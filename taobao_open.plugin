@@ -1,0 +1,11 @@
+#!name = 淘宝天猫 去开屏广告
+#!desc = 淘宝/天猫 iOS 常见开屏与欢迎页广告拦截
+
+[Rewrite]
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.advertisementservice\.getadv - reject-dict
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.idle\.home\.welcome\/ - reject-dict
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.mos\.app\.homepage\.launch - reject-200
+^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.tmall\.wireless - reject-dict
+
+[MITM]
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com
