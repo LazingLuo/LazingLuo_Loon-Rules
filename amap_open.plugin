@@ -1,0 +1,9 @@
+#!name = 高德地图 去开屏广告
+#!desc = 高德地图 iOS 开屏广告精简拦截
+
+[Rewrite]
+^https?:\/\/m\d\.amap\.com\/ws\/valueadded\/alimama\/splash_screen\/ - reject-dict
+^https?:\/\/amap-aos-info-nogw\.amap\.com\/ws\/aos\/alimama\/splash_screen - reject
+
+[MITM]
+hostname = m1.amap.com, m2.amap.com, m3.amap.com, m4.amap.com, m5.amap.com, m6.amap.com, m7.amap.com, m8.amap.com, m9.amap.com, amap-aos-info-nogw.amap.com
