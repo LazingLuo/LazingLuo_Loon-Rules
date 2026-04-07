@@ -1,10 +1,10 @@
-#!name = 新浪微博 去广告
-#!desc = 微博主 App + 国际版常见广告接口拦截
+#!name = 新浪微博 去开屏广告
+#!desc = 微博 iOS 开屏广告拦截增强版
 
 [Rewrite]
 ^https?:\/\/sdkapp\.uve\.weibo\.com\/interface\/sdk\/actionad\.php - reject
 ^https?:\/\/wbapp\.uve\.weibo\.com\/wbapplua\/wbpullad\.lua - reject-200
-^https?:\/\/weibointl\.api\.weibo\.cn\/portal\.php\?a=get_coopen_ads - reject-200
+^https?:\/\/sdkclick\.biz\.weibo\.com\/ - reject
 
 [MITM]
-hostname = sdkapp.uve.weibo.com, wbapp.uve.weibo.com, weibointl.api.weibo.cn
+hostname = sdkapp.uve.weibo.com, wbapp.uve.weibo.com, sdkclick.biz.weibo.com
