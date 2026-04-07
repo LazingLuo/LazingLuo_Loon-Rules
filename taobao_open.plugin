@@ -6,6 +6,7 @@
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.idle\.home\.welcome\/ - reject-dict
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.mos\.app\.homepage\.launch - reject-200
 ^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.tmall\.wireless - reject-dict
+^https?:\/\/h-adashx\.ut\.taobao\.com\/ - reject
 
 [MITM]
-hostname = acs.m.taobao.com, guide-acs.m.taobao.com
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com
