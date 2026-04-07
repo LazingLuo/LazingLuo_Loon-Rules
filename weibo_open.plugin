@@ -5,6 +5,10 @@
 ^https?:\/\/sdkapp\.uve\.weibo\.com\/interface\/sdk\/actionad\.php - reject
 ^https?:\/\/wbapp\.uve\.weibo\.com\/wbapplua\/wbpullad\.lua - reject-200
 ^https?:\/\/sdkclick\.biz\.weibo\.com\/ - reject
+^https?:\/\/sdkaction\.biz\.weibo\.com\/ - reject
+^https?:\/\/sdkmonitor\.biz\.weibo\.com\/ - reject
+^https?:\/\/adstrategy\.biz\.weibo\.com\/ - reject
+^https?:\/\/bootpreload\.uve\.weibo\.com\/ - reject
 
 [MITM]
-hostname = sdkapp.uve.weibo.com, wbapp.uve.weibo.com, sdkclick.biz.weibo.com
+hostname = sdkapp.uve.weibo.com, wbapp.uve.weibo.com, sdkclick.biz.weibo.com, sdkaction.biz.weibo.com, sdkmonitor.biz.weibo.com, adstrategy.biz.weibo.com, bootpreload.uve.weibo.com
