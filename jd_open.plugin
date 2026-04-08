@@ -1,8 +1,8 @@
-#!name = 京东 去启动广告
-#!desc = 仅拦截当前实抓到的 second-floor/xview 启动弹层
+#!name = 京东 去开屏广告
+#!desc = 拦截疑似京东启动页全屏图片素材
 
 [Rewrite]
-^https?:\/\/storage\.360buyimg\.com\/xview\/.*\.json$ url reject
+^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg$ url reject
 
 [MITM]
-hostname = storage.360buyimg.com
+hostname = m.360buyimg.com
