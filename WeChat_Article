@@ -1,0 +1,6 @@
+[Rewrite]
+^https:\/\/mp\.weixin\.qq\.com\/mp\/(cps_product_info|getappmsgad|masonryfeed|relatedarticle)\? url reject-dict
+^https:\/\/mp\.weixin\.qq\.com\/mp\/relatedsearchword url reject-dict
+
+[MITM]
+hostname = mp.weixin.qq.com
