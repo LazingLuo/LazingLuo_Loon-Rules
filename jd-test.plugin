@@ -1,5 +1,8 @@
-[Rewrite]
-^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg$ url reject
+#!name = 京东 去开屏广告
+#!desc = 通过处理 functionId=start 响应移除京东开屏广告
+
+[Script]
+http-response ^https:\/\/api\.m\.jd\.com\/client\.action\?functionId=start requires-body=1,timeout=20,script-path=https://kelee.one/Resource/JavaScript/JD/JD_remove_ads.js,tag=京东_开屏去广告
 
 [MITM]
-hostname = m.360buyimg.com
+hostname = api.m.jd.com
