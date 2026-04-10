@@ -1,6 +1,6 @@
 #!name = 新浪微博 去开屏广告
 #!desc = 微博 iOS 开屏广告精简增强版
-
+# 感谢kelee提供的插件，以及写得那么完整的js
 [Rewrite]
 ^https?:\/\/sdkclick\.biz\.weibo\.com\/ - reject
 ^https?:\/\/sdkaction\.biz\.weibo\.com\/ - reject
