@@ -1,6 +1,5 @@
 #!name = 小红书 去开屏广告
-#!desc = 通过修改 splash_config 响应时间使开屏广告失效
-# 感谢作者RuCu6和fmz200，感谢kelee的整理
+#!desc = 感谢作者RuCu6和fmz200，感谢kelee的整理
 [Script]
 http-response ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d\/system_service\/splash_config requires-body=1,timeout=20,script-path=https://kelee.one/Resource/JavaScript/RedPaper/RedPaper_remove_ads.js,tag=小红书_开屏去广告
 http-response ^https?:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d\/homefeed\? requires-body=1,script-path=https://kelee.one/Resource/JavaScript/RedPaper/RedPaper_remove_ads.js,tag=小红书_信息流净化
