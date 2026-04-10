@@ -1,5 +1,5 @@
 #!name = 新浪微博 去开屏广告
-#!desc = 感谢作者RuCu6和fmz200，感谢kelee的整理
+#!desc = 感谢作者@RuCu6和@zmqcherish，感谢kelee的整理
 
 [Rewrite]
 ^https?:\/\/sdkclick\.biz\.weibo\.com\/ - reject
