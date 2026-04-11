@@ -1,5 +1,0 @@
-#!name = 小红书 广告视频测试
-#!desc = 拦截小红书疑似广告视频素材
-
-[Rewrite]
-^https?:\/\/ads-vp5\.xhscdn\.com\/.*$ url reject
