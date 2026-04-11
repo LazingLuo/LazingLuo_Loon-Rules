@@ -1,5 +1,5 @@
-#!name = 东方财富 去广告（Loon版）
-#!desc = 去除开屏广告及活动背景图，需清除缓存后生效
+#!name = 东方财富去广告
+#!icon = https://raw.githubusercontent.com/jaywcjlove/logo/master/img/eastmoney.png
 
 [Rewrite]
 ^https:\/\/emdcadvertise(?:pj)?\.eastmoney\.com\/infoService\/v2 response-body-json-replace data.adpositionidlist []
