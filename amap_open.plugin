@@ -1,5 +1,5 @@
-#!name = 高德地图 去开屏广告
-#!desc = 高德地图 iOS 开屏广告精简拦截
+#!name = 高德地图去开屏广告
+#!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Amap.png
 
 [Rewrite]
 ^https?:\/\/m\d\.amap\.com\/ws\/valueadded\/alimama\/splash_screen\/ - reject-dict
