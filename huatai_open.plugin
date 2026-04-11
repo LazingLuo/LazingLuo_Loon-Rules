@@ -1,5 +1,5 @@
 #!name = 涨乐财富通 去广告
-#!desc = 拦截涨乐财富通常见开屏图与部分营销图片
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/华泰涨乐.png
 
 [Rewrite]
 ^https?:\/\/d\.zhangle\.com\/pic\/cft\/interaction\/\d{13}-1242-2248\.jpg - reject-200
