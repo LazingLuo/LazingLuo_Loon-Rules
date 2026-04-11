@@ -1,5 +1,5 @@
-#!name = 淘宝天猫 去开屏广告
-#!desc = 淘宝/天猫 iOS 常见开屏与欢迎页广告拦截
+#!name = 淘宝天猫去开屏广告
+#!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Taobao.png
 
 [Rewrite]
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.advertisementservice\.getadv - reject-dict
