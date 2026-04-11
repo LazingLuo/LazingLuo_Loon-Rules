@@ -1,5 +1,5 @@
 #!name = 涨乐财富通 去广告
-#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/华泰涨乐.png
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/zhangle.png
 
 [Rewrite]
 ^https?:\/\/d\.zhangle\.com\/pic\/cft\/interaction\/\d{13}-1242-2248\.jpg - reject-200
