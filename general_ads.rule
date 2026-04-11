@@ -1,8 +1,3 @@
-#!name = 自用常规广告平台
-
-[Rule]
-DOMAIN, advertising.apple.com, REJECT
-DOMAIN, api-adservices.apple.com, REJECT
-
-# 腾讯
-DOMAIN, tangram.e.qq.com, REJECT
+DOMAIN,advertising.apple.com,REJECT
+DOMAIN,api-adservices.apple.com,REJECT
+DOMAIN,tangram.e.qq.com,REJECT
