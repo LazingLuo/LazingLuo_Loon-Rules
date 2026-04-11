@@ -1,4 +1,5 @@
-#!name = 新浪微博 去开屏广告
+#!name = 微博去开屏广告
+#!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Weibo.png
 #!desc = 感谢作者@RuCu6和@zmqcherish，感谢kelee的整理
 
 [Rewrite]
