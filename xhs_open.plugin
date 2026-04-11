@@ -1,4 +1,5 @@
-#!name = 小红书 去开屏广告
+#!name = 小红书去开屏广告
+#!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/RedPaper.png
 #!desc = 感谢作者@RuCu6和@fmz200，感谢kelee的整理
 [Script]
 http-response ^https:\/\/edith\.xiaohongshu\.com\/api\/sns\/v\d\/system_service\/splash_config requires-body=1,timeout=20,script-path=https://kelee.one/Resource/JavaScript/RedPaper/RedPaper_remove_ads.js,tag=小红书_开屏去广告
