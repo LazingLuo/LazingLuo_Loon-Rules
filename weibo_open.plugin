@@ -7,6 +7,7 @@
 ^https?:\/\/sdkaction\.biz\.weibo\.com\/ - reject
 ^https?:\/\/sdkmonitor\.biz\.weibo\.com\/ - reject
 ^https?:\/\/adstrategy\.biz\.weibo\.com\/ - reject
+^https?:\/\/bootrealtime\.uve\.weibo\.com\/v[23]\/ad\/realtime reject-dict
 
 [Script]
 http-response ^https:\/\/bootpreload\.uve\.weibo\.com\/v[12]\/ad\/preload requires-body=1,timeout=20,script-path=https://kelee.one/Resource/JavaScript/Weibo/Weibo_remove_ads.js,tag=微博_开屏_preload
@@ -14,4 +15,4 @@ http-response ^https:\/\/sdkapp\.uve\.weibo\.com\/interface\/sdk\/sdkad\.php req
 http-response ^https:\/\/wbapp\.uve\.weibo\.com\/(?:preload\/get_ad|wbapplua\/wbpullad\.lua) requires-body=1,timeout=20,script-path=https://kelee.one/Resource/JavaScript/Weibo/Weibo_remove_ads.js,tag=微博_开屏_wbapp
 
 [MITM]
-hostname = bootpreload.uve.weibo.com, sdkapp.uve.weibo.com, wbapp.uve.weibo.com, sdkclick.biz.weibo.com, sdkaction.biz.weibo.com, sdkmonitor.biz.weibo.com, adstrategy.biz.weibo.com
+hostname = bootpreload.uve.weibo.com, bootrealtime.uve.weibo.com, sdkapp.uve.weibo.com, wbapp.uve.weibo.com, sdkclick.biz.weibo.com, sdkaction.biz.weibo.com, sdkmonitor.biz.weibo.com, adstrategy.biz.weibo.com
