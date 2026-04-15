@@ -1,0 +1,9 @@
+#!name = 京东开屏测试
+#!desc = 先试公开规则里和启动广告最相关的两条
+
+[Rewrite]
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=home_launchConfig reject-dict
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=start reject-dict
+
+[MITM]
+hostname = api.m.jd.com
