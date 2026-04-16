@@ -1,6 +1,8 @@
-[Rewrite]
-^https:\/\/mp\.weixin\.qq\.com\/mp\/(cps_product_info|getappmsgad|masonryfeed|relatedarticle)\? url reject-dict
-^https:\/\/mp\.weixin\.qq\.com\/mp\/relatedsearchword url reject-dict
+#!name=微信小程序广告图拦截
+#!desc=拦截 wximg.wxs.qq.com 上带 posid 的小程序广告图，以及 ads_svp_video 素材
+#!author=OpenAI
+#!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
-[MITM]
-hostname = mp.weixin.qq.com
+[Rewrite]
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/.*[?&]posid=\d+(?:&|$) - reject
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
