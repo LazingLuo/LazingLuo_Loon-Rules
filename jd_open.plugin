@@ -1,9 +1,5 @@
-#!name = 京东开屏测试
-#!desc = 先试公开规则里和启动广告最相关的两条
+#!name = 京东开屏图片测试
+#!desc = 测试拦截京东常见开屏图片路径
 
 [Rewrite]
-^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=home_launchConfig reject-dict
-^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=start reject-dict
-
-[MITM]
-hostname = api.m.jd.com
+^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/t1\/.*\.jpg$ reject
