@@ -1,0 +1,8 @@
+#!name=微信小程序页面广告图拦截-稳妥版
+#!desc=优先拦截已观察到的广告图片通道，减少误伤
+#!author=OpenAI
+#!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
+
+[Rewrite]
+^https?:\/\/wximg\.wxs\.qq\.com\/141\/20204\/snscosdownload\/SZ\/reserved\/.*00004eec.* - reject
+^https?:\/\/wximg\.wxs\.qq\.com\/131\/20204\/snssvpdownload\/SH\/reserved\/ads_svp_video__.* - reject
