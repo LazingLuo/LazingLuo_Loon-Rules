@@ -1,25 +1,13 @@
-#!name=微信小程序广告位拦截-进阶测试版
-#!desc=不只拦素材，也尝试拦广告配置请求，目标是去掉3秒广告位和小窗视频广告
+#!name=微信小程序广告位拦截-极限测试
+#!desc=测试广告位是否由 minorshort/extshort 的 mmtls 统一控制，可能导致页面内容异常
 #!author=OpenAI
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
 [Rewrite]
-# 素材层
-^https?:\/\/wximg\.wxs\.qq\.com\/131\/20204\/snssvpdownload\/SH\/reserved\/ads_svp_video__.* - reject
-^https?:\/\/wximg\.wxs\.qq\.com\/141\/20204\/snscosdownload\/SZ\/reserved\/.*00004eec.* - reject
-^https?:\/\/wximg\.wxs\.qq\.com\/.*[?&]posid=\d+(?:&|$) - reject
-
-# 配置层：先拦最可疑的几组 mmtls
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/34291e8a$ - reject-200
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/34291e8a$ - reject-200
-^https?:\/\/short\.weixin\.qq\.com\/mmtls\/34291e8a$ - reject-200
-
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/3429e37f$ - reject-200
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/3429e37f$ - reject-200
-
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/342c325e$ - reject-200
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/342c325e$ - reject-200
-^https?:\/\/short\.weixin\.qq\.com\/mmtls\/342c325e$ - reject-200
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* - reject
 
 [MITM]
-hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, short.weixin.qq.com, wximg.wxs.qq.com
+hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, wximg.wxs.qq.com
