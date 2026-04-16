@@ -1,9 +1,25 @@
-#!name=微信小程序广告图拦截-加强版
-#!desc=拦截 wximg.wxs.qq.com 上该小程序常见广告图与微信原生广告素材
+#!name=微信小程序广告位拦截-进阶测试版
+#!desc=不只拦素材，也尝试拦广告配置请求，目标是去掉3秒广告位和小窗视频广告
 #!author=OpenAI
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
 [Rewrite]
-^https?:\/\/wximg\.wxs\.qq\.com\/141\/20204\/snscosdownload\/SZ\/reserved\/.*00004eec.* - reject
-^https?:\/\/wximg\.wxs\.qq\.com\/141\/20204\/snscosdownload\/SZ\/reserved\/.*[?&]posid=\d+(?:&|$) - reject
+# 素材层
 ^https?:\/\/wximg\.wxs\.qq\.com\/131\/20204\/snssvpdownload\/SH\/reserved\/ads_svp_video__.* - reject
+^https?:\/\/wximg\.wxs\.qq\.com\/141\/20204\/snscosdownload\/SZ\/reserved\/.*00004eec.* - reject
+^https?:\/\/wximg\.wxs\.qq\.com\/.*[?&]posid=\d+(?:&|$) - reject
+
+# 配置层：先拦最可疑的几组 mmtls
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/34291e8a$ - reject-200
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/34291e8a$ - reject-200
+^https?:\/\/short\.weixin\.qq\.com\/mmtls\/34291e8a$ - reject-200
+
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/3429e37f$ - reject-200
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/3429e37f$ - reject-200
+
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/342c325e$ - reject-200
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/342c325e$ - reject-200
+^https?:\/\/short\.weixin\.qq\.com\/mmtls\/342c325e$ - reject-200
+
+[MITM]
+hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, short.weixin.qq.com, wximg.wxs.qq.com
