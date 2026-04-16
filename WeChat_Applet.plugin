@@ -1,9 +1,10 @@
 #!name=微信小程序广告位拦截-极限测试
-#!desc=测试广告位是否由 minorshort/extshort 的 mmtls 统一控制，可能导致页面内容异常
+#!desc=微信小程序广告过滤规则集合；当前规则：每日抽奖
 #!author=OpenAI
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
 [Rewrite]
+# 小程序：每日抽奖
 ^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
 ^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
 ^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
