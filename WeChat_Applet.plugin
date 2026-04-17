@@ -8,6 +8,8 @@
 # 小程序：每日抽奖
 # ================================
 
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
 ^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
 ^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* - reject
 
