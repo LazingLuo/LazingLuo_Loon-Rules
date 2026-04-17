@@ -1,21 +1,28 @@
-#!name=微信小程序广告位拦截-极限测试
-#!desc=微信小程序广告过滤规则集合；当前规则：每日抽奖
+#!name=微信小程序广告位拦截-Loon响应修改版
+#!desc=每日抽奖小程序去广告，响应阶段修改，不拦截请求，伪装广告成功加载
 #!author=OpenAI
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
 [Rewrite]
 # ================================
 # 小程序：每日抽奖
-# 说明：
-# 1. 实测有效版本
-# 2. 通过拦截 minorshort/extshort 的 mmtls 以及 wximg 广告素材实现去广告
-# 3. 该小程序广告资源很多，规则目标是保留抽奖流程，跳过刷广告
+# Loon标准body-replace语法，响应阶段修改，必须开启MITM并信任证书
 # ================================
 
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* response-body=""
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* response-body=""
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* response-body=""
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* response-body=""
+# 广告接口：强制响应状态码200 + 全量响应体替换为空
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* status-code response 200
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* body-replace response ^.*$ ""
+
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* status-code response 200
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* body-replace response ^.*$ ""
+
+# 广告视频素材：强制200状态 + 空响应体
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* status-code response 200
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* body-replace response ^.*$ ""
+
+# 广告图片素材：强制200状态 + 空响应体
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* status-code response 200
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* body-replace response ^.*$ ""
 
 [MITM]
 hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, wximg.wxs.qq.com
