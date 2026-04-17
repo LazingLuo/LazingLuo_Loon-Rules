@@ -1,17 +1,10 @@
-#!name=微信小程序广告位拦截-极限测试
-#!desc=微信小程序广告过滤规则集合；当前规则：每日抽奖
+#!name=微信小程序广告过滤-每日抽奖
+#!desc=仅按 appId 定向拦截每日抽奖小程序的广告素材，不处理 mmtls
 #!author=OpenAI
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
-[Rewrite]
-# ================================
-# 小程序：每日抽奖
-# ================================
-
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* - reject
+[Script]
+http-request ^https?:\/\/wximg\.wxs\.qq\.com\/.* script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/js/wechat_applet_dailylotteryadblock.js, tag=每日抽奖广告素材过滤
 
 [MITM]
-hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, wximg.wxs.qq.com
+hostname = wximg.wxs.qq.com
