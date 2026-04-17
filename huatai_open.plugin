@@ -3,7 +3,7 @@
 
 [Rewrite]
 ^https?:\/\/d\.zhangle\.com\/pic\/cft\/interaction\/\d{13}-1242-2248\.jpg - reject-200
-^https?:\/\/c\.zhangle\.com\/pic\/mktg\/diversity\/.+\.jpg$ - reject-dict
+^https?:\/\/c\.zhangle\.com\/pic\/mktg\/diversity\/.+\.jpg$ - reject-200
 
 [MITM]
 hostname = d.zhangle.com, c.zhangle.com
