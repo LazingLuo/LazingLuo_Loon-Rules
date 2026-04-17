@@ -12,10 +12,10 @@
 # 3. 该小程序广告资源很多，规则目标是保留抽奖流程，跳过刷广告
 # ================================
 
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* - reject
+^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* response-body=""
+^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* response-body=""
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* response-body=""
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* response-body=""
 
 [MITM]
 hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, wximg.wxs.qq.com
