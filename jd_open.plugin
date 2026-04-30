@@ -1,4 +1,5 @@
 #!name = 京东开屏图片测试
+#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/JD.png
 
 [Rewrite]
 ^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg(?:\.avif)?$ reject
