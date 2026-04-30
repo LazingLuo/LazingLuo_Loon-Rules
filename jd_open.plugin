@@ -1,5 +1,4 @@
 #!name = 京东开屏图片测试
-#!desc = 测试拦截京东常见开屏图片路径
 
 [Rewrite]
-^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/t1\/.*\.jpg$ reject
+^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg(?:\.avif)?$ reject
