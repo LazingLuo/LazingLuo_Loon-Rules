@@ -1,0 +1,7 @@
+[Rewrite]
+^https?:\/\/iadmusicmat\.music\.126\.net\/.+\.jpg - reject
+^https?:\/\/interface\.music\.163\.com\/eapi\/ad\/config\/get - reject-200
+^https?:\/\/m\.ads\.8le8le\.com\/adShow - reject
+
+[MITM]
+hostname = iadmusicmat.music.126.net, interface.music.163.com, m.ads.8le8le.com
