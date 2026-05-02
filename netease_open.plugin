@@ -1,6 +1,6 @@
 #!name = 网易云音乐去开屏广告
 #!desc = 仅测试新版开屏广告接口
-#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/NeteaseMusic.png
+#!icon = https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d3/77/da/d377dac9-b69e-5b7c-e7cb-b761f96decec/AppIcon-1x_U007emarketing-0-6-0-0-85-220-0.png/144x144.png
 
 [Rewrite]
 ^https?:\/\/ipv4\.music\.163\.com\/e?api\/ad\/loading\/current - reject-200
