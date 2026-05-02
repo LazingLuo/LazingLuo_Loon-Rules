@@ -1,7 +1,9 @@
+#!name = 网易云音乐去开屏广告
+#!desc = 仅测试新版开屏广告接口
+#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/NeteaseMusic.png
+
 [Rewrite]
-^https?:\/\/iadmusicmat\.music\.126\.net\/.+\.jpg - reject
-^https?:\/\/interface\.music\.163\.com\/eapi\/ad\/config\/get - reject-200
-^https?:\/\/m\.ads\.8le8le\.com\/adShow - reject
+^https?:\/\/ipv4\.music\.163\.com\/e?api\/ad\/loading\/current - reject-200
 
 [MITM]
-hostname = iadmusicmat.music.126.net, interface.music.163.com, m.ads.8le8le.com
+hostname = ipv4.music.163.com
