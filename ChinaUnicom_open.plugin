@@ -1,0 +1,10 @@
+#!name = 中国联通去开屏广告
+#!desc = 仅处理中国联通 App 开屏/首页广告
+#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/ChinaUnicom.png
+
+[Rewrite]
+^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/getWelcomeAd - reject-200
+^https?:\/\/m\.client\.10010\.com\/mobileService\/customer\/accountListData\.htm - reject-dict
+
+[MITM]
+hostname = m.client.10010.com
