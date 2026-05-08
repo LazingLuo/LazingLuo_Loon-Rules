@@ -10,6 +10,8 @@
 ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.wireless\.home\.newface\.awesome\.get - reject-dict
 ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.volvo\.secondfloor\.getconfig - reject-dict
 ^https?:\/\/h-adashx\.ut\.taobao\.com\/ - reject
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.poplayer - reject-dict
+^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.poplayer - reject-dict
 
 [Script]
 http-response ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvideo\.video\.query|wireless\.home\.splash\.awesome\.get) script-path=https://kelee.one/Resource/JavaScript/Taobao/Taobao_remove_ads.js,requires-body=true,timeout=20,tag=移除淘宝开屏广告
