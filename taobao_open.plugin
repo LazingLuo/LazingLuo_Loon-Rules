@@ -1,4 +1,5 @@
 #!name = 淘宝天猫去开屏广告
+#!desc = 处理淘宝/天猫开屏广告、热启动广告和部分弹层广告
 #!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Taobao.png
 
 [Rewrite]
@@ -11,8 +12,8 @@
 ^https?:\/\/h-adashx\.ut\.taobao\.com\/ - reject
 
 [Script]
-http-response ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvideo\.video\.query|wireless\.home\.splash\.awesome\.get) requires-body=1,timeout=20,script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/myBlockAds.js,tag=淘宝_开屏广告
-http-response ^https:\/\/poplayer\.template\.alibaba\.com\/\w+\.json requires-body=1,timeout=20,script-path=https://raw.githubusercontent.com/RuCu6/QuanX/main/Scripts/myBlockAds.js,tag=淘宝_弹层广告
+http-response ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvideo\.video\.query|wireless\.home\.splash\.awesome\.get) script-path=https://kelee.one/Resource/JavaScript/Taobao/Taobao_remove_ads.js,requires-body=true,timeout=20,tag=移除淘宝开屏广告
+http-response ^https:\/\/poplayer\.template\.alibaba\.com\/\w+\.json script-path=https://kelee.one/Resource/JavaScript/Taobao/Taobao_remove_ads.js,requires-body=true,timeout=20,tag=移除淘宝开屏活动
 
 [MITM]
 hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com, poplayer.template.alibaba.com
