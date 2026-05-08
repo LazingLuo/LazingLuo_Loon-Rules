@@ -3,12 +3,16 @@
 
 [Rewrite]
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.advertisementservice\.getadv - reject-dict
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.idle\.home\.welcome\/ - reject-dict
+^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.idle\.home\.welcome\/? - reject-dict
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.mos\.app\.homepage\.launch - reject-200
 ^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.tmall\.wireless - reject-dict
-^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.wireless\.home\.splash\.awesome\.get - reject-dict
 ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.wireless\.home\.newface\.awesome\.get - reject-dict
+^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.volvo\.secondfloor\.getconfig - reject-dict
 ^https?:\/\/h-adashx\.ut\.taobao\.com\/ - reject
 
+[Script]
+http-response ^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvideo\.video\.query|wireless\.home\.splash\.awesome\.get) requires-body=1,timeout=20,script-path=https://gitlab.com/lodepuly/vpn_tool/-/raw/master/Resource/Script/Taobao/Taobao_remove_ads.js,tag=淘宝_开屏广告
+http-response ^https:\/\/poplayer\.template\.alibaba\.com\/\w+\.json requires-body=1,timeout=20,script-path=https://gitlab.com/lodepuly/vpn_tool/-/raw/master/Resource/Script/Taobao/Taobao_remove_ads.js,tag=淘宝_弹层广告
+
 [MITM]
-hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com, poplayer.template.alibaba.com
