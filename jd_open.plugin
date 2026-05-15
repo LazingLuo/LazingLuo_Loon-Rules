@@ -3,3 +3,6 @@
 
 [Rewrite]
 ^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg(?:\.avif)?$ reject
+
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=getSplash - reject-dict
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=home_launchConfig - reject-dict
