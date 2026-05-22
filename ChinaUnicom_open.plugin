@@ -1,10 +1,22 @@
 #!name = 中国联通去开屏广告
-#!desc = 仅处理中国联通 App 开屏/首页广告
+#!desc = 处理中国联通 App 开屏、首页广告和部分素材
 #!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/ChinaUnicom.png
 
 [Rewrite]
-^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/getWelcomeAd - reject-200
-^https?:\/\/m\.client\.10010\.com\/mobileService\/customer\/accountListData\.htm - reject-dict
+# 开屏 / 首页广告接口
+^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getWelcomeAd|getHomePageAd) - reject-200
+
+# 启动广告 / 客户端广告 / 账户页启动广告配置
+^https?:\/\/m\.client\.10010\.com\/mobileService\/(activity|customer)\/(accountListData|get_client_adv|get_startadv) - reject-200
+
+# 客户端配置，公开规则中也列入
+^https?:\/\/m\.client\.10010\.com\/mobileService\/customer\/getclientconfig\.htm - reject-dict
+
+# 联通广告素材
+^https?:\/\/m1\.ad\.10010\.com\/noticeMag\/images\/imageUpload\/2\d{3} - reject-img
+
+# 联通商城广告脚本
+^https?:\/\/res\.mall\.10010\.cn\/mall\/common\/js\/fa\.js\?referer= - reject-img
 
 [MITM]
-hostname = m.client.10010.com
+hostname = m.client.10010.com, m1.ad.10010.com, res.mall.10010.cn
