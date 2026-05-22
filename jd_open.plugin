@@ -2,7 +2,15 @@
 #!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/JD.png
 
 [Rewrite]
+# 公开规则里的京东启动页老接口候选（似乎已过时）
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=home_launchConfig - reject-dict
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=(start|queryMaterialAdverts) - reject-dict
+
+# 疑似开屏资源
 ^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg(?:\.avif)?$ reject
 
-^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=getSplash - reject-dict
-^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=home_launchConfig - reject-dict
+# 京东 DSP / ADX 候选，若误伤则删除
+^https?:\/\/(bdsp-x|dsp-x)\.jd\.com\/adx\/ - reject-200
+
+[MITM]
+hostname = api.m.jd.com, bdsp-x.jd.com, dsp-x.jd.com
