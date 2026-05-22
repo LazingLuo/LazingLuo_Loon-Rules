@@ -2,8 +2,11 @@
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/zhangle.png
 
 [Rewrite]
-^https?:\/\/d\.zhangle\.com\/pic\/cft\/interaction\/\d{13}-1242-2248\.jpg - reject-200
-^https?:\/\/c\.zhangle\.com\/pic\/mktg\/diversity\/.+\.jpg$ - reject-200
+# 已实测的开屏/启动页素材
+^https?:\/\/d\.zhangle\.com\/pic\/cft\/interaction\/\d{13}-1242-2248\.(?:jpg|jpeg|png|webp)$ - reject-200
+
+# ultra+ 中的营销图片素材路径，按图片资源软拦
+^https?:\/\/c\.zhangle\.com\/pic\/mktg\/diversity\/.+\.(?:jpg|jpeg|png|webp)$ - reject-200
 
 [MITM]
 hostname = d.zhangle.com, c.zhangle.com
