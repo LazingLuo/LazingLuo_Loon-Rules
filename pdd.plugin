@@ -1,0 +1,8 @@
+#!name = 拼多多去开屏广告
+#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Pinduoduo.png
+
+[Rewrite]
+^https?:\/\/api\.(pinduoduo|yangkeduo)\.com\/api\/cappuccino\/splash - reject-200
+
+[MITM]
+hostname = api.pinduoduo.com, api.yangkeduo.com
