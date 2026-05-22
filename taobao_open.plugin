@@ -38,4 +38,4 @@ http-response ^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvid
 http-response ^https?:\/\/poplayer\.template\.alibaba\.com\/\w+\.json script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/myBlockAds.js,requires-body=true,timeout=20,tag=移除淘宝PopLayer弹层
 
 [MITM]
-hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com, adashx.m.taobao.com, poplayer.template.alibaba.com
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com, adashx.m.taobao.com, poplayer.template.alibaba.com, heic.alicdn.com, gw.alicdn.com, ossgw.alicdn.com, alimama.cloudvideocdn.taobao.com, mamasearchad.cloudvideocdn.taobao.com
