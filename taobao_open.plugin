@@ -1,41 +1,10 @@
 #!name = 淘宝天猫去开屏广告
-#!desc = 开屏候选 + ultra+ 脚本处理 + 埋点频控 + PopLayer 模板处理
+#!desc = 极简版：优先拦截 618 活动开屏大图资源
 #!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Taobao.png
 
 [Rewrite]
-# 通用广告接口
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.advertisementservice\.getadv - reject-dict
-
-# 闲鱼欢迎页广告
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.idle\.home\.welcome\/? - reject-dict
-
-# 淘宝首页启动配置
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.mos\.app\.homepage\.launch - reject-200
-
-# ultra+ 中的 splash / ad 候选
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alibaba\.aicloud\.splash - reject-200
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.o2o\.ad\.gateway\.get - reject-dict
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.etao\.noah\.query\/.+tao_splash - reject-dict
-
-# 天猫无线广告/启动相关
-^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.tmall\.wireless - reject-dict
-
-# 淘宝首页新面孔/启动运营位
-^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.wireless\.home\.newface\.awesome\.get - reject-dict
-
-# 淘宝二楼配置
-^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.volvo\.secondfloor\.getconfig - reject-dict
-
-# 埋点/曝光/频控相关：实测对开屏频率有影响
-^https?:\/\/h-adashx\.ut\.taobao\.com\/ - reject
-^https?:\/\/adashx\.m\.taobao\.com\/ - reject
-
-[Script]
-# 淘宝开屏图片/视频广告，使用 ultra+ 里的 myBlockAds.js
-http-response ^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvideo\.video\.query|wireless\.home\.splash\.awesome\.get) script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/myBlockAds.js,requires-body=true,timeout=20,tag=移除淘宝开屏广告
-
-# PopLayer 具体模板处理：只处理 /xxxx.json，不处理 /popcdn/2/config.json
-http-response ^https?:\/\/poplayer\.template\.alibaba\.com\/\w+\.json script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/myBlockAds.js,requires-body=true,timeout=20,tag=移除淘宝PopLayer弹层
+# 淘宝/天猫开屏大图素材：618 活动 bootImage 类资源
+^https?:\/\/heic\.alicdn\.com\/imgextra\/.*-tps-1125-(?:1602|2436)\.(?:png|jpg)_\d+x\d+q\d+\.jpg_\.heic - reject-200
 
 [MITM]
-hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com, adashx.m.taobao.com, poplayer.template.alibaba.com, heic.alicdn.com, gw.alicdn.com, ossgw.alicdn.com, alimama.cloudvideocdn.taobao.com, mamasearchad.cloudvideocdn.taobao.com
+hostname = heic.alicdn.com
