@@ -1,5 +1,5 @@
 #!name = 淘宝天猫去开屏广告
-#!desc = 保守版
+#!desc = 保守版：传统开屏候选 + ultra+ 脚本处理 + 保留埋点拦截
 #!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Taobao.png
 
 [Rewrite]
@@ -17,9 +17,22 @@
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.o2o\.ad\.gateway\.get - reject-dict
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.etao\.noah\.query\/.+tao_splash - reject-dict
 
+# 天猫无线广告/启动相关
+^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.tmall\.wireless - reject-dict
+
+# 淘宝首页新面孔/启动运营位
+^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.wireless\.home\.newface\.awesome\.get - reject-dict
+
+# 淘宝二楼配置
+^https:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.volvo\.secondfloor\.getconfig - reject-dict
+
+# 埋点/曝光/频控相关：实测对开屏频率有影响
+^https?:\/\/h-adashx\.ut\.taobao\.com\/ - reject
+^https?:\/\/adashx\.m\.taobao\.com\/ - reject
+
 [Script]
 # 淘宝开屏图片/视频广告，使用 ultra+ 里的 myBlockAds.js
 http-response ^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.(cloudvideo\.video\.query|wireless\.home\.splash\.awesome\.get) script-path=https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/myBlockAds.js,requires-body=true,timeout=20,tag=移除淘宝开屏广告
 
 [MITM]
-hostname = acs.m.taobao.com, guide-acs.m.taobao.com
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h-adashx.ut.taobao.com, adashx.m.taobao.com
