@@ -2,8 +2,18 @@
 #!icon = https://raw.githubusercontent.com/jaywcjlove/logo/master/img/eastmoney.png
 
 [Rewrite]
+# 广告配置：清空广告位列表
 ^https:\/\/emdcadvertise(?:pj)?\.eastmoney\.com\/infoService\/v2 response-body-json-replace data.adpositionidlist []
-^https:\/\/swdlcdn\.eastmoney\.com\/app\/adimg\/ url reject-dict
+
+# 已知广告素材
+^https:\/\/swdlcdn\.eastmoney\.com\/app\/adimg\/ - reject-dict
+
+# ultra+ 中的东方财富开屏/启动图素材候选
+^https?:\/\/j5\.dfcfw\.com\/WG\/conf\/202[0-9]{5}\/.*\.(jpg|png) - reject-200
+^https?:\/\/j5\.dfcfw\.com\/WG\/appconf\/202[0-9]{5}\/.*\.(jpg|png) - reject-200
+
+# ultra+ 中较明确的启动广告接口
+^https?:\/\/choicegw2\.eastmoney\.com\/ads\/userauth\/api\/Ad\/GetLaunchAd - reject-dict
 
 [MITM]
-hostname= emdcadvertise.eastmoney.com, emdcadvertisepj.eastmoney.com, swdlcdn.eastmoney.com
+hostname = emdcadvertise.eastmoney.com, emdcadvertisepj.eastmoney.com, swdlcdn.eastmoney.com, j5.dfcfw.com, choicegw2.eastmoney.com
