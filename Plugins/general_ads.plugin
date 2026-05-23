@@ -1,4 +1,5 @@
 #!name = 自用通用广告平台
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/x_ads.png
 #!desc = 极简通用广告平台拦截
 
 [Rule]
