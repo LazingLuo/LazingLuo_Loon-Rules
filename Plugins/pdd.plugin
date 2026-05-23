@@ -1,5 +1,5 @@
 #!name = 拼多多去开屏广告
-#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/Pinduoduo.png
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png
 
 [Rewrite]
 ^https?:\/\/api\.(pinduoduo|yangkeduo)\.com\/api\/cappuccino\/splash - reject-200
