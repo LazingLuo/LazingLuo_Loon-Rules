@@ -1,9 +1,17 @@
-#!name = 京东开屏图片测试
+#!name = 京东去开屏广告
 #!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/JD.png
 
 [Rewrite]
-# 开屏资源
-^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg(?:\.avif)?$ reject
+# 传统启动接口，当前响应 images 已为空，但可保留
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=start - reject-dict
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=home_launchConfig - reject-dict
+^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=queryMaterialAdverts - reject-dict
+
+# 当前最可靠：京东 AppHome 开屏大图
+^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.(?:jpg|jpeg|png|webp)(?:\.avif)?$ - reject-200
+
+# 可选：广告视频素材，可能影响首页活动视频
+^https?:\/\/storage\.360buyimg\.com\/material-video\/video\/.*\.mp4$ - reject-200
 
 [MITM]
-hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com, second-floor-pro.pf.jd.com, bdsp-x.jd.com, dsp-x.jd.com, ads-img-x.jd.com, ads-video-x.jd.com, jzt.jd.com, lop-proxy.jd.com, ms.jr.jd.com, wl.jd.com, gias.jd.com, papi-service.jd.com, cfe.m.jd.com, wq.jd.com, img10.360buyimg.com, img11.360buyimg.com, img12.360buyimg.com, img13.360buyimg.com, img14.360buyimg.com, img20.360buyimg.com, img30.360buyimg.com
+hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com
