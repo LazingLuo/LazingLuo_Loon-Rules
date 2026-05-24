@@ -6,7 +6,4 @@
 ^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/.*\.jpg(?:\.avif)?$ reject
 
 [MITM]
-hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com, second-floor-pro.pf.jd.com, 
-bdsp-x.jd.com, dsp-x.jd.com, ads-img-x.jd.com, ads-video-x.jd.com, jzt.jd.com, 
-lop-proxy.jd.com, ms.jr.jd.com, wl.jd.com, gias.jd.com, 
-papi-service.jd.com, cfe.m.jd.com, wq.jd.com, img10.360buyimg.com, img11.360buyimg.com, img12.360buyimg.com, img13.360buyimg.com, img14.360buyimg.com, img20.360buyimg.com, img30.360buyimg.com
+hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com, second-floor-pro.pf.jd.com, bdsp-x.jd.com, dsp-x.jd.com, ads-img-x.jd.com, ads-video-x.jd.com, jzt.jd.com, lop-proxy.jd.com, ms.jr.jd.com, wl.jd.com, gias.jd.com, papi-service.jd.com, cfe.m.jd.com, wq.jd.com, img10.360buyimg.com, img11.360buyimg.com, img12.360buyimg.com, img13.360buyimg.com, img14.360buyimg.com, img20.360buyimg.com, img30.360buyimg.com
