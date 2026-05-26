@@ -1,16 +1,13 @@
-#!name=微信mmtls相关业务阻断
-#!desc=可用于阻断每日抽奖中的广告拉取，快速获取一次广告奖励，不要常开，会影响微信正常功能
+#!name=微信小程度视频广告
+#!desc=可用于阻断每日抽奖中的广告拉取
 #!icon=https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/WeChat.png
 
 [Rewrite]
 # ================================
 # 小程序：每日抽奖
 # ================================
-
-^https?:\/\/minorshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
-^https?:\/\/extshort\.weixin\.qq\.com\/mmtls\/.* - reject-200
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/ads_svp_video__.* - reject
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snscosdownload\/SZ\/reserved\/.* - reject
+^https?:\/\/wxsmw\.wxs\.qq\.com\/.*\/snssvpdownload\/.*\/ads_svp_video__.*\.mp4 - reject-200
+^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snssvpdownload\/.*\/ads_svp_video__.*\.mp4 - reject-200
 
 [MITM]
-hostname = minorshort.weixin.qq.com, extshort.weixin.qq.com, wximg.wxs.qq.com
+hostname = wximg.wxs.qq.com, wxsmw.wxs.qq.com
