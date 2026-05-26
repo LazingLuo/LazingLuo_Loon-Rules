@@ -7,7 +7,7 @@
 # 小程序：每日抽奖
 # ================================
 ^https?:\/\/wxsmw\.wxs\.qq\.com\/.*\/snssvpdownload\/.*\/ads_svp_video__.*\.mp4 - reject-200
-^https?:\/\/wximg\.wxs\.qq\.com\/.*\/snssvpdownload\/.*\/ads_svp_video__.*\.mp4 - reject-200
+^https?:\/\/wximg\.wxs\.qq\.com\/\d+\/\d+\/snscosdownload\/[A-Z]+\/reserved\/[a-f0-9]+(?:\?.*)?$ - reject-img
 
 [MITM]
 hostname = wximg.wxs.qq.com, wxsmw.wxs.qq.com
