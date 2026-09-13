@@ -3,7 +3,7 @@
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/xianyu.png
 
 [Script]
-http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=idle-splash.js,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
 
 [MITM]
 hostname = acs.m.goofish.com
