@@ -1,9 +1,9 @@
-#!name = 闲鱼去开屏广告
-#!desc = 清空闲鱼开屏广告数据
+#!name = 闲鱼开屏净化（测试版）
+#!desc = 清空已确认的两个闲鱼开屏接口的广告列表
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/xianyu.png
 
-[Rewrite]
-^https?:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash - reject-dict
+[Script]
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=idle-splash.js,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
 
 [MITM]
 hostname = acs.m.goofish.com
