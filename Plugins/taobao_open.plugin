@@ -1,10 +1,10 @@
 #!name = 淘宝天猫去开屏广告
-#!desc = 极简版：优先拦截 618 活动开屏大图资源
+#!desc = 开屏大图资源
 #!icon = https://gitlab.com/lodepuly/iconlibrary/-/raw/main/App_icon/120px/Taobao.png
 
 [Rewrite]
-# 淘宝/天猫开屏大图素材：618 活动 bootImage 类资源
-^https?:\/\/heic\.alicdn\.com\/imgextra\/.*-tps-1125-(?:1602|2436)\.(?:png|jpg)_\d+x\d+q\d+\.jpg_\.heic - reject-200
+# 淘宝/天猫开屏大图素材
+^https?:\/\/gw\.alicdn\.com\/imgextra\/[^?#]*-tps-1125-2436\. reject
 
 [MITM]
 hostname = heic.alicdn.com
