@@ -4,6 +4,7 @@
 [URL Rewrite]
 # 京东
 ^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/ reject
+^https?:\/\/storage\.360buyimg\.com\/material-video\/video\/.*\.mp4$ - reject-200
 
 [MITM]
 hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com
