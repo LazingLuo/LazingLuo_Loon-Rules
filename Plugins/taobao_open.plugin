@@ -7,4 +7,4 @@
 ^https?:\/\/gw\.alicdn\.com\/imgextra\/[^?#]*-tps-1125-2436\. reject
 
 [MITM]
-hostname = heic.alicdn.com
+hostname = gw.alicdn.com
