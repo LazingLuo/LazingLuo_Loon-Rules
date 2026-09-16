@@ -5,6 +5,7 @@
 [Rewrite]
 # 淘宝/天猫开屏大图素材
 ^https?:\/\/gw\.alicdn\.com\/imgextra\/[^?#]*-tps-1125-2436\. reject
+^https?:\/\/cloud\.video\.taobao\.com\/vod\/[^?#]+\.mp4(?:\?.*)?$ reject
 
 [MITM]
-hostname = gw.alicdn.com
+hostname = gw.alicdn.com, cloud.video.taobao.com
