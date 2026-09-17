@@ -7,7 +7,7 @@
 ^https?:\/\/gw\.alicdn\.com\/imgextra\/[^?#]*-tps-1125-2436\. reject
 ^https?:\/\/cloud\.video\.taobao\.com\/vod\/[^?#]+\.mp4(?:\?.*)?$ reject
 
-request if ${url} ~= /^http:\/\/.+\/amdc\/mobileDispatch/ then reject_dict(200)
+^http:\/\/.+\/amdc\/mobileDispatch(?:\?.*)?$ reject-dict
 
 [MITM]
 hostname = gw.alicdn.com, cloud.video.taobao.com
