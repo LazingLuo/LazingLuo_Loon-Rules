@@ -7,7 +7,7 @@
 ^https?:\/\/gw\.alicdn\.com\/imgextra\/[^?#]*-tps-1125-2436\. reject
 ^https?:\/\/cloud\.video\.taobao\.com\/vod\/[^?#]+\.mp4(?:\?.*)?$ reject
 
-^http:\/\/.+\/amdc\/mobileDispatch(?:\?.*)?$ reject-dict
+^http:\/\/.+\/amdc\/mobileDispatch(?:\?.*)?$ reject
 
 [MITM]
 hostname = gw.alicdn.com, cloud.video.taobao.com
