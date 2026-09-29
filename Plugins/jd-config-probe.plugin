@@ -1,0 +1,16 @@
+#!name = 京东开屏配置探测（临时）
+#!desc = 只读检查京东 API 的文本/JSON 响应；发现已知开屏素材、1125x2436，或图片地址与开屏字段同时出现时通知。不修改任何响应。
+#!loon_version = 3.5.1(983)
+#!tag = 京东,开屏广告,抓包,实验
+
+[Argument]
+notify = switch,true,tag=命中时通知
+dedup_minutes = input,30,tag=相同线索静默时间（分钟）
+max_body_kb = input,2048,tag=最大检查响应（KB）
+extra_keywords = input,"",tag=额外素材标识,desc=可填写图片文件名或哈希，多个用英文逗号分隔
+
+[Script]
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /(?:json|text|javascript)/i then script("jd-config-probe.js", {${notify}, ${dedup_minutes}, ${max_body_kb}, ${extra_keywords}}) with tag="京东开屏配置探测", timeout=15, requires_body=true
+
+[Mitm]
+hostname = api.m.jd.com
