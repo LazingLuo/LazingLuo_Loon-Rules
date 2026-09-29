@@ -15,6 +15,8 @@
   const size = getImageSize(bytes);
   if (!size || !targets.has(size.width + "x" + size.height)) return $done({});
 
+  const learnedId = learnMaterialId($request.url);
+
   const transparentPng = new Uint8Array([
     137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,
     0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,
@@ -27,7 +29,8 @@
   removeHeader(headers, "transfer-encoding");
   setHeader(headers, "Content-Type", "image/png");
 
-  const message = "已替换 " + size.width + "x" + size.height + "\n" + $request.url;
+  const message = "已替换 " + size.width + "x" + size.height +
+    (learnedId ? "\n已学习素材标识：" + learnedId : "") + "\n" + $request.url;
   console.log("[京东开屏图片] " + message);
   if (!$argument || $argument.notify !== false) {
     try {
@@ -157,5 +160,32 @@
   function setHeader(headers, name, value) {
     removeHeader(headers, name);
     headers[name] = value;
+  }
+
+  function learnMaterialId(url) {
+    if (typeof $persistentStore === "undefined") return "";
+    const cleanUrl = String(url || "").split("?")[0].split("#")[0];
+    const fileName = cleanUrl.slice(cleanUrl.lastIndexOf("/") + 1);
+    const id = fileName.split(".")[0];
+    // JD image identifiers observed here are normally 16 hexadecimal characters.
+    if (!/^[0-9a-f]{12,64}$/i.test(id)) return "";
+    const key = "jd_splash_learned_ids_v1";
+    let saved = [];
+    try {
+      saved = JSON.parse($persistentStore.read(key) || "[]");
+      if (!Array.isArray(saved)) saved = [];
+    } catch (_) {
+      saved = [];
+    }
+    saved = saved.filter(function (item) { return typeof item === "string" && item !== id; });
+    saved.unshift(id);
+    saved = saved.slice(0, 50);
+    try {
+      $persistentStore.write(JSON.stringify(saved), key);
+      return id;
+    } catch (error) {
+      console.log("[京东开屏图片] 自动学习素材标识失败：" + error);
+      return "";
+    }
   }
 })();
