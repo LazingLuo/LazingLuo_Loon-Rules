@@ -17,9 +17,10 @@
     "0258465984541464",
     "14ce25646760e292"
   ];
+  const learnedIds = readLearnedIds();
   const extras = String(($argument && $argument.extra_keywords) || "")
     .split(",").map(function (x) { return x.trim(); }).filter(Boolean);
-  const exactTerms = knownIds.concat(extras);
+  const exactTerms = unique(knownIds.concat(learnedIds, extras));
   const lower = body.toLowerCase();
 
   const exactHits = exactTerms.filter(function (term) {
@@ -85,6 +86,18 @@
     if (last && now - last < minutes * 60000) return false;
     $persistentStore.write(String(now), key);
     return true;
+  }
+
+  function readLearnedIds() {
+    if (typeof $persistentStore === "undefined") return [];
+    try {
+      const saved = JSON.parse($persistentStore.read("jd_splash_learned_ids_v1") || "[]");
+      return Array.isArray(saved) ? saved.filter(function (item) {
+        return typeof item === "string" && /^[0-9a-f]{12,64}$/i.test(item);
+      }).slice(0, 50) : [];
+    } catch (_) {
+      return [];
+    }
   }
 
   function simpleHash(text) {
