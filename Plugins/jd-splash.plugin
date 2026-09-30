@@ -3,7 +3,7 @@
 #!loon_version = 3.5.1(983)
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("jd-splash.js") with tag="京东 start 开屏配置净化", requires_body=true, timeout=15
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js") with tag="京东 start 开屏配置净化", requires_body=true, timeout=15
 
 [Mitm]
 hostname = api.m.jd.com
