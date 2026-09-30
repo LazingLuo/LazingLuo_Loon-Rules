@@ -1,0 +1,10 @@
+#!name = 京东开屏素材视频拦截
+#!desc = 拦截已在 start 开屏配置中确认使用的 material-video/video MP4 素材路径。该路径可能随活动更新文件名。
+#!loon_version = 3.5.1(983)
+#!tag = 京东,开屏广告,视频
+
+[URL Rewrite]
+^https:\/\/storage\.360buyimg\.com\/material-video\/video\/[^?]+\.mp4(?:\?.*)?$ reject-200
+
+[Mitm]
+hostname = storage.360buyimg.com
