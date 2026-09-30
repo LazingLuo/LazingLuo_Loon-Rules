@@ -10,20 +10,24 @@
   }
 
   const knownIds = [
-    "00294659847e154d",
-    "02584659847afb31",
-    "0258465984d4b764",
-    "0029465984635b2e",
+    // Previously observed on a visibly displayed JD splash.
     "0258465984541464",
-    "14ce25646760e292"
+    // Confirmed by the 2026-09-30 start response.
+    "0258465984fe4b7a",
+    "02584659844678e3",
+    "b949b365b5b64ee2c862d6404f7d28e7"
   ];
-  const learnedIds = readLearnedIds();
+  const confirmedIds = readStoredIds("jd_splash_confirmed_ids_v1");
+  const learnedIds = readStoredIds("jd_splash_learned_ids_v1");
   const extras = String(($argument && $argument.extra_keywords) || "")
     .split(",").map(function (x) { return x.trim(); }).filter(Boolean);
-  const exactTerms = unique(knownIds.concat(learnedIds, extras));
+  const confirmedTerms = unique(knownIds.concat(confirmedIds, extras));
   const lower = body.toLowerCase();
 
-  const exactHits = exactTerms.filter(function (term) {
+  const exactHits = confirmedTerms.filter(function (term) {
+    return lower.indexOf(term.toLowerCase()) !== -1;
+  });
+  const learnedHits = learnedIds.filter(function (term) {
     return lower.indexOf(term.toLowerCase()) !== -1;
   });
   const sizeHit = /1125\s*[xX*]\s*(?:2436|1602)/.test(body) ||
@@ -34,13 +38,22 @@
     return x.toLowerCase();
   })).slice(0, 12);
 
-  // A lone 360buyimg URL is common on the home page. Require a stronger link.
-  if (!exactHits.length && !sizeHit && !(imageHit && clueHits.length)) return $done({});
+  const functionId = getFunctionId($request.url, body);
+  // start is handled and notified by the sanitizer to avoid duplicate alerts.
+  if (functionId.toLowerCase() === "start") return $done({});
+  const explicitSplash = /launchSource(?:=|%3[dD])splash/i.test(body) ||
+    /(?:\\?"pos_id\\?"\s*:\s*\\?"3976\\?")/i.test(body) ||
+    /(?:splash|launchad|startupad|开屏)/i.test(body);
+  // Size-only images and generic words such as material/duration are common in JD home data.
+  // Automatically learned size candidates alert only when the same response has an explicit splash marker.
+  if (!exactHits.length && !explicitSplash && !(learnedHits.length && explicitSplash) &&
+      !(sizeHit && explicitSplash)) return $done({});
 
   const urls = extractImageUrls(body).slice(0, 8);
-  const functionId = getFunctionId($request.url, body);
   const reasons = [];
-  if (exactHits.length) reasons.push("已知素材=" + exactHits.join(","));
+  if (exactHits.length) reasons.push("start确认素材=" + exactHits.join(","));
+  if (learnedHits.length && explicitSplash) reasons.push("尺寸候选素材=" + learnedHits.join(","));
+  if (explicitSplash) reasons.push("明确开屏特征");
   if (sizeHit) reasons.push("尺寸=1125x2436/1602");
   if (clueHits.length) reasons.push("字段=" + clueHits.join(","));
 
@@ -88,10 +101,10 @@
     return true;
   }
 
-  function readLearnedIds() {
+  function readStoredIds(key) {
     if (typeof $persistentStore === "undefined") return [];
     try {
-      const saved = JSON.parse($persistentStore.read("jd_splash_learned_ids_v1") || "[]");
+      const saved = JSON.parse($persistentStore.read(key) || "[]");
       return Array.isArray(saved) ? saved.filter(function (item) {
         return typeof item === "string" && /^[0-9a-f]{12,64}$/i.test(item);
       }).slice(0, 50) : [];
