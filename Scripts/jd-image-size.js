@@ -16,6 +16,12 @@
   if (!size || !targets.has(size.width + "x" + size.height)) return $done({});
 
   const learnedId = learnMaterialId($request.url);
+  const confirmed = learnedId && isConfirmedId(learnedId);
+  if ($argument && $argument.confirmed_only === true && !confirmed) {
+    console.log("[京东开屏图片] 尺寸命中但不是 start 已确认素材，仅学习不替换：" +
+      size.width + "x" + size.height + " " + $request.url);
+    return $done({});
+  }
 
   const transparentPng = new Uint8Array([
     137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,
@@ -30,7 +36,8 @@
   setHeader(headers, "Content-Type", "image/png");
 
   const message = "已替换 " + size.width + "x" + size.height +
-    (learnedId ? "\n已学习素材标识：" + learnedId : "") + "\n" + $request.url;
+    (learnedId ? "\n素材标识：" + learnedId + (confirmed ? "（start已确认）" : "（仅尺寸候选）") : "") +
+    "\n" + $request.url;
   console.log("[京东开屏图片] " + message);
   if (!$argument || $argument.notify !== false) {
     try {
@@ -186,6 +193,18 @@
     } catch (error) {
       console.log("[京东开屏图片] 自动学习素材标识失败：" + error);
       return "";
+    }
+  }
+
+  function isConfirmedId(id) {
+    const builtIn = ["0258465984541464", "0258465984fe4b7a", "02584659844678e3"];
+    if (builtIn.indexOf(id) !== -1) return true;
+    if (typeof $persistentStore === "undefined") return false;
+    try {
+      const saved = JSON.parse($persistentStore.read("jd_splash_confirmed_ids_v1") || "[]");
+      return Array.isArray(saved) && saved.indexOf(id) !== -1;
+    } catch (_) {
+      return false;
     }
   }
 })();
