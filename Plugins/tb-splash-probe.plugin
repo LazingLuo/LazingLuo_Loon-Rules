@@ -1,0 +1,10 @@
+#!name = 淘宝天猫开屏素材关联探测
+#!desc = 只读记录1125x2436/1602竖屏图片候选，关联淘宝天猫接口中的素材URL。命中不代表确认开屏，不替换图片或配置。
+#!loon_version = 3.5.1(983)
+
+[Script]
+response if ${url} ~= /^https:\/\/(?:heic|img|gw|g)\.alicdn\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /^image\//i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/tb-image-probe.js") with tag="淘宝竖屏图片探测", timeout=20, requires_body=true, binary_body_mode=true
+response if ${url} ~= /^https:\/\/(?:[a-z0-9-]+\.)*(?:taobao|tmall)\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /json|text|javascript/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/tb-config-probe.js") with tag="淘宝素材接口关联", timeout=15, requires_body=true
+
+[Mitm]
+hostname = heic.alicdn.com,img.alicdn.com,gw.alicdn.com,g.alicdn.com,h5api.m.taobao.com,acs.m.taobao.com,guide-acs.m.taobao.com,acs.m.tmall.com
