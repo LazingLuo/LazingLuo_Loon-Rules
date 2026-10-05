@@ -1,13 +1,17 @@
-#!name = 京东去开屏广告
+#!name = 京东开屏处理
 #!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/JD.png
+#!desc = 清空 start 开屏任务；按真实尺寸替换图片为透明 PNG；拦截 material-video/video 目录的 MP4 并通知。保留素材学习和命中日志。
+#!loon_version = 3.5.1(983)
+#!tag = 京东,开屏广告
 
-[Rewrite]
-# 京东
-^https?:\/\/m\.360buyimg\.com\/mobilecms\/s1125x2436_jfs\/ reject
-^https?:\/\/storage\.360buyimg\.com\/material-video\/video\/.*\.mp4$ - reject-200
+[Argument]
+sizes = input,"1125x2436,1125x1602",tag=图片尺寸,desc=多个宽x高用英文逗号分隔
+notify = switch,true,tag=图片命中通知
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js") with tag="京东 start 开屏配置净化", requires_body=true, timeout=10
+request if ${url} ~= /^https:\/\/storage\.360buyimg\.com\/material-video\/video\/[^/?#]+\.mp4(?:\?[^#]*)?$/i then script("jd-video-block.js") with tag="京东素材视频拦截通知", timeout=10
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("jd-splash.js") with tag="京东 start 开屏配置净化", requires_body=true, timeout=15
+response if ${url} ~= /^https:\/\/(?:m(?:\d+)?|img\d+|nakedeye)\.360buyimg\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /^image\//i then script("jd-image-size.js", {${sizes}, ${notify}}) with tag="京东开屏图片尺寸检查", timeout=20, requires_body=true, binary_body_mode=true
 
-[MITM]
-hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com
+[Mitm]
+hostname = api.m.jd.com,*.360buyimg.com
