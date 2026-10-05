@@ -1,5 +1,5 @@
 #!name = 京东开屏配置探测（临时）
-#!desc = 只读检查京东 API 文本/JSON；仅在命中 start 已确认素材或明确 splash 特征时通知。start 本身交给净化插件处理。
+#!desc = 只读探测京东 API 配置，自动保存最近20组命中证据和最近一次响应正文到数据持久化；命中已学习素材只表示候选线索。start 交给净化插件处理。
 #!loon_version = 3.5.1(983)
 #!tag = 京东,开屏广告,抓包,实验
 
@@ -10,7 +10,7 @@ max_body_kb = input,2048,tag=最大检查响应（KB）
 extra_keywords = input,"",tag=额外素材标识,desc=可填写图片文件名或哈希，多个用英文逗号分隔
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /(?:json|text|javascript)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-config-probe.js", {${notify}, ${dedup_minutes}, ${max_body_kb}, ${extra_keywords}}) with tag="京东开屏配置探测", timeout=15, requires_body=true
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /(?:json|text|javascript)/i then script("jd-config-probe.js", {${notify}, ${dedup_minutes}, ${max_body_kb}, ${extra_keywords}}) with tag="京东开屏配置探测", timeout=15, requires_body=true
 
 [Mitm]
 hostname = api.m.jd.com
