@@ -1,5 +1,5 @@
 #!name = 京东签到手动测试
-#!desc = 实验版：获取普通签到和每日刮卡凭据，手动测试本地 h5st 5.3 签名。服务器是否接受尚未验证。没有定时任务。凭据只保存在 Loon 本地。
+#!desc = 实验版：获取签到凭据，手动测试本地 h5st 5.3。当前普通签到返回过402，领取尚不可用。新增不发请求的本地签名诊断。无定时任务，凭据只存本地。
 #!loon_version = 3.5.1(983)
 
 [Argument]
@@ -10,6 +10,7 @@ response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "daily") with tag="京东普通签到手动测试", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "scratch") with tag="京东每日刮卡待验证", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "status") with tag="京东签到最近结果", timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "diagnose") with tag="京东签名本地诊断（不发请求）", timeout=30
 
 [Mitm]
 hostname = api.m.jd.com
