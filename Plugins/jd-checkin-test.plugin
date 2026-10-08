@@ -11,6 +11,7 @@ generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "scratch") with tag="京东每日刮卡待验证", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "status") with tag="京东签到最近结果", timeout=10
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "diagnose") with tag="京东签名本地诊断（不发请求）", timeout=30
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "query_compare") with tag="京东环境对比查询（不领取）", timeout=30
 
 [Mitm]
 hostname = api.m.jd.com
