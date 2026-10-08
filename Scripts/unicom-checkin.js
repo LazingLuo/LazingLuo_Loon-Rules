@@ -39,11 +39,23 @@
   }
   function request(method,url,h,body) {
     return new Promise((resolve,reject)=>{
-      const options={url,headers:h,timeout:12,'auto-redirect':false,'auto-cookie':false,insecure:false};
+      // $httpClient timeout is milliseconds; Script timeout is seconds.
+      const options={url,headers:h,timeout:12000,'auto-redirect':false,'auto-cookie':false,insecure:false};
       if(body!==undefined)options.body=body;
       $httpClient[method](options,(error,response,text)=>{
-        if(error)return reject(new Error('网络请求失败；本次不自动重试'));
-        if(!response||Number(response.status)!==200)return reject(new Error('HTTP 状态异常；本次不自动重试'));
+        if(error) {
+          // Classify locally, never persist the raw error (it may contain the URL).
+          const raw=typeof error==='string'?error:String(error.message||error.error||'');
+          const code=String(error.code||'').match(/^-?\d{1,6}$/);
+          const kind=/timed?\s*out|timeout|超时|-1001/i.test(raw)?'timeout':/certificate|ssl|tls|证书|-120[0-6]/i.test(raw)?'tls':/dns|resolve|找不到.*服务器|-1003/i.test(raw)?'dns':'connection';
+          result.networkError={kind,timeoutMs:12000};
+          if(code)result.networkError.code=Number(code[0]);
+          return reject(new Error('网络请求失败（'+kind+'）；本次不自动重试'));
+        }
+        if(!response||Number(response.status)!==200) {
+          result.httpStatus=response&&Number(response.status)||0;
+          return reject(new Error('HTTP 状态异常 '+result.httpStatus+'；本次不自动重试'));
+        }
         try {resolve(JSON.parse(text));}catch(_){reject(new Error('返回内容不是 JSON；本次不自动重试'));}
       });
     });
