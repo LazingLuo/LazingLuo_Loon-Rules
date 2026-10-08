@@ -38,7 +38,7 @@ function jdcTask(data, mode) {
   if (tasks.length !== 1) throw new Error('每日任务无法唯一识别，未提交领取');
   return tasks[0];
 }
-function jdcLabel(mode) { return mode === 'daily' ? '普通签到' : '每日刮卡'; }
+function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : '每日刮卡'; }
 function jdcEndpoint(url) {
   const m = String(url).match(/^https:\/\/api\.m\.jd\.com\/(api|client\.action)(?:\?|$)/);
   if (!m) throw new Error('接口地址不符');
@@ -82,8 +82,8 @@ function jdcEndpoint(url) {
     const account = jdcRead(JDC_KEY, null);
     const state = account && account.pin === pin ? account : {pin, modes:{}};
     const previous = state.modes[mode] || {};
-    const isNew = !previous[kind];
-    previous[kind] = {endpoint, params, signatureAppId:expected, signatureParameterEncoding:sig[9]};
+    const isNew = !previous[kind] || !previous[kind].referenceEnvironmentEncoded;
+    previous[kind] = {endpoint, params, capturedAt:Date.now(), signatureAppId:expected, signatureParameterEncoding:sig[9], referenceEnvironmentEncoded:sig[7]};
     previous.headers = headers;
     previous.capturedAt = Date.now();
     state.modes[mode] = previous;
