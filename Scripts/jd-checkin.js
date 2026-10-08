@@ -1,4 +1,3 @@
-
 // Experimental Loon manual JD check-in. Server acceptance remains unverified.
 // Embedded official SDK: https://storage.360buyimg.com/webcontainer/js_security_v3_lite_0.1.5.js
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
@@ -77,7 +76,8 @@ function jdcSha256(text) {
   return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
 function jdcInstallBrowser(profile) {
-  const g = globalThis;
+  // Keep the SDK's browser shim private: Loon globals may be read-only.
+  const g = {};
   const saved = jdcRead('JD_CHECKIN_TEST_SDK_V1', null);
   const cache = saved && saved.pin === profile.pin ? saved.values : {};
   const local = {
@@ -117,8 +117,12 @@ function jdcInstallBrowser(profile) {
     screen:{width,height,colorDepth:24},innerWidth:width,innerHeight:height,devicePixelRatio:3,
     atob,btoa
   });
+  return g;
 }
-function jdcMakeSigner(appId) {
+function jdcMakeSigner(appId, browser) {
+  const globalThis = browser;
+  const {window,self,Element,XMLHttpRequest,navigator,location,localStorage,
+    document,screen,innerWidth,innerHeight,devicePixelRatio,atob,btoa} = browser;
   // JD's public SDK is embedded here by build.py; it is not fetched at runtime.
   // Vendor logging is suppressed to avoid leaking signing inputs into Loon logs.
   const console = {log:()=>{},warn:()=>{},error:()=>{},info:()=>{},debug:()=>{}};
@@ -171,7 +175,7 @@ function jdcMakeSigner(appId) {
     if(Number($persistentStore.read(lockKey)||0)>Date.now()) throw new Error('该测试正在执行，请稍后查看结果');
     if(!$persistentStore.write(String(Date.now()+90000),lockKey)) throw new Error('执行锁保存失败');
     lockOwned=true;
-    jdcInstallBrowser({pin:state.pin,headers:profile.headers});
+    const browser=jdcInstallBrowser({pin:state.pin,headers:profile.headers});
     const signers={};
     function signed(params, appId, expectedEncoding) {
       const fields=['appid','body','functionId'];
@@ -181,7 +185,7 @@ function jdcMakeSigner(appId) {
         if(params[k]===undefined||params[k]==='') throw new Error('缺少签名参数 '+k+'，未发送请求');
         signInput[k]=k==='body'?jdcSha256(params[k]):params[k];
       });
-      const signer=signers[appId]||(signers[appId]=jdcMakeSigner(appId));
+      const signer=signers[appId]||(signers[appId]=jdcMakeSigner(appId,browser));
       const output=signer.signSync(signInput);
       const parts=String(output.h5st||'').split(';');
       if(parts.length!==10||parts[5]!=='5.3'||parts[2]!==appId) throw new Error('本地签名生成失败，未发送请求');
