@@ -1,0 +1,14 @@
+#!name = 联通签到手动测试
+#!desc = 保存联通每日签到凭据，手动查询、签到、复查并通知。无定时任务，不处理月签、看视频或其他活动。凭据只保存在 Loon 本地。
+#!loon_version = 3.5.1(983)
+
+[Argument]
+capture = switch,true,tag=获取签到凭据,desc=打开联通每日签到页面，收到凭据已保存通知后关闭
+
+[Script]
+response if ${url} ~= /^https:\/\/activity\.10010\.com\/sixPalaceGridTurntableLottery\/signin\/getContinuous(?:\?|$)/ && ${request.method} == "GET" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", "capture") with tag="联通签到凭据获取", requires_body=true, timeout=15, enable=${capture}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", "manual") with tag="联通每日签到手动测试", timeout=60
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", "status") with tag="联通签到最近结果", timeout=10
+
+[Mitm]
+hostname = activity.10010.com
