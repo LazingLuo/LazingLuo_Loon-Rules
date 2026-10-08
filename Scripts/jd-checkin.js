@@ -243,7 +243,12 @@ if (diagnostics) {
         history.push(result);jdcWrite('JD_CHECKIN_TEST_HISTORY_V1',history.slice(-20));
       }
     } catch (_) { console.log('[京东签到] 结果保存失败'); }
-    console.log('[京东签到测试] '+JSON.stringify(result));
+    const summary=Object.assign({},result);
+    if(summary.diagnostics) {
+      summary.diagnostics=Object.assign({},summary.diagnostics);
+      delete summary.diagnostics.encodingTrace;
+    }
+    console.log('[京东签到测试] '+JSON.stringify(summary));
     $notification.post('京东签到测试', label, result.message || result.status);
   }
   function http(options) {
@@ -330,6 +335,22 @@ if (diagnostics) {
     if(!$persistentStore.write(String(Date.now()+90000),lockKey)) throw new Error('执行锁保存失败');
     lockOwned=true;
     const browser=jdcInstallBrowser({pin:state.pin,headers:profile.headers});
+    function capturedEnvironment(template) {
+      if(!template||!template.referenceEnvironmentEncoded||!template.capturedAt)throw new Error('缺少原始签名环境，请更新凭据获取脚本后打开普通签到页');
+      if(Date.now()-template.capturedAt>7*86400000)throw new Error('原始签名环境超过七天，请重新打开普通签到页');
+      const env=jdcDecodeEnvironment(template.referenceEnvironmentEncoded);
+      if(!env.pp.p1||![state.pin,decodeURIComponent(state.pin)].includes(env.pp.p1))throw new Error('签名环境账号不匹配，未发送请求');
+      return env;
+    }
+    const queryEnvironment=mode==='daily'?capturedEnvironment(profile.query):undefined;
+    let claimEnvironment=queryEnvironment;
+    if(mode==='daily') {
+      result.environmentSource='captured_app';
+      if(profile.interaction&&profile.interaction.referenceEnvironmentEncoded&&profile.interaction.capturedAt&&Date.now()-profile.interaction.capturedAt<=7*86400000) {
+        claimEnvironment=capturedEnvironment(profile.interaction);
+        result.claimEnvironmentSource='interaction';
+      } else result.claimEnvironmentSource='query';
+    }
     const signers={};
     function signed(params, appId, expectedEncoding) {
       const fields=['appid','body','functionId'];
@@ -339,11 +360,16 @@ if (diagnostics) {
         if(params[k]===undefined||params[k]==='') throw new Error('缺少签名参数 '+k+'，未发送请求');
         signInput[k]=k==='body'?jdcSha256(params[k]):params[k];
       });
-      const signer=signers[appId]||(signers[appId]=jdcMakeSigner(appId,browser));
+      const reference=appId==='90b26'?claimEnvironment:queryEnvironment;
+      const signer=signers[appId]||(signers[appId]=jdcMakeSigner(appId,browser,undefined,reference));
       const output=signer.signSync(signInput);
       const parts=String(output.h5st||'').split(';');
       if(parts.length!==10||parts[5]!=='5.3'||parts[2]!==appId) throw new Error('本地签名生成失败，未发送请求');
       if(expectedEncoding&&parts[9]!==expectedEncoding) throw new Error('签名参数集合与原请求不同，未发送请求');
+      if(reference) {
+        const env=jdcDecodeEnvironment(parts[7]);
+        if(env.fp!==parts[1]||JSON.stringify(env.pp)!==JSON.stringify(reference.pp)||env.canvas!==reference.canvas||env.webglFp!==reference.webglFp)throw new Error('签名环境一致性检查失败，未发送请求');
+      }
       result.signatureVersion=parts[5];result.environmentLength=parts[7].length;
       return Object.assign({},params,{h5st:output.h5st});
     }
@@ -380,7 +406,11 @@ if (diagnostics) {
     const allowed=mode==='daily'?['client','screen','networkType','openudid','uuid','clientVersion','d_model','osVersion','eid','x-api-eid-token']:['loginType','scval','xAPIClientLanguage','d_brand','x-api-eid-token'];
     allowed.forEach(k=>{if(source[k]!==undefined)params[k]=source[k];});
     const body={scene:'commonDoInteractiveAssignment',activityCode:'beanDailySign',businessScenario:'jingDouCenter'};
-    if(mode==='daily') {body.commonScene='secKillChannel';params.sceneType='secKillChannel';}
+    if(mode==='daily') {
+      body.commonScene='secKillChannel';params.sceneType='secKillChannel';
+      // App query uses client=apple; the observed claim uses client=ios.
+      params.client=profile.interaction&&source.client?source.client:'ios';
+    }
     body.assignmentId=task.encryptAssignmentId;
     if(mode==='scratch') {body.actionType='100';body.itemId='';}
     params.appid=mode==='daily'?'signed_wh5':'plus_business';
