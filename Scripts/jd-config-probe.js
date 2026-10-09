@@ -1,5 +1,7 @@
 // Read-only probe: it never changes the response body or headers.
 (function () {
+  const PROBE_VERSION = 2;
+  recheckCandidates();
   const body = typeof $response.body === "string" ? $response.body : "";
   if (!body) return $done({});
 
@@ -32,7 +34,7 @@
   });
   const sizeHit = /1125\s*[xX*]\s*(?:2436|1602)/.test(body) ||
     /s1125x(?:2436|1602)_jfs/i.test(body);
-  const imageHit = /(?:https?:\\?\/\\?\/)?(?:[a-z0-9-]+\.)?360buyimg\.com\//i.test(body);
+
   const cluePattern = /(?:splash|showtimes?|show_times?|countdown|duration|skip(?:time)?|swipe|slide|material(?:id|url)?|exposure|launchad|startupad|开屏|倒计时|上滑)/ig;
   const clueHits = unique((body.match(cluePattern) || []).map(function (x) {
     return x.toLowerCase();
@@ -41,18 +43,37 @@
   const functionId = getFunctionId($request.url, body);
   // start is handled and notified by the sanitizer to avoid duplicate alerts.
   if (functionId.toLowerCase() === "start") return $done({});
-  const explicitSplash = /launchSource(?:=|%3[dD])splash/i.test(body) ||
-    /(?:\\?"pos_id\\?"\s*:\s*\\?"3976\\?")/i.test(body) ||
-    /(?:splash|launchad|startupad|开屏)/i.test(body);
-  // Learned IDs and dimensions are candidate evidence, not proof of a splash task.
-  // Generic words such as material/duration alone do not trigger capture.
-  if (!exactHits.length && !explicitSplash && !learnedHits.length && !sizeHit) return $done({});
+  // A landing-page source marker does not configure the splash container.
+  const clueText = body.replace(/launchSource(?:=|%3d|\\u003d)splash/ig, "landingSource");
+  const explicitSplash = /(?:splash|launchad|startupad|开屏)/i.test(clueText) ||
+    /(?:\\?"pos_id\\?"\s*:\s*\\?"3976\\?")/i.test(body);
+  const landingSource = /launchSource(?:=|%3d)splash/i.test(body);
+  const allUrls = extractImageUrls(body);
+  const materials = allUrls.map(function (url) {
+    const m = url.match(/\/([0-9a-f]{16})\.(?:jpe?g|png|webp|avif|heic|qpng|gif)(?:[.?&#]|$)/i);
+    return m ? {id: m[1].toLowerCase(), url: url} : null;
+  }).filter(Boolean);
+  const namingIds = unique(materials.map(function (m) { return m.id; }));
+  const prefixIds = namingIds.filter(function (id) { return /^0258465984[0-9a-f]{6}$/.test(id); });
+  // Generic 16-character names are archived silently, never promoted to confirmed IDs.
+  if (namingIds.length) saveCandidate({
+    time: Date.now(), functionId: functionId,
+    endpoint: functionId ? "functionId=" + functionId : shortUrl($request.url),
+    requestUrl: $request.url, method: $request.method || "", status: $response.status,
+    bodyHash: simpleHash(body), bodyLength: body.length,
+    materials: materials.slice(0, 100),
+    fieldMatches: findFields(body, namingIds),
+    excerpts: findExcerpts(body, prefixIds), landingSource: landingSource
+  });
+  if (!exactHits.length && !explicitSplash && !learnedHits.length && !sizeHit && !prefixIds.length) return $done({});
 
-  const urls = extractImageUrls(body).slice(0, 8);
+  const urls = allUrls.slice(0, 8);
   const reasons = [];
-  if (exactHits.length) reasons.push("start确认素材=" + exactHits.join(","));
+  if (exactHits.length) reasons.push("已知素材=" + exactHits.join(","));
   if (learnedHits.length) reasons.push("尺寸候选素材=" + learnedHits.join(","));
-  if (explicitSplash) reasons.push("明确开屏特征");
+  if (prefixIds.length) reasons.push("文件名前缀候选=" + prefixIds.join(","));
+  if (explicitSplash) reasons.push("开屏关键词候选（待核实）");
+  if (landingSource) reasons.push("包含开屏跳转来源（不代表配置）");
   if (sizeHit) reasons.push("尺寸=1125x2436/1602");
   if (clueHits.length) reasons.push("字段=" + clueHits.join(","));
 
@@ -60,12 +81,12 @@
   const detail = reasons.join("；") + (urls.length ? "\n" + urls.join("\n") : "");
   console.log("[京东开屏配置探测] 命中 " + endpoint + "\n" + detail);
   const saved = saveEvidence({
-    time: Date.now(), functionId: functionId, endpoint: endpoint,
+    probeVersion: PROBE_VERSION, time: Date.now(), functionId: functionId, endpoint: endpoint,
     requestUrl: $request.url, method: $request.method || "", status: $response.status,
-    reasons: reasons, confirmedIds: exactHits, candidateIds: learnedHits,
+    reasons: reasons, confirmedIds: exactHits, candidateIds: unique(learnedHits.concat(prefixIds)), namingIds: namingIds.slice(0, 100),
     urls: extractImageUrls(body).slice(0, 40),
     bodyLength: body.length, bodyHash: simpleHash(body),
-    fieldMatches: findFields(body, exactHits.concat(learnedHits)),
+    fieldMatches: findFields(body, unique(exactHits.concat(learnedHits, prefixIds))),
     excerpts: findExcerpts(body, exactHits.concat(learnedHits))
   });
 
@@ -78,7 +99,8 @@
   }
   $done({});
 
-  function saveEvidence(record) {
+  function saveEvidence(record, responseText) {
+    if (responseText === undefined) responseText = body;
     if (typeof $persistentStore === "undefined") return false;
     try {
       let history = [];
@@ -92,8 +114,8 @@
       history = history.slice(0, 20);
       const historyOK = $persistentStore.write(JSON.stringify(history), "jd_splash_probe_history_v1");
       const latest = Object.assign({}, record, {
-        responseBody: body.slice(0, 512 * 1024),
-        bodyTruncated: body.length > 512 * 1024
+        responseBody: responseText.slice(0, 512 * 1024),
+        bodyTruncated: responseText.length > 512 * 1024
       });
       const latestOK = $persistentStore.write(JSON.stringify(latest), "jd_splash_probe_last_v1");
       return historyOK !== false && latestOK !== false;
@@ -107,21 +129,21 @@
     const results = [];
     let nodes = 0;
     const marker = /launchSource=splash|splash|launchad|startupad|开屏|1125[x*](?:2436|1602)/i;
-    function walk(value, path, depth) {
+    function walk(value, path, depth, parent) {
       if (++nodes > 30000 || depth > 18 || results.length >= 30) return;
       if (typeof value === "string") {
         if (marker.test(value) || ids.some(function (id) { return value.toLowerCase().indexOf(id.toLowerCase()) !== -1; })) {
-          results.push({path: path, value: truncate(value, 1000)});
+          results.push({path: path, value: truncate(value, 1000), nearby: parent ? truncate(JSON.stringify(parent), 2400) : ""});
         }
         // JD sometimes embeds another JSON document inside a string field.
         if (depth < 18 && /^[\[{]/.test(value.trim())) {
-          try { walk(JSON.parse(value), path + "::<JSON>", depth + 1); } catch (_) {}
+          try { walk(JSON.parse(value), path + "::<JSON>", depth + 1, null); } catch (_) {}
         }
       } else if (value && typeof value === "object") {
         Object.keys(value).forEach(function (key) {
           if (key === "pos_id" && String(value[key]) === "3976" && results.length < 30)
             results.push({path: path + "." + key, value: value[key]});
-          walk(value[key], path + (Array.isArray(value) ? "[" + key + "]" : "." + key), depth + 1);
+          walk(value[key], path + (Array.isArray(value) ? "[" + key + "]" : "." + key), depth + 1, value);
         });
       }
     }
@@ -144,11 +166,56 @@
   }
 
   function extractImageUrls(text) {
-    const normalized = text.replace(/\\\//g, "/").replace(/\\u002[fF]/g, "/");
-    const matches = normalized.match(/https?:\/\/[^"'\s<>]+360buyimg\.com\/[^"'\s<>]+/ig) || [];
-    return unique(matches.map(function (url) {
-      return url.replace(/[},\]]+$/, "");
-    }));
+    const normalized = text.replace(/\\\//g, "/").replace(/\\u002[fF]/g, "/")
+      .replace(/&quot;|&#34;|&lt;|&gt;/ig, '"').replace(/&amp;/ig, "&");
+    return unique(normalized.match(/https?:\/\/(?:[a-z0-9-]+\.)*360buyimg\.com\/[^"'\s<>\\]+/ig) || []);
+  }
+
+  function loadCandidates() {
+    try {
+      const rows = JSON.parse($persistentStore.read("jd_splash_probe_candidates_v2") || "[]");
+      return Array.isArray(rows) ? rows.filter(function (r) {
+        return r && Array.isArray(r.materials) && Date.now() - r.time < 7 * 86400000;
+      }) : [];
+    } catch (_) { return []; }
+  }
+
+  function saveCandidate(record) {
+    if (typeof $persistentStore === "undefined") return;
+    let rows = loadCandidates().filter(function (r) {
+      return !(r.endpoint === record.endpoint && r.bodyHash === record.bodyHash);
+    });
+    rows.unshift(record);
+    rows = rows.slice(0, 24);
+    while (JSON.stringify(rows).length > 256 * 1024 && rows.length) rows.pop();
+    $persistentStore.write(JSON.stringify(rows), "jd_splash_probe_candidates_v2");
+  }
+
+  // Run on the next API response after an image script learns an ID.
+  // The image script itself is unchanged and cannot trigger this probe directly.
+  function recheckCandidates() {
+    if (typeof $persistentStore === "undefined") return;
+    const ids = readStoredIds("jd_splash_learned_ids_v1").concat(readStoredIds("jd_splash_confirmed_ids_v1"));
+    const rows = loadCandidates();
+    let changed = false;
+    rows.forEach(function (r) {
+      const hits = unique(r.materials.map(function (m) { return m.id; }).filter(function (id) { return ids.indexOf(id) !== -1; }));
+      const fresh = hits.filter(function (id) { return (r.linkedIds || []).indexOf(id) === -1; });
+      if (!fresh.length) return;
+      r.linkedIds = hits; changed = true;
+      const record = Object.assign({}, r, {
+        probeVersion: 2, time: Date.now(), originalTime: r.time, retrospective: true,
+        confirmedIds: [], candidateIds: hits,
+        reasons: ["新学习素材回查=" + fresh.join(","), "仅证明接口曾引用素材，尚未确认容器配置"],
+        urls: r.materials.filter(function (m) { return hits.indexOf(m.id) !== -1; }).map(function (m) { return m.url; })
+      });
+      saveEvidence(record, "");
+      console.log("[京东开屏配置探测] 素材回查命中 " + r.endpoint + " " + fresh.join(","));
+      if ((!$argument || $argument.notify !== false) && shouldNotify("backlink|" + r.endpoint + "|" + fresh.join(","))) {
+        try { $notification.post("京东素材引用回查（已保存）", r.endpoint, fresh.join(",") + "；尚未确认开屏容器配置"); } catch (_) {}
+      }
+    });
+    if (changed) $persistentStore.write(JSON.stringify(rows), "jd_splash_probe_candidates_v2");
   }
 
   function getFunctionId(url, text) {
