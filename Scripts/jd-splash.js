@@ -6,6 +6,8 @@
     if (!/^https:\/\/api\.m\.jd\.com\/client\.action\?/.test(url) ||
         !/[?&]functionId=start(?:&|$)/.test(url)) return $done({});
     if ($response.status !== 200 || typeof $response.body !== "string") return $done({});
+    // Save the received body before parsing or modifying any configuration.
+    const originalSaved = saveOriginalStart($response.body);
     const obj = JSON.parse($response.body);
     if (!obj || (obj.code !== "0" && obj.code !== 0) ||
         !Array.isArray(obj.images) ||
@@ -22,6 +24,7 @@
     }
     const detail = `原始任务 ${originalImageCount} 个，图片 ${materials.images.length}，视频 ${materials.videos.length}，每日次数 ${originalDaily}；` +
       (changed ? "已清空" : "原本已为空，无需修改") +
+      (originalSaved ? "；修改前原响应已保存" : "；原响应保存失败") +
       (materials.dates.length ? `；日期 ${materials.dates.join("、")}` : "") +
       (materials.ids.length ? `\n素材标识：${materials.ids.join(",")}` : "");
     console.log("[京东开屏] start 已触发：" + detail);
@@ -34,6 +37,34 @@
     console.log("[京东开屏] 正文不可解析，保留原响应");
   }
   $done(result);
+
+  function saveOriginalStart(body) {
+    if (typeof $persistentStore === "undefined") return false;
+    try {
+      const limit = 512 * 1024;
+      const record = {
+        version: 1, time: Date.now(), endpoint: "functionId=start",
+        status: $response.status, bodyLength: body.length,
+        responseBody: body.length <= limit ? body : body.slice(0, limit),
+        bodyTruncated: body.length > limit,
+        source: "received_before_this_script_modification"
+      };
+      const latestOK = $persistentStore.write(JSON.stringify(record), "jd_splash_start_original_last_v1");
+      let rows = [];
+      try { rows = JSON.parse($persistentStore.read("jd_splash_start_original_history_v1") || "[]"); } catch (_) {}
+      if (!Array.isArray(rows)) rows = [];
+      rows.unshift(record);
+      rows = rows.slice(0, 5);
+      while (JSON.stringify(rows).length > 1024 * 1024 && rows.length > 1) rows.pop();
+      const historyOK = $persistentStore.write(JSON.stringify(rows), "jd_splash_start_original_history_v1");
+      console.log("[京东开屏] 修改前 start 已保存：" + body.length + " 字符" +
+        (record.bodyTruncated ? "（超限截断）" : ""));
+      return latestOK !== false && historyOK !== false;
+    } catch (error) {
+      console.log("[京东开屏] 原始 start 保存失败：" + error);
+      return false;
+    }
+  }
 
   function collectMaterials(groups) {
     const data = {items: 0, images: [], videos: [], urls: [], ids: [], dates: []};
