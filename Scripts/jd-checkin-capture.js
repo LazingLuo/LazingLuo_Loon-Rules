@@ -38,7 +38,7 @@ function jdcTask(data, mode) {
   if (tasks.length !== 1) throw new Error('每日任务无法唯一识别，未提交领取');
   return tasks[0];
 }
-function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : '每日刮卡'; }
+function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : mode === 'blindbox' ? 'PLUS每日盲盒' : '每日刮卡'; }
 function jdcEndpoint(url) {
   const m = String(url).match(/^https:\/\/api\.m\.jd\.com\/(api|client\.action)(?:\?|$)/);
   if (!m) throw new Error('接口地址不符');
@@ -52,6 +52,15 @@ function jdcQueryAccepted(data, mode) {
   return mode === 'scratch' && code === '1711000' && data.msg === '成功' &&
     !!(data.rs && data.rs.beanTask && Array.isArray(data.rs.beanTask.taskList));
 }
+
+function jdcBoxAccepted(data) {
+  return !!data && String(data.code)==='1711000' && data.msg==='成功' && !!data.rs;
+}
+function jdcBoxToday(data) {
+  if(!jdcBoxAccepted(data)||!Array.isArray(data.rs.sendBenefitList))
+    throw new Error('盲盒奖励记录不完整，未继续开盒');
+  return data.rs.sendBenefitList.filter(x=>String(x.prizeTime||'').slice(0,10)===jdcDay());
+}
 (function () {
   try {
     if (typeof $request === 'undefined' || typeof $response === 'undefined') throw new Error('请通过插件响应规则获取凭据');
@@ -63,6 +72,13 @@ function jdcQueryAccepted(data, mode) {
     let mode, kind;
     if (fid === 'findBeanSceneNew' && params.appid === 'signed_wh5_ihub') { mode = 'daily'; kind = 'query'; }
     else if (fid === 'bff_rightsCenter_jdInteractTask' && params.appid === 'plus_business') { mode = 'scratch'; kind = 'query'; }
+    else if (fid === 'bff_marketing_interaction' && params.appid === 'plus_business') {
+      const body=JSON.parse(params.body||'{}');
+      if(body.scene==='blindBox' && ['purePlusIndexNew2608','plusIndexHistory'].includes(body.touchPoint)) kind='query';
+      else if(body.scene==='commonReceiveBlindBox' && body.touchPoint==='purePlusIndex') kind='interaction';
+      else return;
+      mode='blindbox';
+    }
     else if (fid === 'bff_rightsCenter_interaction') {
       const body = JSON.parse(params.body || '{}');
       if (body.activityCode !== 'beanDailySign' || body.scene !== 'commonDoInteractiveAssignment') return;
@@ -72,10 +88,10 @@ function jdcQueryAccepted(data, mode) {
       kind = 'interaction';
     } else return;
     const data = JSON.parse($response.body || '{}');
-    if (kind === 'query' ? !jdcQueryAccepted(data, mode) : String(data.code) !== '0') return;
-    if (kind === 'query') jdcTask(data, mode);
+    if (mode==='blindbox' ? !jdcBoxAccepted(data) : (kind === 'query' ? !jdcQueryAccepted(data, mode) : String(data.code) !== '0')) return;
+    if (kind === 'query' && mode!=='blindbox') jdcTask(data, mode);
     const sig = String(params.h5st || '').split(';');
-    const expected = kind === 'query' && mode === 'daily' ? 'ed9a2' : mode === 'daily' ? '90b26' : 'b63ff';
+    const expected = mode==='blindbox' ? '35fa0' : kind === 'query' && mode === 'daily' ? 'ed9a2' : mode === 'daily' ? '90b26' : 'b63ff';
     if (sig.length !== 10 || sig[5] !== '5.3' || sig[2] !== expected) throw new Error('签名版本或活动标识变化，请保留日志后反馈');
     const cookie = jdcHeader($request.headers, 'cookie');
     const pin = jdcCookie(cookie, 'pt_pin');
