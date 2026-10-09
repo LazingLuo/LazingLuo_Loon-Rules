@@ -1,4 +1,4 @@
-// Experimental Loon manual JD check-in. Server acceptance remains unverified.
+// Loon manual JD check-in: daily reward verified on device; scratch reward pending verification.
 // Embedded official SDK: https://storage.360buyimg.com/webcontainer/js_security_v3_lite_0.1.5.js
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
@@ -44,6 +44,14 @@ function jdcEndpoint(url) {
   const m = String(url).match(/^https:\/\/api\.m\.jd\.com\/(api|client\.action)(?:\?|$)/);
   if (!m) throw new Error('接口地址不符');
   return 'https://api.m.jd.com/' + m[1];
+}
+
+// The observed scratch query uses a business success code different from daily sign-in.
+function jdcQueryAccepted(data, mode) {
+  const code = String(data && data.code);
+  if (code === '0') return true;
+  return mode === 'scratch' && code === '1711000' && data.msg === '成功' &&
+    !!(data.rs && data.rs.beanTask && Array.isArray(data.rs.beanTask.taskList));
 }
 // Standard SHA-256 for the UTF-8 request body; JD's SDK handles its own signing hashes.
 function jdcSha256(text) {
@@ -282,7 +290,7 @@ if (diagnostics) {
       let reference;
       if(mode==='query_compare') {
         if(!profile.query.referenceEnvironmentEncoded||!profile.query.capturedAt)throw new Error('缺少成功请求的环境记录，请更新凭据获取脚本后重新打开普通签到页');
-        if(Date.now()-profile.query.capturedAt>86400000)throw new Error('环境记录超过一天，请重新打开普通签到页更新');
+        if(Date.now()-profile.query.capturedAt>86400000)throw new Error('环境记录超过一天，请重新打开对应活动页更新');
         reference=jdcDecodeEnvironment(profile.query.referenceEnvironmentEncoded);
         const pins=[state.pin,decodeURIComponent(state.pin)];
         if(!reference.pp.p1||!pins.includes(reference.pp.p1))throw new Error('原始环境账号字段不匹配，对比停止');
@@ -336,15 +344,15 @@ if (diagnostics) {
     lockOwned=true;
     const browser=jdcInstallBrowser({pin:state.pin,headers:profile.headers});
     function capturedEnvironment(template) {
-      if(!template||!template.referenceEnvironmentEncoded||!template.capturedAt)throw new Error('缺少原始签名环境，请更新凭据获取脚本后打开普通签到页');
-      if(Date.now()-template.capturedAt>7*86400000)throw new Error('原始签名环境超过七天，请重新打开普通签到页');
+      if(!template||!template.referenceEnvironmentEncoded||!template.capturedAt)throw new Error('缺少原始签名环境，请更新凭据获取脚本后打开对应活动页');
+      if(Date.now()-template.capturedAt>7*86400000)throw new Error('原始签名环境超过七天，请重新打开对应活动页');
       const env=jdcDecodeEnvironment(template.referenceEnvironmentEncoded);
       if(!env.pp.p1||![state.pin,decodeURIComponent(state.pin)].includes(env.pp.p1))throw new Error('签名环境账号不匹配，未发送请求');
       return env;
     }
-    const queryEnvironment=mode==='daily'?capturedEnvironment(profile.query):undefined;
+    const queryEnvironment=capturedEnvironment(profile.query);
     let claimEnvironment=queryEnvironment;
-    if(mode==='daily') {
+    {
       result.environmentSource='captured_app';
       if(profile.interaction&&profile.interaction.referenceEnvironmentEncoded&&profile.interaction.capturedAt&&Date.now()-profile.interaction.capturedAt<=7*86400000) {
         claimEnvironment=capturedEnvironment(profile.interaction);
@@ -352,7 +360,7 @@ if (diagnostics) {
       } else result.claimEnvironmentSource='query';
     }
     const signers={};
-    function signed(params, appId, expectedEncoding) {
+    function signed(params, appId, expectedEncoding, isClaim) {
       const fields=['appid','body','functionId'];
       if(appId==='90b26'||appId==='ed9a2') fields.push('client','clientVersion');
       const signInput={};
@@ -360,8 +368,9 @@ if (diagnostics) {
         if(params[k]===undefined||params[k]==='') throw new Error('缺少签名参数 '+k+'，未发送请求');
         signInput[k]=k==='body'?jdcSha256(params[k]):params[k];
       });
-      const reference=appId==='90b26'?claimEnvironment:queryEnvironment;
-      const signer=signers[appId]||(signers[appId]=jdcMakeSigner(appId,browser,undefined,reference));
+      const reference=isClaim?claimEnvironment:queryEnvironment;
+      const signerKey=appId+(isClaim?':claim':':query');
+      const signer=signers[signerKey]||(signers[signerKey]=jdcMakeSigner(appId,browser,undefined,reference));
       const output=signer.signSync(signInput);
       const parts=String(output.h5st||'').split(';');
       if(parts.length!==10||parts[5]!=='5.3'||parts[2]!==appId) throw new Error('本地签名生成失败，未发送请求');
@@ -386,7 +395,7 @@ if (diagnostics) {
     result.phase='query';
     const data=await send(query,queryId);
     result.queryCode=String(data.code);result.queryMessage=businessMessage(data);
-    if(result.queryCode!=='0') throw new Error('任务查询被拒绝：'+result.queryCode+' '+result.queryMessage+'；未提交领取');
+    if(!jdcQueryAccepted(data,mode)) throw new Error('任务查询被拒绝：'+result.queryCode+' '+result.queryMessage+'；未提交领取');
     const task=jdcTask(data,mode);
     result.assignmentId=task.encryptAssignmentId;
     const end=String(task.assignmentEndTime||'').slice(0,10);
@@ -419,7 +428,7 @@ if (diagnostics) {
     if(profile.interaction)interaction.signatureParameterEncoding=profile.interaction.signatureParameterEncoding;
     const appId=mode==='daily'?'90b26':'b63ff';
     // Generate before recording the attempt so a local signing error does not consume it.
-    const requestParams=signed(params,appId,interaction.signatureParameterEncoding);
+    const requestParams=signed(params,appId,interaction.signatureParameterEncoding,true);
     jdcWrite(attemptKey,{pin:state.pin,date:jdcDay(),time:Date.now(),assignmentId:task.encryptAssignmentId});
     result.phase='claim';
     const claimURL=interaction.endpoint+'?functionId=bff_rightsCenter_interaction'+(mode==='scratch'?'&scene=commonDoInteractiveAssignment':'');
