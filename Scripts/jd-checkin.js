@@ -1,4 +1,4 @@
-// Loon manual JD check-in: daily reward verified on device; scratch reward pending verification.
+// Loon manual JD check-in: daily and scratch rewards verified on device; PLUS blindbox pending device verification.
 // Embedded official SDK: https://storage.360buyimg.com/webcontainer/js_security_v3_lite_0.1.5.js
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
@@ -39,7 +39,7 @@ function jdcTask(data, mode) {
   if (tasks.length !== 1) throw new Error('每日任务无法唯一识别，未提交领取');
   return tasks[0];
 }
-function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : '每日刮卡'; }
+function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : mode === 'blindbox' ? 'PLUS每日盲盒' : '每日刮卡'; }
 function jdcEndpoint(url) {
   const m = String(url).match(/^https:\/\/api\.m\.jd\.com\/(api|client\.action)(?:\?|$)/);
   if (!m) throw new Error('接口地址不符');
@@ -52,6 +52,15 @@ function jdcQueryAccepted(data, mode) {
   if (code === '0') return true;
   return mode === 'scratch' && code === '1711000' && data.msg === '成功' &&
     !!(data.rs && data.rs.beanTask && Array.isArray(data.rs.beanTask.taskList));
+}
+
+function jdcBoxAccepted(data) {
+  return !!data && String(data.code)==='1711000' && data.msg==='成功' && !!data.rs;
+}
+function jdcBoxToday(data) {
+  if(!jdcBoxAccepted(data)||!Array.isArray(data.rs.sendBenefitList))
+    throw new Error('盲盒奖励记录不完整，未继续开盒');
+  return data.rs.sendBenefitList.filter(x=>String(x.prizeTime||'').slice(0,10)===jdcDay());
 }
 // Standard SHA-256 for the UTF-8 request body; JD's SDK handles its own signing hashes.
 function jdcSha256(text) {
@@ -276,7 +285,7 @@ if (diagnostics) {
       $notification.post('京东签到测试','最近执行结果',last ? last.date+' '+jdcLabel(last.mode)+'：'+(last.message||last.status) : '暂无执行记录');
       return;
     }
-    if(!['daily','scratch','diagnose','query_compare'].includes(mode)) throw new Error('请从插件的签到或签名诊断入口运行');
+    if(!['daily','scratch','blindbox','diagnose','query_compare'].includes(mode)) throw new Error('请从插件的签到或签名诊断入口运行');
     if(typeof $request!=='undefined') throw new Error('领取脚本只能手动执行');
     const state=jdcRead(JDC_KEY,null);
     const profile=state&&state.modes&&state.modes[['diagnose','query_compare'].includes(mode)?'daily':mode];
@@ -382,11 +391,52 @@ if (diagnostics) {
       result.signatureVersion=parts[5];result.environmentLength=parts[7].length;
       return Object.assign({},params,{h5st:output.h5st});
     }
-    function send(template, appId) {
+    function send(template, appId, isClaim) {
       const endpoint=jdcEndpoint(template.endpoint);
-      const params=signed(template.params,appId,template.signatureParameterEncoding);
+      const params=signed(template.params,appId,template.signatureParameterEncoding,isClaim);
       const routing='?functionId='+encodeURIComponent(params.functionId)+(params.scene?'&scene='+encodeURIComponent(params.scene):'');
       return http({url:endpoint+routing,headers:Object.assign({},profile.headers,{'Content-Type':'application/x-www-form-urlencoded'}),body:jdcForm(params),timeout:15000,'auto-redirect':false,'auto-cookie':false,insecure:false});
+    }
+    if(mode==='blindbox') {
+      function boxTemplate(template, scene, touchPoint) {
+        if(!template||template.params.functionId!=='bff_marketing_interaction'||template.params.appid!=='plus_business'||template.signatureAppId!=='35fa0')
+          throw new Error('缺少PLUS盲盒凭据，请开启获取开关后进入盲盒页');
+        const body=JSON.parse(template.params.body||'{}');
+        if(body.scene!==(scene==='blindBox'?'blindBox':'commonReceiveBlindBox') && !(scene==='commonReceiveBlindBox' && template===profile.query && body.scene==='blindBox'))throw new Error('盲盒请求模板不匹配，未开盒');
+        const next={scene,touchPoint};
+        if(body.eid)next.eid=body.eid;
+        if(scene==='blindBox')next.version='250520';
+        else {next['ext[sortCoupon]']='';next['ext[notFilterInvalidRights]']='';}
+        return Object.assign({},template,{params:Object.assign({},template.params,{body:JSON.stringify(next),t:String(Date.now())})});
+      }
+      result.phase='query';
+      const historyTemplate=boxTemplate(profile.query,'blindBox','plusIndexHistory');
+      const history=await send(historyTemplate,'35fa0');
+      result.queryCode=String(history.code);
+      const today=jdcBoxToday(history);
+      if(today.length) {result.status='already_done';result.message='PLUS盲盒今天已有奖励记录；未重复开盒。';return;}
+      const status=await send(boxTemplate(profile.query,'blindBox','purePlusIndexNew2608'),'35fa0');
+      if(!jdcBoxAccepted(status)||!Number.isInteger(status.rs.leftTimes)||status.rs.leftTimes<0)throw new Error('盲盒剩余次数查询不明确，未开盒');
+      result.leftTimesBefore=status.rs.leftTimes;
+      if(status.rs.leftTimes===0){result.status='no_chance';result.message='PLUS盲盒当前没有开盒机会。';return;}
+      const attemptKey='JD_CHECKIN_TEST_ATTEMPT_blindbox';
+      const attempt=jdcRead(attemptKey,null);
+      if(attempt&&attempt.pin===state.pin&&attempt.date===jdcDay())throw new Error('今天已提交过开盒，请查看结果；不重复提交');
+      const claim=boxTemplate(profile.interaction||profile.query,'commonReceiveBlindBox','purePlusIndex');
+      // Finish local signing before consuming the daily attempt.
+      const params=signed(claim.params,'35fa0',claim.signatureParameterEncoding,true);
+      jdcWrite(attemptKey,{pin:state.pin,date:jdcDay(),time:Date.now()});
+      result.phase='claim';
+      const received=await http({url:jdcEndpoint(claim.endpoint)+'?functionId=bff_marketing_interaction',headers:Object.assign({},profile.headers,{'Content-Type':'application/x-www-form-urlencoded'}),body:jdcForm(params),timeout:15000,'auto-redirect':false,'auto-cookie':false,insecure:false});
+      result.claimCode=String(received.code);
+      if(!jdcBoxAccepted(received))throw new Error('盲盒领取返回 '+result.claimCode+' '+businessMessage(received)+'；未自动重试');
+      const components=received.rs.compInfoList;
+      result.beanQuantity=Array.isArray(components)?components.filter(x=>x.success===true).reduce((sum,x)=>sum+(x.data&&Array.isArray(x.data.rightResourceDetails)?x.data.rightResourceDetails.reduce((n,r)=>n+(Number(r.beanInfo&&r.beanInfo.beanNum)||0),0):0),0):0;
+      result.phase='verify';
+      const confirmed=jdcBoxToday(await send(boxTemplate(profile.query,'blindBox','plusIndexHistory'),'35fa0'));
+      if(confirmed.length){result.status='box_confirmed';result.message='PLUS盲盒已开一次，今日奖励记录已确认'+(result.beanQuantity>0?'；获得 '+result.beanQuantity+' 京豆。':'；请到活动页查看奖励。');}
+      else {result.status='claim_unconfirmed';result.message='开盒请求已返回，但今日奖励记录未确认；不重复开盒。';}
+      return;
     }
     const query=profile.query;
     const queryId=mode==='daily'?'ed9a2':'b63ff';
