@@ -44,6 +44,14 @@ function jdcEndpoint(url) {
   if (!m) throw new Error('接口地址不符');
   return 'https://api.m.jd.com/' + m[1];
 }
+
+// The observed scratch query uses a business success code different from daily sign-in.
+function jdcQueryAccepted(data, mode) {
+  const code = String(data && data.code);
+  if (code === '0') return true;
+  return mode === 'scratch' && code === '1711000' && data.msg === '成功' &&
+    !!(data.rs && data.rs.beanTask && Array.isArray(data.rs.beanTask.taskList));
+}
 (function () {
   try {
     if (typeof $request === 'undefined' || typeof $response === 'undefined') throw new Error('请通过插件响应规则获取凭据');
@@ -64,7 +72,7 @@ function jdcEndpoint(url) {
       kind = 'interaction';
     } else return;
     const data = JSON.parse($response.body || '{}');
-    if (String(data.code) !== '0') return;
+    if (kind === 'query' ? !jdcQueryAccepted(data, mode) : String(data.code) !== '0') return;
     if (kind === 'query') jdcTask(data, mode);
     const sig = String(params.h5st || '').split(';');
     const expected = kind === 'query' && mode === 'daily' ? 'ed9a2' : mode === 'daily' ? '90b26' : 'b63ff';
