@@ -88,11 +88,18 @@
     if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据：开启获取凭据后，打开联通签到页面');
     if(!profile.capturedAt||Date.now()-profile.capturedAt>7*86400000)throw new Error('凭据已超过七天，请重新打开签到页更新');
     if(Number($persistentStore.read(LOCK)||0)>Date.now())throw new Error('签到脚本正在运行，请稍后查看结果');
-    if(!$persistentStore.write(String(Date.now()+90000),LOCK))throw new Error('执行锁保存失败');
+    if(!$persistentStore.write(String(Date.now()+(mode==='cron'?1290000:90000)),LOCK))throw new Error('执行锁保存失败');
     locked=true;
     const h=headers(profile.headers), q=profile.query||{};
     const query=Object.keys(q).filter(k=>['taskId','channel','imei'].includes(k)).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(q[k])).join('&');
     const queryURL=BASE+'getContinuous'+(query?'?'+query:'');
+    if(mode==='cron') {
+      const delaySeconds=Math.floor(Math.random()*1201);
+      result.phase='waiting';result.randomDelaySeconds=delaySeconds;
+      console.log('[联通签到] 定时任务随机等待 '+delaySeconds+' 秒');
+      if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
+      if(day()!==result.date)throw new Error('随机等待跨过零点，本次停止，请调整签到时间');
+    }
     result.phase='query';
     const before=state(await request('get',queryURL,h));
     result.daysBefore=String(before.continueCountCur||before.continueCount||'');
