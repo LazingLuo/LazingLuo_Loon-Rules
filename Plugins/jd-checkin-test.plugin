@@ -1,14 +1,15 @@
 #!name = 京东签到手动测试
-#!desc = 实验版：获取签到凭据，手动测试本地 h5st 5.3。当前普通签到返回过402，领取尚不可用。新增不发请求的本地签名诊断。无定时任务，凭据只存本地。
+#!desc = 手动测试版：普通签到、每日刮卡已实测成功；新增PLUS每日盲盒，只开一次并核对奖励，待实机验证。无定时任务，凭据只存本地。
 #!loon_version = 3.5.1(983)
 
 [Argument]
-capture = switch,true,tag=获取活动凭据,desc=进入普通签到页和每日刮卡页，保存成功后关闭
+capture = switch,true,tag=获取活动凭据,desc=进入普通签到、每日刮卡及PLUS盲盒页，保存成功后关闭
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:findBeanSceneNew|bff_rightsCenter_jdInteractTask|bff_rightsCenter_interaction)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin-capture.js") with tag="京东签到凭据获取", requires_body=true, timeout=15, enable=${capture}
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:findBeanSceneNew|bff_rightsCenter_jdInteractTask|bff_rightsCenter_interaction|bff_marketing_interaction)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin-capture.js") with tag="京东签到凭据获取", requires_body=true, timeout=15, enable=${capture}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "blindbox") with tag="京东PLUS每日盲盒手动测试", timeout=90
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "daily") with tag="京东普通签到手动测试", timeout=60
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "scratch") with tag="京东每日刮卡待验证", timeout=60
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "scratch") with tag="京东每日刮卡手动测试", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "status") with tag="京东签到最近结果", timeout=10
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "diagnose") with tag="京东签名本地诊断（不发请求）", timeout=30
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "query_compare") with tag="京东环境对比查询（不领取）", timeout=30
