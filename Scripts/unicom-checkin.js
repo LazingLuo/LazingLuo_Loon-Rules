@@ -1,4 +1,4 @@
-// China Unicom daily sign-in: local capture and manual test, 2026-10-09.
+// China Unicom daily sign-in: local capture, scheduled and manual sign-in, 2026-10-10.
 // Credentials stay in Loon. No browser shim, third-party service or auto retries.
 (async function () {
   const KEY='UNICOM_CHECKIN_ACCOUNT_V1', LAST='UNICOM_CHECKIN_LAST_RESULT_V1';
@@ -7,7 +7,7 @@
   const BASE='https://activity.10010.com/sixPalaceGridTurntableLottery/signin/';
   const mode=typeof $argument==='string'?$argument:'';
   const day=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
-  const result={time:Date.now(),date:day(),phase:'prepare'};
+  const result={time:Date.now(),date:day(),mode,phase:'prepare'};
   let locked=false;
   function read(key,fallback) {try {const v=$persistentStore.read(key);return v?JSON.parse(v):fallback;}catch(_){return fallback;}}
   function write(key,value) {if(!$persistentStore.write(JSON.stringify(value),key))throw new Error('本地记录保存失败，已停止');}
@@ -83,7 +83,7 @@
       $notification.post('联通签到','最近执行结果',last?last.date+'：'+last.message:'暂无执行记录');
       return;
     }
-    if(mode!=='manual'||typeof $request!=='undefined')throw new Error('请从联通每日签到手动测试入口执行');
+    if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从联通签到定时或手动入口执行');
     const profile=read(KEY,null);
     if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据：开启获取凭据后，打开联通签到页面');
     if(!profile.capturedAt||Date.now()-profile.capturedAt>7*86400000)throw new Error('凭据已超过七天，请重新打开签到页更新');
@@ -132,10 +132,10 @@
     }
   } finally {
     if(locked)$persistentStore.write(undefined,LOCK);
-    if(mode==='manual') {
+    if(mode==='manual'||mode==='cron') {
       try {write(LAST,result);const history=read(HISTORY,[]);history.push(result);write(HISTORY,history.slice(-20));}catch(_){console.log('[联通签到] 执行结果保存失败');}
       console.log('[联通签到] '+JSON.stringify(result));
-      $notification.post('联通签到','手动测试结果',result.message||result.status);
+      $notification.post('联通签到',mode==='cron'?'定时签到结果':'手动签到结果',result.message||result.status);
     }
     $done({});
   }
