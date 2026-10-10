@@ -411,12 +411,19 @@ if (diagnostics) {
         return Object.assign({},template,{params:Object.assign({},template.params,{body:JSON.stringify(next),t:String(Date.now())})});
       }
       result.phase='query';
+      function checkBoxQuery(data, stage) {
+        result.queryStage=stage;
+        result.queryCode=String(data.code);
+        result.queryMessage=businessMessage(data);
+        if(!jdcBoxAccepted(data))throw new Error('PLUS盲盒'+(stage==='status'?'次数':'奖励记录')+'查询失败：'+result.queryCode+' '+result.queryMessage);
+      }
       const historyTemplate=boxTemplate(profile.query,'blindBox','plusIndexHistory');
       const history=await send(historyTemplate,'35fa0');
-      result.queryCode=String(history.code);
+      checkBoxQuery(history,'history');
       const today=jdcBoxToday(history);
       if(today.length) {result.status='already_done';result.message='PLUS盲盒今天已有奖励记录；未重复开盒。';return;}
       const status=await send(boxTemplate(profile.query,'blindBox','purePlusIndexNew2608'),'35fa0');
+      checkBoxQuery(status,'status');
       if(!jdcBoxAccepted(status)||!Number.isInteger(status.rs.leftTimes)||status.rs.leftTimes<0)throw new Error('盲盒剩余次数查询不明确，未开盒');
       result.leftTimesBefore=status.rs.leftTimes;
       if(status.rs.leftTimes===0){result.status='no_chance';result.message='PLUS盲盒当前没有开盒机会。';return;}
@@ -434,7 +441,9 @@ if (diagnostics) {
       const components=received.rs.compInfoList;
       result.beanQuantity=Array.isArray(components)?components.filter(x=>x.success===true).reduce((sum,x)=>sum+(x.data&&Array.isArray(x.data.rightResourceDetails)?x.data.rightResourceDetails.reduce((n,r)=>n+(Number(r.beanInfo&&r.beanInfo.beanNum)||0),0):0),0):0;
       result.phase='verify';
-      const confirmed=jdcBoxToday(await send(boxTemplate(profile.query,'blindBox','plusIndexHistory'),'35fa0'));
+      const verified=await send(boxTemplate(profile.query,'blindBox','plusIndexHistory'),'35fa0');
+      checkBoxQuery(verified,'verify');
+      const confirmed=jdcBoxToday(verified);
       if(confirmed.length){result.status='box_confirmed';result.message='PLUS盲盒已开一次，今日奖励记录已确认'+(result.beanQuantity>0?'；获得 '+result.beanQuantity+' 京豆。':'；请到活动页查看奖励。');}
       else {result.status='claim_unconfirmed';result.message='开盒请求已返回，但今日奖励记录未确认；不重复开盒。';}
       return;
