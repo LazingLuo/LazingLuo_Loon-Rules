@@ -1,4 +1,4 @@
-// Independent plant-bean daily gift. Device validation pending.
+// Independent plant-bean daily gift: manual verified; cron waits 0-20 minutes.
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
   const raw = $persistentStore.read(key);
@@ -65,6 +65,15 @@ const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
 const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
 function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
+function zSummary(result){
+ if(['signed_confirmed','already_done'].includes(result.status)){
+  let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
+  if(result.continuousDays>0)text+='，连续 '+result.continuousDays+' 天';
+  return '成功，'+text+'。';
+ }
+ const text=[result.message,result.queryMessage,result.claimMessage].join(' ');
+ return '失败，'+(/未登[录陆]|登录|凭据|账号.*匹配|原始签名环境/.test(text)?'凭据可能失效或不完整，请重新获取种豆凭据。':'请查看执行日志或最近结果。');
+}
 function zStatus(data){
  if(!zAccepted(data))throw new Error('签到状态查询失败：'+String(data&&data.code)+' '+(data?zMessage(data):'无说明'));
  const main=data.data.signMainVo,list=data.data.signListVo;
@@ -260,7 +269,7 @@ if (diagnostics) {
 (async function(){
  const mode=typeof $argument==='string'?$argument:'';
  const LAST='JD_PLANT_CHECKIN_LAST_RESULT_V1',HISTORY='JD_PLANT_CHECKIN_HISTORY_V1',LOCK='JD_PLANT_CHECKIN_LOCK_V1',ATTEMPT='JD_PLANT_CHECKIN_ATTEMPT_V1';
- const result={time:Date.now(),date:jdcDay(),phase:'prepare'};let locked=false;
+ const result={time:Date.now(),date:jdcDay(),mode,phase:'prepare'};let locked=false;
  function http(template,params){
   return new Promise((resolve,reject)=>$httpClient.post({url:jdcEndpoint(template.endpoint)+'?functionId='+encodeURIComponent(params.functionId),headers:Object.assign({},template.headers,{'Content-Type':'application/x-www-form-urlencoded'}),body:jdcForm(params),timeout:12000,'auto-redirect':false,'auto-cookie':false,insecure:false},(error,response,body)=>{
    if(error)return reject(new Error('网络请求失败，本次不自动重试'));
@@ -270,13 +279,13 @@ if (diagnostics) {
  }
  try{
   if(mode==='status'){
-   const last=jdcRead(LAST,null);console.log('[种豆签到] '+JSON.stringify(last));$notification.post('种豆得豆签到','最近结果',last?last.message:'暂无记录');return;
+   const last=jdcRead(LAST,null);console.log('[种豆签到] '+JSON.stringify(last));$notification.post('种豆得豆签到','最近结果',last?last.date+' '+zSummary(last):'暂无记录');return;
   }
-  if(mode!=='manual'||typeof $request!=='undefined')throw new Error('请从手动签到入口执行');
+  if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从定时或手动签到入口执行');
   const profile=jdcRead(Z_KEY,null);
   if(!profile||!profile.query)throw new Error('缺少种豆签到凭据，请开启获取开关后进入签到礼包页');
   function validate(t,kind){
-   if(!t||!t.capturedAt||Date.now()-t.capturedAt>7*86400000)throw new Error('种豆签到凭据缺失或超过七天，请重新获取');
+   if(!t||!t.capturedAt)throw new Error('种豆签到凭据缺失或不完整，请重新获取');
    if(!t.headers||!jdcCookie(t.headers.Cookie,'pt_key')||jdcCookie(t.headers.Cookie,'pt_pin')!==profile.pin)throw new Error('种豆签到账号凭据不完整，请重新获取');
    const b=JSON.parse(t.params.body||'{}');
    if(t.params.appid!=='wegame-hub'||t.params.functionId!==(kind==='query'?'weGameHome':'weGameLottery')||b.linkId!==Z_LINK||Number(b.envType)!==1||Number(b.appType)!==1||t.appId!==(kind==='query'?'101aa':'730a6'))throw new Error('种豆签到模板不匹配，未发送请求');
@@ -287,7 +296,14 @@ if (diagnostics) {
   }
   const queryEnv=validate(profile.query,'query');
   if(Number($persistentStore.read(LOCK)||0)>Date.now())throw new Error('签到正在执行，请稍后查看结果');
-  if(!$persistentStore.write(String(Date.now()+90000),LOCK))throw new Error('执行锁保存失败');locked=true;
+  if(!$persistentStore.write(String(Date.now()+(mode==='cron'?1290000:90000)),LOCK))throw new Error('执行锁保存失败');locked=true;
+  if(mode==='cron'){
+   const delaySeconds=Math.floor(Math.random()*1201);
+   result.phase='waiting';result.randomDelaySeconds=delaySeconds;
+   console.log('[种豆签到] 定时执行，随机延迟 '+delaySeconds+' 秒');
+   if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
+   if(jdcDay()!==result.date)throw new Error('等待跨过零点，本次签到停止');
+  }
   const browser=jdcInstallBrowser({pin:profile.pin,headers:profile.query.headers});
   function sign(template,env){
    const params=Object.assign({},template.params,{t:String(Date.now())});delete params.h5st;
@@ -301,7 +317,7 @@ if (diagnostics) {
   result.phase='query';
   const before=await http(profile.query,sign(profile.query,queryEnv));result.queryCode=String(before.code);result.queryMessage=zMessage(before);
   const state=zStatus(before);
-  if(state.done){result.status='already_done';result.message='种豆得豆礼包今天已领取，未重复提交。';return;}
+  if(state.done){if(Number.isInteger(Number(state.main.signDays))&&Number(state.main.signDays)>0)result.continuousDays=Number(state.main.signDays);result.status='already_done';result.message='种豆得豆礼包今天已领取，未重复提交。';return;}
   const begin=String(state.main.startTime||'').slice(0,10),end=String(state.main.endTime||'').slice(0,10);
   if(begin&&begin>jdcDay()||end&&end<jdcDay())throw new Error('礼包不在有效期内，未提交领取');
   if(jdcDay()!==result.date)throw new Error('执行跨过零点，请稍后再试');
@@ -325,6 +341,7 @@ if (diagnostics) {
   try{
    const after=zStatus(await http(profile.query,sign(profile.query,queryEnv)));
    if(!after.done)throw new Error('未更新');
+   if(Number.isInteger(Number(after.main.signDays))&&Number(after.main.signDays)>0)result.continuousDays=Number(after.main.signDays);
    result.status='signed_confirmed';result.message='种豆得豆礼包今日领取已确认'+(result.beanQuantity>0?'，获得 '+result.beanQuantity+' 京豆。':'，请到活动页查看奖励。');
   }catch(_){result.status='claim_success_verify_unconfirmed';result.message='领取接口返回成功'+(result.beanQuantity>0?'，'+result.beanQuantity+' 京豆':'')+'；状态复查未确认，不自动重试。';}
  }catch(e){result.status='stopped';result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请反馈执行阶段';}
@@ -332,7 +349,7 @@ if (diagnostics) {
   if(locked)$persistentStore.write(undefined,LOCK);
   if(mode!=='status'){
    try{jdcWrite(LAST,result);const history=jdcRead(HISTORY,[]);history.push(result);jdcWrite(HISTORY,history.slice(-20));}catch(_){}
-   console.log('[种豆签到] '+JSON.stringify(result));$notification.post('种豆得豆签到','手动签到结果',result.message||result.status);
+   console.log('[种豆签到] '+JSON.stringify(result));$notification.post('种豆得豆签到',mode==='cron'?'自动签到结果':'手动签到结果',zSummary(result));
   }
   $done({});
  }
