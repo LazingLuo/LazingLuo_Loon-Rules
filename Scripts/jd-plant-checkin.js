@@ -1,4 +1,3 @@
-
 // Independent plant-bean daily gift. Device validation pending.
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
@@ -65,8 +64,9 @@ function jdcBoxToday(data) {
 const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
 const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
+function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
 function zStatus(data){
- if(!zAccepted(data))throw new Error('签到状态查询失败，未继续领取');
+ if(!zAccepted(data))throw new Error('签到状态查询失败：'+String(data&&data.code)+' '+(data?zMessage(data):'无说明'));
  const main=data.data.signMainVo,list=data.data.signListVo;
  if(!main||!Array.isArray(list))throw new Error('签到状态结构变化，未继续领取');
  const today=list.find(x=>x.signDate===jdcDay()&&Number(x.status)===3);
@@ -296,10 +296,10 @@ if (diagnostics) {
    if(parts.length!==10||parts[5]!=='5.3'||parts[2]!==template.appId||parts[9]!==template.encoding)throw new Error('签名生成检查未通过，未发送请求');
    const generated=jdcDecodeEnvironment(parts[7]);
    if(generated.fp!==parts[1]||JSON.stringify(generated.pp)!==JSON.stringify(env.pp)||generated.canvas!==env.canvas||generated.webglFp!==env.webglFp)throw new Error('签名环境检查未通过，未发送请求');
-   result.signatureVersion=parts[5];return Object.assign(params,{h5st:out.h5st});
+   result.signatureVersion=parts[5];result.environmentLength=parts[7].length;return Object.assign(params,{h5st:out.h5st});
   }
   result.phase='query';
-  const before=await http(profile.query,sign(profile.query,queryEnv));result.queryCode=String(before.code);
+  const before=await http(profile.query,sign(profile.query,queryEnv));result.queryCode=String(before.code);result.queryMessage=zMessage(before);
   const state=zStatus(before);
   if(state.done){result.status='already_done';result.message='种豆得豆礼包今天已领取，未重复提交。';return;}
   const begin=String(state.main.startTime||'').slice(0,10),end=String(state.main.endTime||'').slice(0,10);
@@ -317,8 +317,8 @@ if (diagnostics) {
   const params=sign(claim,claimEnv);
   jdcWrite(ATTEMPT,{pin:profile.pin,date:result.date,time:Date.now()});
   result.phase='claim';
-  const received=await http(claim,params);result.claimCode=String(received.code);
-  if(!zAccepted(received))throw new Error('领取接口未返回成功，未自动重试');
+  const received=await http(claim,params);result.claimCode=String(received.code);result.claimMessage=zMessage(received);
+  if(!zAccepted(received))throw new Error('领取失败：'+result.claimCode+' '+result.claimMessage);
   const award=received.data.awardVo;
   if(award&&award.awardName==='BEAN'&&/^\d+$/.test(String(award.awardGivenNumber)))result.beanQuantity=Number(award.awardGivenNumber);
   result.phase='verify';
