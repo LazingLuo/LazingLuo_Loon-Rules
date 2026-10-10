@@ -64,8 +64,9 @@ function jdcBoxToday(data) {
 const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
 const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
+function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
 function zStatus(data){
- if(!zAccepted(data))throw new Error('签到状态查询失败，未继续领取');
+ if(!zAccepted(data))throw new Error('签到状态查询失败：'+String(data&&data.code)+' '+(data?zMessage(data):'无说明'));
  const main=data.data.signMainVo,list=data.data.signListVo;
  if(!main||!Array.isArray(list))throw new Error('签到状态结构变化，未继续领取');
  const today=list.find(x=>x.signDate===jdcDay()&&Number(x.status)===3);
@@ -74,30 +75,46 @@ function zStatus(data){
  return {done:false,main};
 }
 (function(){
+ let stage='检查请求';
  try {
   if(typeof $request==='undefined'||typeof $response==='undefined'||$request.method!=='POST'||Number($response.status)!==200)return;
   const endpoint=jdcEndpoint($request.url);
   const params=Object.assign(jdcParseForm(($request.url.split('?')[1]||'').split('#')[0]),jdcParseForm($request.body));
   if(params.appid!=='wegame-hub'||!['weGameHome','weGameLottery'].includes(params.functionId))return;
+  stage='解析活动参数';
   const body=JSON.parse(params.body||'{}');
   if(body.linkId!==Z_LINK||Number(body.envType)!==1||Number(body.appType)!==1)return;
+  stage='解析接口响应';
   const data=JSON.parse($response.body||'{}');
-  if(!zAccepted(data))return;
+  if(!zAccepted(data)){console.log('[种豆签到] 未保存凭据：接口未返回登录成功状态，返回码 '+String(data.code));return;}
   const kind=params.functionId==='weGameHome'?'query':'claim';
-  if(kind==='query')zStatus(data);
+  // Capture an authenticated page even when today's reward cannot be claimed.
+  // Eligibility is checked by the runner before any claim is submitted.
+  stage='检查签名配置';
   const sig=String(params.h5st||'').split(';'),appId=kind==='query'?'101aa':'730a6';
   if(sig.length!==10||sig[5]!=='5.3'||sig[2]!==appId)throw new Error('签名配置变化，请反馈执行日志');
+  stage='检查登录和页面凭据';
   const headers={};
   ['Cookie','User-Agent','Referer','Origin','wg-sdk-token','x-rp-client','x-referer-page','request-from'].forEach(k=>{const v=jdcHeader($request.headers,k);if(v)headers[k]=v;});
   const pin=jdcCookie(headers.Cookie,'pt_pin');
-  if(!pin||!jdcCookie(headers.Cookie,'pt_key')||!headers['User-Agent']||!headers.Referer)throw new Error('登录或页面凭据不完整，未保存');
+  const missing=[];
+  if(!pin)missing.push('pt_pin');
+  if(!jdcCookie(headers.Cookie,'pt_key'))missing.push('pt_key');
+  if(!headers['User-Agent'])missing.push('User-Agent');
+  if(!headers.Referer)missing.push('Referer');
+  if(missing.length)throw new Error('缺少 '+missing.join('、')+'，未保存');
   delete params.h5st;
   const old=jdcRead(Z_KEY,null),profile=old&&old.pin===pin?old:{pin};
   const first=!profile[kind];
   profile[kind]={endpoint,params,capturedAt:Date.now(),appId,encoding:sig[9],environment:sig[7],headers};
+  stage='保存本地凭据';
   jdcWrite(Z_KEY,profile);
   console.log('[种豆签到] 已保存'+(kind==='query'?'查询凭据':'领取模板')+'，未修改原请求');
   if(first)$notification.post('种豆得豆签到','凭据已保存',kind==='query'?'可关闭获取开关，在Loon中手动测试。':'已保存领取模板；还需进入页面保存查询凭据。');
- }catch(e){console.log('[种豆签到] 获取失败');$notification.post('种豆得豆签到','凭据获取未完成','请检查活动页面、登录状态或脚本版本。');}
+ }catch(e){
+  // Only expose known validation messages; parser errors can contain credentials.
+  const detail=stage==='检查签名配置'?'签名配置变化，请反馈执行日志':stage==='检查登录和页面凭据'&&String(e.message).startsWith('缺少 ')?e.message:stage+'失败';
+  console.log('[种豆签到] 获取失败：'+detail);$notification.post('种豆得豆签到','凭据获取未完成',detail);
+ }
  finally{$done({});}
 })();
