@@ -1,0 +1,14 @@
+#!name = 京东种豆得豆签到
+#!desc = 独立处理种豆得豆连续签到礼包。查询、领取一次、复查并通知；不处理种豆、营养液、助力或瓜分。手动测试版，尚待真机验证。凭据仅存Loon本地。
+#!loon_version = 3.5.1(983)
+
+[Argument]
+capture = switch,false,tag=获取礼包凭据,desc=开启后进入种豆得豆的连续签到礼包页，收到保存通知后关闭
+
+[Script]
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:weGameHome|weGameLottery)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin-capture.js") with tag="种豆签到凭据获取", requires_body=true, timeout=15, enable=${capture}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "manual") with tag="种豆得豆礼包手动签到", timeout=60
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "status") with tag="种豆签到最近结果", timeout=10
+
+[Mitm]
+hostname = api.m.jd.com
