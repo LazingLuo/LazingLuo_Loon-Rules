@@ -372,6 +372,7 @@ if (diagnostics) {
     function signed(params, appId, expectedEncoding, isClaim) {
       const fields=['appid','body','functionId'];
       if(appId==='90b26'||appId==='ed9a2') fields.push('client','clientVersion');
+      if(appId==='35fa0') fields.push('t');
       const signInput={};
       fields.forEach(k=>{
         if(params[k]===undefined||params[k]==='') throw new Error('缺少签名参数 '+k+'，未发送请求');
