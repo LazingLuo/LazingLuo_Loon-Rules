@@ -1,4 +1,4 @@
-// Loon manual JD check-in: daily and scratch rewards verified on device; PLUS blindbox pending device verification.
+// Loon JD automatic check-in: daily, scratch, PLUS blindbox; cron waits 0-20 minutes; manual stays immediate.
 // Embedded official SDK: https://storage.360buyimg.com/webcontainer/js_security_v3_lite_0.1.5.js
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
@@ -245,8 +245,7 @@ if (diagnostics) {
     if(diagnostics&&status&&typeof status.code==='number')diagnostics.sdkSignCode=status.code;
   }});
 }
-(async function () {
-  const mode = typeof $argument === 'string' ? $argument : '';
+async function jdcRun(mode, quiet) {
   const label = jdcLabel(mode);
   const result = {time:Date.now(),date:jdcDay(),mode,phase:'prepare'};
   let lockKey, lockOwned=false;
@@ -266,7 +265,7 @@ if (diagnostics) {
       delete summary.diagnostics.encodingTrace;
     }
     console.log('[京东签到测试] '+JSON.stringify(summary));
-    $notification.post('京东签到测试', label, result.message || result.status);
+    if(!quiet)$notification.post('京东签到', label+'结果', ['diagnose','query_compare'].includes(mode)?result.message:jdcResultLine(result));
   }
   function http(options) {
     return new Promise((resolve,reject)=>$httpClient.post(options,(error,response,body)=>{
@@ -282,16 +281,16 @@ if (diagnostics) {
     if (mode==='status') {
       const last=jdcRead('JD_CHECKIN_TEST_LAST_RESULT_V1',null);
       console.log('[京东签到测试] 最近结果：'+JSON.stringify(last));
-      $notification.post('京东签到测试','最近执行结果',last ? last.date+' '+jdcLabel(last.mode)+'：'+(last.message||last.status) : '暂无执行记录');
-      return;
+      $notification.post('京东签到','最近执行结果',last ? last.date+'\n'+(last.results?last.results.map(jdcResultLine).join('\n'):jdcResultLine(last)) : '暂无执行记录');
+      return result;
     }
     if(!['daily','scratch','blindbox','diagnose','query_compare'].includes(mode)) throw new Error('请从插件的签到或签名诊断入口运行');
-    if(typeof $request!=='undefined') throw new Error('领取脚本只能手动执行');
+    if(typeof $request!=='undefined') throw new Error('请从定时或手动签到入口执行');
     const state=jdcRead(JDC_KEY,null);
     const profile=state&&state.modes&&state.modes[['diagnose','query_compare'].includes(mode)?'daily':mode];
     if(!profile||!profile.query) throw new Error('缺少'+label+'凭据：请先打开京东对应活动页面');
     if(!profile.headers||jdcCookie(profile.headers.Cookie,'pt_pin')!==state.pin||!jdcCookie(profile.headers.Cookie,'pt_key')) throw new Error('账号凭据不完整，请重新获取');
-    if(!profile.capturedAt||Date.now()-profile.capturedAt>7*86400000) throw new Error('凭据已超过七天，请重新打开活动页面更新');
+    if(!profile.capturedAt) throw new Error('凭据记录不完整，请重新打开活动页面更新');
     if(mode==='diagnose'||mode==='query_compare') {
       result.phase='local_sign';
       const browser=jdcInstallBrowser({pin:state.pin,headers:profile.headers});
@@ -341,11 +340,11 @@ if (diagnostics) {
         } else {
           result.status='query_rejected';result.message='环境对比查询返回 '+result.queryCode+' '+result.queryMessage+'；没有提交领取，不自动重试。';
         }
-        return;
+        return result;
       }
       result.status=parts.length===10?'diagnostic_only':'local_sign_failed';
       result.message='本地诊断完成：环境字段长度 '+result.environmentLength+'；未发送网络请求，也未提交签到。';
-      return;
+      return result;
     }
     lockKey='JD_CHECKIN_TEST_LOCK_'+mode;
     if(Number($persistentStore.read(lockKey)||0)>Date.now()) throw new Error('该测试正在执行，请稍后查看结果');
@@ -354,7 +353,6 @@ if (diagnostics) {
     const browser=jdcInstallBrowser({pin:state.pin,headers:profile.headers});
     function capturedEnvironment(template) {
       if(!template||!template.referenceEnvironmentEncoded||!template.capturedAt)throw new Error('缺少原始签名环境，请更新凭据获取脚本后打开对应活动页');
-      if(Date.now()-template.capturedAt>7*86400000)throw new Error('原始签名环境超过七天，请重新打开对应活动页');
       const env=jdcDecodeEnvironment(template.referenceEnvironmentEncoded);
       if(!env.pp.p1||![state.pin,decodeURIComponent(state.pin)].includes(env.pp.p1))throw new Error('签名环境账号不匹配，未发送请求');
       return env;
@@ -363,7 +361,7 @@ if (diagnostics) {
     let claimEnvironment=queryEnvironment;
     {
       result.environmentSource='captured_app';
-      if(profile.interaction&&profile.interaction.referenceEnvironmentEncoded&&profile.interaction.capturedAt&&Date.now()-profile.interaction.capturedAt<=7*86400000) {
+      if(profile.interaction&&profile.interaction.referenceEnvironmentEncoded&&profile.interaction.capturedAt) {
         claimEnvironment=capturedEnvironment(profile.interaction);
         result.claimEnvironmentSource='interaction';
       } else result.claimEnvironmentSource='query';
@@ -421,12 +419,12 @@ if (diagnostics) {
       const history=await send(historyTemplate,'35fa0');
       checkBoxQuery(history,'history');
       const today=jdcBoxToday(history);
-      if(today.length) {result.status='already_done';result.message='PLUS盲盒今天已有奖励记录；未重复开盒。';return;}
+      if(today.length) {result.status='already_done';result.message='PLUS盲盒今天已有奖励记录；未重复开盒。';return result;}
       const status=await send(boxTemplate(profile.query,'blindBox','purePlusIndexNew2608'),'35fa0');
       checkBoxQuery(status,'status');
       if(!jdcBoxAccepted(status)||!Number.isInteger(status.rs.leftTimes)||status.rs.leftTimes<0)throw new Error('盲盒剩余次数查询不明确，未开盒');
       result.leftTimesBefore=status.rs.leftTimes;
-      if(status.rs.leftTimes===0){result.status='no_chance';result.message='PLUS盲盒当前没有开盒机会。';return;}
+      if(status.rs.leftTimes===0){result.status='no_chance';result.message='PLUS盲盒当前没有开盒机会。';return result;}
       const attemptKey='JD_CHECKIN_TEST_ATTEMPT_blindbox';
       const attempt=jdcRead(attemptKey,null);
       if(attempt&&attempt.pin===state.pin&&attempt.date===jdcDay())throw new Error('今天已提交过开盒，请查看结果；不重复提交');
@@ -446,7 +444,7 @@ if (diagnostics) {
       const confirmed=jdcBoxToday(verified);
       if(confirmed.length){result.status='box_confirmed';result.message='PLUS盲盒已开一次，今日奖励记录已确认'+(result.beanQuantity>0?'；获得 '+result.beanQuantity+' 京豆。':'；请到活动页查看奖励。');}
       else {result.status='claim_unconfirmed';result.message='开盒请求已返回，但今日奖励记录未确认；不重复开盒。';}
-      return;
+      return result;
     }
     const query=profile.query;
     const queryId=mode==='daily'?'ed9a2':'b63ff';
@@ -462,8 +460,9 @@ if (diagnostics) {
     const start=String(task.assignmentStartTime||'').slice(0,10);
     if(end&&end<jdcDay()||start&&start>jdcDay()) throw new Error('活动不在有效期内，未提交领取');
     if(task.completionFlag===true) {
+      if(mode==='daily'&&Number.isInteger(Number(data.data.continuousDays))&&Number(data.data.continuousDays)>0)result.continuousDays=Number(data.data.continuousDays);
       result.status='already_done';result.message='京东实时查询显示今天已完成；未重复领取。';
-      return;
+      return result;
     }
     if(task.completionFlag!==false) throw new Error('完成状态不明确，未提交领取');
     if(task.canParticipation===false) throw new Error('当前任务不可参与，未提交领取');
@@ -503,6 +502,55 @@ if (diagnostics) {
   finally {
     if(lockOwned) $persistentStore.write(undefined,lockKey);
     if(mode!=='status')saveAndNotify();
+  }
+  return result;
+}
+function jdcSucceeded(r) {
+  return ['reward_received','box_confirmed','already_done','no_chance'].includes(r.status);
+}
+function jdcResultLine(r) {
+  const name=r.mode==='daily'?'普通签到':r.mode==='scratch'?'每日刮卡':r.mode==='blindbox'?'PLUS盲盒':'京东签到';
+  if(jdcSucceeded(r)) {
+    let detail=r.beanQuantity>0?'获得 '+r.beanQuantity+' 京豆':r.status==='already_done'?'今天已完成':r.status==='no_chance'?'暂无开盒机会':'已完成，奖励见活动页';
+    if(r.continuousDays>0)detail+='，连续 '+r.continuousDays+' 天';
+    return name+'：成功，'+detail+'。';
+  }
+  const text=[r.message,r.queryMessage,r.claimMessage].join(' ');
+  return name+'：失败，'+(/未登[录陆]|登录|凭据|账号.*匹配|原始签名环境/.test(text)?'凭据可能失效或不完整，请重新获取该活动凭据。':'请查看执行日志或最近结果。');
+}
+(async function(){
+  const mode=typeof $argument==='string'?$argument:'';
+  const lock='JD_CHECKIN_AUTO_LOCK_V1';let locked=false;
+  try {
+    if(mode!=='cron'){await jdcRun(mode,false);return;}
+    if(typeof $request!=='undefined')throw new Error('请从定时签到入口执行');
+    if(Number($persistentStore.read(lock)||0)>Date.now())throw new Error('自动签到正在执行');
+    if(!$persistentStore.write(String(Date.now()+1560000),lock))throw new Error('执行锁保存失败');
+    locked=true;
+    const date=jdcDay(),randomDelaySeconds=Math.floor(Math.random()*1201);
+    console.log('[京东签到] 定时执行，随机延迟 '+randomDelaySeconds+' 秒');
+    if(randomDelaySeconds>0)await new Promise(resolve=>setTimeout(resolve,randomDelaySeconds*1000));
+    if(date!==jdcDay())throw new Error('等待跨过零点，本次签到停止');
+    const results=[];
+    for(const activity of ['daily','scratch','blindbox']) {
+      if(date!==jdcDay()) {
+        results.push({mode:activity,date,status:'stopped',message:'执行跨过零点，本次活动停止'});
+        continue;
+      }
+      results.push(await jdcRun(activity,true));
+    }
+    const aggregate={time:Date.now(),date,mode:'cron',randomDelaySeconds,status:results.every(jdcSucceeded)?'success':'failed',results};
+    aggregate.message=results.map(jdcResultLine).join('\n');
+    jdcWrite('JD_CHECKIN_TEST_LAST_RESULT_V1',aggregate);
+    const history=jdcRead('JD_CHECKIN_TEST_HISTORY_V1',[]);
+    history.push(aggregate);jdcWrite('JD_CHECKIN_TEST_HISTORY_V1',history.slice(-20));
+    console.log('[京东签到] '+JSON.stringify(aggregate));
+    $notification.post('京东签到','自动签到结果',aggregate.message);
+  }catch(e){
+    console.log('[京东签到] 定时执行失败：'+String(e.message));
+    $notification.post('京东签到','执行失败','请查看执行日志。');
+  }finally{
+    if(locked)$persistentStore.write(undefined,lock);
     $done({});
   }
 })();
