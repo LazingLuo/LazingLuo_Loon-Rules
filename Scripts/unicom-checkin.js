@@ -10,7 +10,7 @@
   const result={time:Date.now(),date:day(),mode,phase:'prepare'};
   let locked=false;
   function read(key,fallback) {try {const v=$persistentStore.read(key);return v?JSON.parse(v):fallback;}catch(_){return fallback;}}
-  function write(key,value) {if(!$persistentStore.write(JSON.stringify(value),key))throw new Error('本地记录保存失败，已停止');}
+  function write(key,value) {if(!$persistentStore.write(JSON.stringify(value),key))throw new Error('本地记录保存失败');}
   function headers(source) {
     const out={};
     Object.keys(source||{}).forEach(k=>{
@@ -32,9 +32,9 @@
     return out;
   }
   function state(reply) {
-    if(!reply||String(reply.code)!=='0000')throw new Error('状态查询未成功，未提交签到');
+    if(!reply||String(reply.code)!=='0000')throw new Error('签到状态查询失败');
     const data=reply.data;
-    if(!data||!['y','n'].includes(data.todayIsSignIn))throw new Error('今天的签到状态不明确，未提交签到');
+    if(!data||!['y','n'].includes(data.todayIsSignIn))throw new Error('今天的签到状态不明确');
     return data;
   }
   function request(method,url,h,body) {
@@ -50,13 +50,14 @@
           const kind=/timed?\s*out|timeout|超时|-1001/i.test(raw)?'timeout':/certificate|ssl|tls|证书|-120[0-6]/i.test(raw)?'tls':/dns|resolve|找不到.*服务器|-1003/i.test(raw)?'dns':'connection';
           result.networkError={kind,timeoutMs:12000};
           if(code)result.networkError.code=Number(code[0]);
-          return reject(new Error('网络请求失败（'+kind+'）；本次不自动重试'));
+          const reason={timeout:'网络请求超时',tls:'安全连接或证书异常',dns:'域名解析失败',connection:'网络连接失败'}[kind];
+          return reject(new Error(reason));
         }
         if(!response||Number(response.status)!==200) {
           result.httpStatus=response&&Number(response.status)||0;
-          return reject(new Error('HTTP 状态异常 '+result.httpStatus+'；本次不自动重试'));
+          return reject(new Error('服务器响应异常（HTTP '+result.httpStatus+'）'));
         }
-        try {resolve(JSON.parse(text));}catch(_){reject(new Error('返回内容不是 JSON；本次不自动重试'));}
+        try {resolve(JSON.parse(text));}catch(_){reject(new Error('服务器返回内容无法解析'));}
       });
     });
   }
@@ -67,7 +68,7 @@
       if(Number($response.status)!==200)return;
       state(JSON.parse($response.body));
       const h=headers($request.headers);
-      if(!h.cookie||!h['user-agent'])throw new Error('没有读取到完整 Cookie 或 User-Agent，未保存凭据');
+      if(!h.cookie||!h['user-agent'])throw new Error('登录凭据或页面信息不完整');
       // Never retain a referer outside the observed Unicom page host.
       if(!/^https:\/\/img\.client\.10010\.com\//.test(h.referer||''))h.referer='https://img.client.10010.com/SigininApp/index.html';
       h.origin='https://img.client.10010.com';
@@ -85,9 +86,8 @@
     }
     if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从联通签到定时或手动入口执行');
     const profile=read(KEY,null);
-    if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据：开启获取凭据后，打开联通签到页面');
-    if(!profile.capturedAt||Date.now()-profile.capturedAt>7*86400000)throw new Error('凭据已超过七天，请重新打开签到页更新');
-    if(Number($persistentStore.read(LOCK)||0)>Date.now())throw new Error('签到脚本正在运行，请稍后查看结果');
+    if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据，请重新获取凭据。');
+    if(Number($persistentStore.read(LOCK)||0)>Date.now())throw new Error('签到脚本正在运行');
     if(!$persistentStore.write(String(Date.now()+(mode==='cron'?1290000:90000)),LOCK))throw new Error('执行锁保存失败');
     locked=true;
     const h=headers(profile.headers), q=profile.query||{};
@@ -98,24 +98,24 @@
       result.phase='waiting';result.randomDelaySeconds=delaySeconds;
       console.log('[联通签到] 定时任务随机等待 '+delaySeconds+' 秒');
       if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
-      if(day()!==result.date)throw new Error('随机等待跨过零点，本次停止，请调整签到时间');
+      if(day()!==result.date)throw new Error('随机等待跨过零点');
     }
     result.phase='query';
     const before=state(await request('get',queryURL,h));
     result.daysBefore=String(before.continueCountCur||before.continueCount||'');
     if(before.todayIsSignIn==='y') {
-      result.status='already_done';result.message='今天已签到，连续 '+result.daysBefore+' 天；未重复提交。';return;
+      result.status='already_done';result.message='今天已签到，连续 '+result.daysBefore+' 天。';return;
     }
-    if(day()!==result.date)throw new Error('运行时跨过零点，请稍后重新执行');
+    if(day()!==result.date)throw new Error('执行过程中跨过零点');
     const attempt=read(ATTEMPT,null);
-    if(attempt&&attempt.date===result.date)throw new Error('今天已提交过签到；先查看最近结果，本测试版不重复提交');
+    if(attempt&&attempt.date===result.date)throw new Error('今天已发送过签到请求，结果尚未确认');
     // Persist before POST, including ambiguous network failures, to avoid retries.
     write(ATTEMPT,{date:result.date,time:Date.now()});
     result.phase='sign';
     const signed=await request('post',BASE+'daySign',Object.assign({},h,{'content-type':'application/x-www-form-urlencoded'}),'shareCl=&shareCode=');
     result.signCode=String(signed.code);
     result.businessStatus=String(signed.data&&signed.data.status);
-    if(result.signCode!=='0000'||result.businessStatus!=='0000')throw new Error('签到未确认，业务码 '+result.signCode+' / '+result.businessStatus+'；未自动重试');
+    if(result.signCode!=='0000'||result.businessStatus!=='0000')throw new Error('签到接口返回异常（业务码 '+result.signCode+' / '+result.businessStatus+'）');
     const reward=String(signed.data.redSignMessage||'').match(/^\+?\d+(?:\.\d+)?元$/);
     result.reward=reward?reward[0]:'';
     result.phase='verify';
@@ -124,15 +124,15 @@
       result.daysAfter=String(after.continueCountCur||after.continueCount||'');
       if(after.todayIsSignIn!=='y')throw new Error('状态尚未更新');
       result.status='signed_confirmed';
-      result.message='签到成功'+(result.reward?'，话费红包 '+result.reward:'')+'；已复查今天已签到，连续 '+result.daysAfter+' 天。';
+      result.message='签到成功'+(result.reward?'，话费红包 '+result.reward:'')+'，连续 '+result.daysAfter+' 天。';
     } catch(_) {
       result.status='sign_success_verify_unconfirmed';
-      result.message='签到接口返回成功'+(result.reward?'，话费红包 '+result.reward:'')+'；后续状态复查未确认，不自动重试。';
+      result.message='签到接口返回成功'+(result.reward?'，话费红包 '+result.reward:'')+'；签到状态暂无法确认。';
     }
   } catch(e) {
     result.status='stopped';
     // Only our own fixed error messages are retained; parsing/runtime errors are generic.
-    result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请查看配置并反馈执行阶段';
+    result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败';
     if(mode==='capture') {
       console.log('[联通签到] '+result.message);
       $notification.post('联通签到','凭据未保存',result.message);
