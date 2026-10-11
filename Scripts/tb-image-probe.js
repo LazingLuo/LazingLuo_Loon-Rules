@@ -1,4 +1,4 @@
-// Read-only Ali image probe: learn candidates by decoded pixel dimensions.
+// Read-only Ali image probe v3: asset learning and bounded retrospective association.
 (function () {
   const bytes = $response.body;
   if (!(bytes instanceof Uint8Array)) return $done({});
@@ -11,19 +11,49 @@
   const filename = clean.slice(clean.lastIndexOf('/') + 1);
   const id = filename.replace(/-tps-.*$/i, '').split('.')[0];
   if (id.length < 8) return $done({});
-  const record = {time:Date.now(), id:id, url:url, size:size, reason:measured?'真实尺寸':'URL尺寸标记'};
+  const arg=typeof $argument==='object' && $argument ? $argument : {};
+  const record={probeVersion:3,time:Date.now(),id:id,url:clean,size:size,reason:measured?'真实尺寸':'URL尺寸标记'};
   try {
-    let ids = JSON.parse($persistentStore.read('tb_splash_candidate_ids_v1') || '[]');
-    if (!Array.isArray(ids)) ids=[];
-    ids = ids.filter(x=>x.id!==id); ids.unshift(record);
-    $persistentStore.write(JSON.stringify(ids.slice(0,50)), 'tb_splash_candidate_ids_v1');
-    const refs = JSON.parse($persistentStore.read('tb_splash_recent_refs_v1') || '[]');
-    const related = Array.isArray(refs) ? refs.filter(x=>x.refs && x.refs.some(r=>r.url.indexOf(id)>=0)) : [];
-    $persistentStore.write(JSON.stringify({candidate:record, earlierReferences:related.slice(0,10)}),'tb_splash_last_image_v1');
-    console.log('[淘宝竖屏候选] '+JSON.stringify(record)+'；此前接口引用='+related.length);
-    $notification.post('淘宝/天猫竖屏素材候选',related.length?'已找到此前接口引用':'已学习ID，尚未找到接口引用',url);
-  } catch(e) { console.log('[淘宝素材探测] 保存失败：'+e); }
+    const ids=readArray('tb_splash_candidate_ids_v1').filter(x=>x.id!==id);
+    ids.unshift(record); write('tb_splash_candidate_ids_v1',ids.slice(0,50));
+    const refs=readArray('tb_splash_recent_refs_v1');
+    const related=refs.filter(x=>(Array.isArray(x.materialIds)&&x.materialIds.indexOf(id)>=0) ||
+      (Array.isArray(x.refs)&&x.refs.some(r=>typeof r.url==='string'&&r.url.indexOf(id)>=0)));
+    const nearby=readArray('tb_splash_probe_inventory_v1')
+      .filter(x=>record.time-x.time>=0 && record.time-x.time<=120000).slice(0,30);
+    // Time proximity is a lead only; it is never counted as a material match.
+    write('tb_splash_last_image_v1',{candidate:record,earlierReferences:related.slice(0,10),
+      nearbyInterfaces:nearby,nearbyMeaning:'下载前120秒接口，仅时间线索，不证明素材来源'});
+    const recentImages=readArray('tb_splash_image_history_v1');
+    recentImages.unshift({candidate:record,earlierReferences:related.slice(0,5),nearbyInterfaces:nearby.slice(0,15)});
+    recentImages.splice(10);
+    while(JSON.stringify(recentImages).length>400000 && recentImages.length>1)recentImages.pop();
+    write('tb_splash_image_history_v1',recentImages);
+    if(related.length) {
+      const history=readArray('tb_splash_probe_history_v1');
+      for(const ref of related.slice(0,10)) {
+        if(history.some(x=>x.originalTime===ref.time && Array.isArray(x.ids)&&x.ids.indexOf(id)>=0))continue;
+        const evidence=Object.assign({},ref,{probeVersion:3,time:record.time,originalTime:ref.time,
+          ids:[id],retrospective:true,association:'素材ID直接匹配，尚未确认开屏配置'});
+        history.unshift(evidence);
+        write('tb_splash_probe_last_v1',evidence);
+      }
+      history.splice(20);
+      while(JSON.stringify(history).length>500000 && history.length>1)history.pop();
+      write('tb_splash_probe_history_v1',history);
+    }
+    console.log('[淘宝竖屏候选] '+id+'；此前素材引用='+related.length+'；下载前120秒接口='+nearby.length);
+    if(arg.notify!==false && arg.notify!=='false') $notification.post('淘宝/天猫竖屏素材候选',
+      related.length?'已找到此前接口引用':'已学习ID，尚未找到接口引用',clean);
+  } catch(_) { console.log('[淘宝素材探测] 本地保存失败'); }
   $done({});
+  function readArray(key) {
+    try { const rows=JSON.parse($persistentStore.read(key)||'[]');return Array.isArray(rows)?rows:[]; }
+    catch(_){return [];}
+  }
+  function write(key,value) {
+    if(!$persistentStore.write(JSON.stringify(value),key))console.log('[淘宝素材探测] 本地写入失败：'+key);
+  }
   function getImageSize(data) {
     return pngSize(data) || gifSize(data) || jpegSize(data) || webpSize(data) || ispeSize(data);
   }
