@@ -1,4 +1,4 @@
-// Loon JD automatic check-in: daily, scratch, PLUS blindbox; cron waits 0-20 minutes; manual stays immediate.
+// Loon JD automatic check-in: daily, scratch, PLUS blindbox; cron uses a configurable delay in seconds; manual stays immediate.
 // Embedded official SDK: https://storage.360buyimg.com/webcontainer/js_security_v3_lite_0.1.5.js
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
@@ -505,6 +505,14 @@ async function jdcRun(mode, quiet) {
   }
   return result;
 }
+function checkinScheduleArgument(value) {
+ const raw=typeof value==='string'?value:'';
+ let config={mode:raw};
+ if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
+ const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
+ if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
+ return {mode:config.mode||'',min,max};
+}
 function jdcSucceeded(r) {
   return ['reward_received','box_confirmed','already_done','no_chance'].includes(r.status);
 }
@@ -519,18 +527,18 @@ function jdcResultLine(r) {
   return name+'：失败，'+(/未登[录陆]|登录|凭据|账号.*匹配|原始签名环境/.test(text)?'凭据可能失效或不完整，请重新获取该活动凭据。':'请查看执行日志或最近结果。');
 }
 (async function(){
-  const mode=typeof $argument==='string'?$argument:'';
-  const lock='JD_CHECKIN_AUTO_LOCK_V1';let locked=false;
+  let settings,mode;try{settings=checkinScheduleArgument(typeof $argument==='undefined'?'':$argument);mode=settings.mode;}catch(e){console.log('[京东签到] '+e.message);$notification.post('京东签到','参数错误',e.message);return $done({});}
+  const lock='JD_CHECKIN_AUTO_LOCK_V1';let locked=false,lockValue;
   try {
     if(mode!=='cron'){await jdcRun(mode,false);return;}
     if(typeof $request!=='undefined')throw new Error('请从定时签到入口执行');
-    if(Number($persistentStore.read(lock)||0)>Date.now())throw new Error('自动签到正在执行');
-    if(!$persistentStore.write(String(Date.now()+1560000),lock))throw new Error('执行锁保存失败');
-    locked=true;
-    const date=jdcDay(),randomDelaySeconds=Math.floor(Math.random()*1201);
+    const date=jdcDay(),randomDelaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
     console.log('[京东签到] 定时执行，随机延迟 '+randomDelaySeconds+' 秒');
     if(randomDelaySeconds>0)await new Promise(resolve=>setTimeout(resolve,randomDelaySeconds*1000));
     if(date!==jdcDay())throw new Error('等待跨过零点，本次签到停止');
+    if(Number($persistentStore.read(lock)||0)>Date.now()){console.log('[京东签到] 自动签到正在执行');return;}
+    lockValue=String(Date.now()+300000);
+    if(!$persistentStore.write(lockValue,lock))throw new Error('执行锁保存失败');locked=true;
     const results=[];
     for(const activity of ['daily','scratch','blindbox']) {
       if(date!==jdcDay()) {
@@ -550,7 +558,7 @@ function jdcResultLine(r) {
     console.log('[京东签到] 定时执行失败：'+String(e.message));
     $notification.post('京东签到','执行失败','请查看执行日志。');
   }finally{
-    if(locked)$persistentStore.write(undefined,lock);
+    if(locked&&$persistentStore.read(lock)===lockValue)$persistentStore.write(undefined,lock);
     $done({});
   }
 })();
