@@ -12,7 +12,7 @@ delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整�
 
 [Script]
 response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js") with tag="京东金融签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", "{\"mode\":\"cron\",\"delayMin\":\"${delayMin}\",\"delayMax\":\"${delayMax}\"}") with tag="京东金融自动签到", timeout=2160, enable=${autoEnabled}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", {${delayMin}, ${delayMax}}) with tag="京东金融自动签到", timeout=2160, enable=${autoEnabled}
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", "manual") with tag="京东金融手动签到", timeout=120
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", "status") with tag="京东金融签到最近结果", timeout=10
 
