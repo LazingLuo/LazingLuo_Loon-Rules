@@ -1,3 +1,11 @@
+function checkinScheduleArgument(value) {
+ const raw=typeof value==='string'?value:'';
+ let config={mode:raw};
+ if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
+ const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
+ if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
+ return {mode:config.mode||'',min,max};
+}
 // China Unicom daily sign-in: local capture, scheduled and manual sign-in, 2026-10-10.
 // Credentials stay in Loon. No browser shim, third-party service or auto retries.
 (async function () {
@@ -5,10 +13,10 @@
   const HISTORY='UNICOM_CHECKIN_HISTORY_V1', ATTEMPT='UNICOM_CHECKIN_ATTEMPT_V1';
   const LOCK='UNICOM_CHECKIN_LOCK_V1';
   const BASE='https://activity.10010.com/sixPalaceGridTurntableLottery/signin/';
-  const mode=typeof $argument==='string'?$argument:'';
+  let settings,mode;try{settings=checkinScheduleArgument(typeof $argument==='undefined'?'':$argument);mode=settings.mode;}catch(e){console.log('[联通签到] '+e.message);$notification.post('联通签到','参数错误',e.message);return $done({});}
   const day=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
   const result={time:Date.now(),date:day(),mode,phase:'prepare'};
-  let locked=false;
+  let locked=false,lockValue,recordResult=true;
   function read(key,fallback) {try {const v=$persistentStore.read(key);return v?JSON.parse(v):fallback;}catch(_){return fallback;}}
   function write(key,value) {if(!$persistentStore.write(JSON.stringify(value),key))throw new Error('本地记录保存失败');}
   function headers(source) {
@@ -87,19 +95,19 @@
     if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从联通签到定时或手动入口执行');
     const profile=read(KEY,null);
     if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据，请重新获取凭据。');
-    if(Number($persistentStore.read(LOCK)||0)>Date.now())throw new Error('签到脚本正在运行');
-    if(!$persistentStore.write(String(Date.now()+(mode==='cron'?1290000:90000)),LOCK))throw new Error('执行锁保存失败');
-    locked=true;
     const h=headers(profile.headers), q=profile.query||{};
     const query=Object.keys(q).filter(k=>['taskId','channel','imei'].includes(k)).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(q[k])).join('&');
     const queryURL=BASE+'getContinuous'+(query?'?'+query:'');
     if(mode==='cron') {
-      const delaySeconds=Math.floor(Math.random()*1201);
+      const delaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
       result.phase='waiting';result.randomDelaySeconds=delaySeconds;
       console.log('[联通签到] 定时任务随机等待 '+delaySeconds+' 秒');
       if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
       if(day()!==result.date)throw new Error('随机等待跨过零点');
     }
+    if(Number($persistentStore.read(LOCK)||0)>Date.now()){recordResult=false;console.log('[联通签到] 签到正在执行，请稍后查看结果');return;}
+    lockValue=String(Date.now()+90000);
+    if(!$persistentStore.write(lockValue,LOCK))throw new Error('执行锁保存失败');locked=true;
     result.phase='query';
     const before=state(await request('get',queryURL,h));
     result.daysBefore=String(before.continueCountCur||before.continueCount||'');
@@ -138,8 +146,8 @@
       $notification.post('联通签到','凭据未保存',result.message);
     }
   } finally {
-    if(locked)$persistentStore.write(undefined,LOCK);
-    if(mode==='manual'||mode==='cron') {
+    if(locked&&$persistentStore.read(LOCK)===lockValue)$persistentStore.write(undefined,LOCK);
+    if(recordResult&&(mode==='manual'||mode==='cron')) {
       try {write(LAST,result);const history=read(HISTORY,[]);history.push(result);write(HISTORY,history.slice(-20));}catch(_){console.log('[联通签到] 执行结果保存失败');}
       console.log('[联通签到] '+JSON.stringify(result));
       $notification.post('联通签到',mode==='cron'?'定时签到结果':'手动签到结果',result.message||result.status);
