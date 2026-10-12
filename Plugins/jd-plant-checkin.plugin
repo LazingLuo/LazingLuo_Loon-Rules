@@ -13,7 +13,7 @@ delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整�
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:weGameHome|weGameLottery)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin-capture.js") with tag="种豆签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "{\"mode\":\"cron\",\"delayMin\":\"${delayMin}\",\"delayMax\":\"${delayMax}\"}") with tag="种豆得豆礼包自动签到", timeout=2160, enable=${autoEnabled}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", {${delayMin}, ${delayMax}}) with tag="种豆得豆礼包自动签到", timeout=2160, enable=${autoEnabled}
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "manual") with tag="种豆得豆礼包手动签到", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "status") with tag="种豆签到最近结果", timeout=10
 
