@@ -13,7 +13,7 @@ delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整�
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:findBeanSceneNew|bff_rightsCenter_jdInteractTask|bff_rightsCenter_interaction|bff_marketing_interaction)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin-capture.js") with tag="京东签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "{\"mode\":\"cron\",\"delayMin\":\"${delayMin}\",\"delayMax\":\"${delayMax}\"}") with tag="京东每日自动签到", timeout=2400, enable=${autoEnabled}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", {${delayMin}, ${delayMax}}) with tag="京东每日自动签到", timeout=2400, enable=${autoEnabled}
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "blindbox") with tag="京东PLUS每日盲盒手动执行", timeout=90
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "daily") with tag="京东普通签到手动执行", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "scratch") with tag="京东每日刮卡手动执行", timeout=60
