@@ -1,16 +1,19 @@
 #!name = 京东每日自动签到
-#!desc = 每天定时后随机延迟0至20分钟，依次执行普通签到、每日刮卡和PLUS每日盲盒，汇总通知。每项每天最多提交一次，保留手动入口，凭据只存本地。
+#!desc = 每天定时后随机延迟参数指定的秒数，依次执行普通签到、每日刮卡和PLUS每日盲盒，汇总通知。每项每天最多提交一次，保留手动入口，凭据只存本地。
 #!loon_version = 3.5.1(983)
 
 [Argument]
 capture = switch,false,tag=获取活动凭据,desc=进入普通签到、每日刮卡及PLUS盲盒页，保存成功后关闭
 
 autoEnabled = switch,true,tag=自动签到,desc=关闭后仍可手动执行
-cronExp = input,"0 0 * * *",tag=签到时间,desc=默认每天00:00后随机延迟0至20分钟；五段依次为分 时 日 月 周
+cronExp = input,"0 0 * * *",tag=签到时间,desc=默认每天00:00后随机延迟参数指定的秒数；五段依次为分 时 日 月 周
+
+delayMin = input,"0",tag=随机延迟最小秒数,desc=填写0–2000的整数；0表示允许立即开始
+delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整数且不小于最小值；两者相同表示固定延迟
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:findBeanSceneNew|bff_rightsCenter_jdInteractTask|bff_rightsCenter_interaction|bff_marketing_interaction)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin-capture.js") with tag="京东签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "cron") with tag="京东每日自动签到", timeout=1500, enable=${autoEnabled}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "{\"mode\":\"cron\",\"delayMin\":\"${delayMin}\",\"delayMax\":\"${delayMax}\"}") with tag="京东每日自动签到", timeout=2400, enable=${autoEnabled}
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "blindbox") with tag="京东PLUS每日盲盒手动执行", timeout=90
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "daily") with tag="京东普通签到手动执行", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-checkin.js", "scratch") with tag="京东每日刮卡手动执行", timeout=60
