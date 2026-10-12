@@ -1,16 +1,19 @@
 #!name = 京东种豆得豆自动签到
-#!desc = 独立处理种豆得豆签到礼包。每天定时后随机延迟0至20分钟，查询、领取一次、复查并通知，保留手动入口。不处理种豆任务、营养液、助力或瓜分。凭据仅存本地。
+#!desc = 独立处理种豆得豆签到礼包。每天定时后随机延迟参数指定的秒数，查询、领取一次、复查并通知，保留手动入口。不处理种豆任务、营养液、助力或瓜分。凭据仅存本地。
 #!loon_version = 3.5.1(983)
 
 [Argument]
 capture = switch,false,tag=获取礼包凭据,desc=开启后进入种豆得豆的连续签到礼包页，收到保存通知后关闭
 
 autoEnabled = switch,true,tag=自动签到,desc=关闭后仍可手动执行
-cronExp = input,"0 0 * * *",tag=签到时间,desc=默认每天00:00后随机延迟0至20分钟；五段依次为分 时 日 月 周
+cronExp = input,"0 0 * * *",tag=签到时间,desc=默认每天00:00后随机延迟参数指定的秒数；五段依次为分 时 日 月 周
+
+delayMin = input,"0",tag=随机延迟最小秒数,desc=填写0–2000的整数；0表示允许立即开始
+delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整数且不小于最小值；两者相同表示固定延迟
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:weGameHome|weGameLottery)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin-capture.js") with tag="种豆签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "cron") with tag="种豆得豆礼包自动签到", timeout=1260, enable=${autoEnabled}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "{\"mode\":\"cron\",\"delayMin\":\"${delayMin}\",\"delayMax\":\"${delayMax}\"}") with tag="种豆得豆礼包自动签到", timeout=2160, enable=${autoEnabled}
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "manual") with tag="种豆得豆礼包手动签到", timeout=60
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "status") with tag="种豆签到最近结果", timeout=10
 
