@@ -1,4 +1,4 @@
-// Independent plant-bean daily gift: manual verified; cron waits 0-20 minutes.
+// Independent plant-bean daily gift: manual verified; cron uses a configurable delay in seconds.
 const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
 function jdcRead(key, fallback) {
   const raw = $persistentStore.read(key);
@@ -266,10 +266,18 @@ if (diagnostics) {
     if(diagnostics&&status&&typeof status.code==='number')diagnostics.sdkSignCode=status.code;
   }});
 }
+function checkinScheduleArgument(value) {
+ const raw=typeof value==='string'?value:'';
+ let config={mode:raw};
+ if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
+ const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
+ if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
+ return {mode:config.mode||'',min,max};
+}
 (async function(){
- const mode=typeof $argument==='string'?$argument:'';
+ let settings,mode;try{settings=checkinScheduleArgument(typeof $argument==='undefined'?'':$argument);mode=settings.mode;}catch(e){console.log('[种豆签到] '+e.message);$notification.post('种豆得豆签到','参数错误',e.message);return $done({});}
  const LAST='JD_PLANT_CHECKIN_LAST_RESULT_V1',HISTORY='JD_PLANT_CHECKIN_HISTORY_V1',LOCK='JD_PLANT_CHECKIN_LOCK_V1',ATTEMPT='JD_PLANT_CHECKIN_ATTEMPT_V1';
- const result={time:Date.now(),date:jdcDay(),mode,phase:'prepare'};let locked=false;
+ const result={time:Date.now(),date:jdcDay(),mode,phase:'prepare'};let locked=false,lockValue,recordResult=true;
  function http(template,params){
   return new Promise((resolve,reject)=>$httpClient.post({url:jdcEndpoint(template.endpoint)+'?functionId='+encodeURIComponent(params.functionId),headers:Object.assign({},template.headers,{'Content-Type':'application/x-www-form-urlencoded'}),body:jdcForm(params),timeout:12000,'auto-redirect':false,'auto-cookie':false,insecure:false},(error,response,body)=>{
    if(error)return reject(new Error('网络请求失败，本次不自动重试'));
@@ -295,15 +303,16 @@ if (diagnostics) {
    return env;
   }
   const queryEnv=validate(profile.query,'query');
-  if(Number($persistentStore.read(LOCK)||0)>Date.now())throw new Error('签到正在执行，请稍后查看结果');
-  if(!$persistentStore.write(String(Date.now()+(mode==='cron'?1290000:90000)),LOCK))throw new Error('执行锁保存失败');locked=true;
   if(mode==='cron'){
-   const delaySeconds=Math.floor(Math.random()*1201);
+   const delaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
    result.phase='waiting';result.randomDelaySeconds=delaySeconds;
    console.log('[种豆签到] 定时执行，随机延迟 '+delaySeconds+' 秒');
    if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
    if(jdcDay()!==result.date)throw new Error('等待跨过零点，本次签到停止');
   }
+  if(Number($persistentStore.read(LOCK)||0)>Date.now()){recordResult=false;console.log('[种豆签到] 签到正在执行，请稍后查看结果');return;}
+  lockValue=String(Date.now()+90000);
+  if(!$persistentStore.write(lockValue,LOCK))throw new Error('执行锁保存失败');locked=true;
   const browser=jdcInstallBrowser({pin:profile.pin,headers:profile.query.headers});
   function sign(template,env){
    const params=Object.assign({},template.params,{t:String(Date.now())});delete params.h5st;
@@ -346,8 +355,8 @@ if (diagnostics) {
   }catch(_){result.status='claim_success_verify_unconfirmed';result.message='领取接口返回成功'+(result.beanQuantity>0?'，'+result.beanQuantity+' 京豆':'')+'；状态复查未确认，不自动重试。';}
  }catch(e){result.status='stopped';result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请反馈执行阶段';}
  finally{
-  if(locked)$persistentStore.write(undefined,LOCK);
-  if(mode!=='status'){
+  if(locked&&$persistentStore.read(LOCK)===lockValue)$persistentStore.write(undefined,LOCK);
+  if(mode!=='status'&&recordResult){
    try{jdcWrite(LAST,result);const history=jdcRead(HISTORY,[]);history.push(result);jdcWrite(HISTORY,history.slice(-20));}catch(_){}
    console.log('[种豆签到] '+JSON.stringify(result));$notification.post('种豆得豆签到',mode==='cron'?'自动签到结果':'手动签到结果',zSummary(result));
   }
