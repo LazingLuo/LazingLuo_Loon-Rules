@@ -1,6 +1,7 @@
 // Read-only probe: it never changes the response body or headers.
 (function () {
   const PROBE_VERSION = 2;
+  const probeNotify=$argument && typeof $argument.probe_notify === "boolean" ? $argument.probe_notify : (!$argument || $argument.notify !== false);
   recheckCandidates();
   const body = typeof $response.body === "string" ? $response.body : "";
   if (!body) return $done({});
@@ -90,7 +91,7 @@
     excerpts: findExcerpts(body, exactHits.concat(learnedHits))
   });
 
-  if ((!$argument || $argument.notify !== false) && shouldNotify(endpoint + "|" + reasons.join("|"))) {
+  if (probeNotify && shouldNotify(endpoint + "|" + reasons.join("|"))) {
     try {
       $notification.post("京东配置线索" + (saved ? "（已保存）" : "（保存失败）"), endpoint, truncate(detail, 900));
     } catch (error) {
@@ -211,7 +212,7 @@
       });
       saveEvidence(record, "");
       console.log("[京东开屏配置探测] 素材回查命中 " + r.endpoint + " " + fresh.join(","));
-      if ((!$argument || $argument.notify !== false) && shouldNotify("backlink|" + r.endpoint + "|" + fresh.join(","))) {
+      if (probeNotify && shouldNotify("backlink|" + r.endpoint + "|" + fresh.join(","))) {
         try { $notification.post("京东素材引用回查（已保存）", r.endpoint, fresh.join(",") + "；尚未确认开屏容器配置"); } catch (_) {}
       }
     });
@@ -279,3 +280,4 @@
     try { return decodeURIComponent(value); } catch (_) { return value; }
   }
 })();
+
