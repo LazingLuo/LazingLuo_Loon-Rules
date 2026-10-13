@@ -514,7 +514,18 @@ function checkinScheduleArgument(value) {
  if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
  const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
  if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
- return {mode:config.mode||'',min,max};
+ const gapExtra=config.taskGapExtra===undefined?5:Number(config.taskGapExtra);
+ if(config.mode==='cron'&&(!Number.isInteger(gapExtra)||gapExtra<0||gapExtra>300))throw new Error('任务间随机增加秒数须为0–300的整数；实际间隔为5秒至5加该数值秒');
+ function enabled(key){
+  const value=config[key];
+  if(value===undefined)return true;
+  if(value===true||value==='true')return true;
+  if(value===false||value==='false')return false;
+  if(config.mode==='cron')throw new Error('自动签到项目开关参数错误');
+  return true;
+ }
+ const activities=[['daily','dailyEnabled'],['scratch','scratchEnabled'],['blindbox','blindboxEnabled']].filter(item=>enabled(item[1])).map(item=>item[0]);
+ return {mode:config.mode||'',min,max,gapExtra,activities};
 }
 function jdcSucceeded(r) {
   return ['reward_received','box_confirmed','already_done','no_chance'].includes(r.status);
@@ -535,22 +546,31 @@ function jdcResultLine(r) {
   try {
     if(mode!=='cron'){await jdcRun(mode,false);return;}
     if(typeof $request!=='undefined')throw new Error('请从定时签到入口执行');
+    const activities=settings.activities;
+    if(!activities.length){console.log('[京东签到] 未开启任何自动签到项目');return;}
     const date=jdcDay(),randomDelaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
     console.log('[京东签到] 定时执行，随机延迟 '+randomDelaySeconds+' 秒');
     if(randomDelaySeconds>0)await new Promise(resolve=>setTimeout(resolve,randomDelaySeconds*1000));
     if(date!==jdcDay())throw new Error('等待跨过零点，本次签到停止');
     if(Number($persistentStore.read(lock)||0)>Date.now()){console.log('[京东签到] 自动签到正在执行');return;}
-    lockValue=String(Date.now()+300000);
+    lockValue=String(Date.now()+300000+Math.max(0,activities.length-1)*(5+settings.gapExtra)*1000);
     if(!$persistentStore.write(lockValue,lock))throw new Error('执行锁保存失败');locked=true;
-    const results=[];
-    for(const activity of ['daily','scratch','blindbox']) {
+    const results=[],taskPauses=[];
+    for(let index=0;index<activities.length;index++) {
+      const activity=activities[index];
+      if(index>0&&date===jdcDay()){
+        const seconds=5+Math.floor(Math.random()*(settings.gapExtra+1));
+        taskPauses.push({after:activities[index-1],before:activity,seconds});
+        console.log('[京东签到] 下一项目开始前随机停顿 '+seconds+' 秒');
+        await new Promise(resolve=>setTimeout(resolve,seconds*1000));
+      }
       if(date!==jdcDay()) {
         results.push({mode:activity,date,status:'stopped',message:'执行跨过零点，本次活动停止'});
         continue;
       }
       results.push(await jdcRun(activity,true));
     }
-    const aggregate={time:Date.now(),date,mode:'cron',randomDelaySeconds,status:results.every(jdcSucceeded)?'success':'failed',results};
+    const aggregate={time:Date.now(),date,mode:'cron',randomDelaySeconds,taskPauses,status:results.every(jdcSucceeded)?'success':'failed',results};
     aggregate.message=results.map(jdcResultLine).join('\n');
     jdcWrite('JD_CHECKIN_TEST_LAST_RESULT_V1',aggregate);
     const history=jdcRead('JD_CHECKIN_TEST_HISTORY_V1',[]);
