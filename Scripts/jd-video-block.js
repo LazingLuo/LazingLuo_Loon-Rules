@@ -6,7 +6,9 @@
   }
   console.log("[京东素材视频] 已拦截，返回空 HTTP 200\n" + url);
   try {
-    $notification.post("京东素材视频已拦截", "material-video/video · MP4", url);
+    if (typeof $argument === "undefined" || !$argument || $argument.notify !== false) {
+      $notification.post("京东素材视频已拦截", "material-video/video · MP4", url);
+    }
   } catch (error) {
     console.log("[京东素材视频] 通知失败：" + error);
   }
