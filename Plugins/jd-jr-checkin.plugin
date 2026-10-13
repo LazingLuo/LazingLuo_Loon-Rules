@@ -1,9 +1,9 @@
 #!name = 京东金融现金签到
-#!desc = 每日现金签到，保留手动执行及本地结果入口。定时默认关闭，请先手动验证一次。开启后默认零点随机等待参数指定的秒数。仅签到，不处理抽奖、提现、借贷或额外任务。凭据仅存本地；失败不自动重试。
+#!desc = 每日现金签到后检查双签礼包，京东和金融均已签到且未领取时领取一次并复查；保留手动执行及本地结果入口。定时默认关闭，请先手动验证一次。开启后默认零点随机等待参数指定的秒数。仅处理现金签到及双签礼包，不处理抽奖、提现、借贷或额外任务。凭据仅存本地；失败不自动重试。
 #!loon_version = 3.5.1(983)
 
 [Argument]
-capture = switch,false,tag=获取签到凭据,desc=开启后进入京东金融现金签到页面，收到凭据保存通知后关闭
+capture = switch,false,tag=获取签到凭据,desc=开启后进入京东金融现金签到页面，并进入双签礼包页保存页面信息，再关闭
 autoEnabled = switch,false,tag=自动签到,desc=先手动验证成功，再开启每天自动签到
 cronExp = input,"0 0 * * *",tag=签到时间,desc=默认每天00:00后随机延迟参数指定的秒数
 
@@ -12,8 +12,9 @@ delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整�
 
 [Script]
 response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js") with tag="京东金融签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", {${delayMin}, ${delayMax}}) with tag="京东金融自动签到", timeout=2160, enable=${autoEnabled}
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", "manual") with tag="京东金融手动签到", timeout=120
+response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/legogw\/h5\/m\/getPageInfoDoubleSignInForH5(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js") with tag="京东金融双签凭据获取", requires_body=true, timeout=15, enable=${capture}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", {${delayMin}, ${delayMax}}) with tag="京东金融自动签到", timeout=2220, enable=${autoEnabled}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", "manual") with tag="京东金融手动签到", timeout=210
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jr-checkin.js", "status") with tag="京东金融签到最近结果", timeout=10
 
 [Mitm]
