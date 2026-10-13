@@ -66,6 +66,7 @@ const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
 function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
 function zSummary(result){
+ if(result.status==='manual_required')return result.message;
  if(['signed_confirmed','already_done'].includes(result.status)){
   let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
   if(result.continuousDays>0)text+='，连续 '+result.continuousDays+' 天';
@@ -80,6 +81,12 @@ function zStatus(data){
  if(!main||!Array.isArray(list))throw new Error('签到状态结构变化，未继续领取');
  const today=list.find(x=>x.signDate===jdcDay()&&Number(x.status)===3);
  if(today)return {done:true,main};
+ const task=main.beforeTaskVo;
+ if(Number(main.currentStatus)===0&&task&&task.taskType==='BROWSE_RTB'&&task.taskFinished===false){
+  const seconds=Number(task.timeLimitPeriod);
+  const duration=Number.isInteger(seconds)&&seconds>0&&seconds<=3600?seconds+'秒':'';
+  throw Object.assign(new Error('请先到种豆活动页手动完成浏览页面'+duration+'，再执行签到。'),{status:'manual_required'});
+ }
  if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确，未继续领取');
  return {done:false,main};
 }
@@ -354,7 +361,7 @@ function checkinScheduleArgument(value) {
    if(Number.isInteger(Number(after.main.signDays))&&Number(after.main.signDays)>0)result.continuousDays=Number(after.main.signDays);
    result.status='signed_confirmed';result.message='种豆得豆礼包今日领取已确认'+(result.beanQuantity>0?'，获得 '+result.beanQuantity+' 京豆。':'，请到活动页查看奖励。');
   }catch(_){result.status='claim_success_verify_unconfirmed';result.message='领取接口返回成功'+(result.beanQuantity>0?'，'+result.beanQuantity+' 京豆':'')+'；状态复查未确认，不自动重试。';}
- }catch(e){result.status='stopped';result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请反馈执行阶段';}
+ }catch(e){result.status=e.status==='manual_required'?'manual_required':'stopped';result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请反馈执行阶段';}
  finally{
   if(locked&&$persistentStore.read(LOCK)===lockValue)$persistentStore.write(undefined,LOCK);
   if(mode!=='status'&&recordResult){
