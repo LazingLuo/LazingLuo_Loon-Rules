@@ -61,6 +61,29 @@ function jdcBoxToday(data) {
     throw new Error('盲盒奖励记录不完整，未继续开盒');
   return data.rs.sendBenefitList.filter(x=>String(x.prizeTime||'').slice(0,10)===jdcDay());
 }
+// Refresh only the shared login pair; preserve every activity's device/page context.
+function jdcSyncLogin(state, cookie, source, observedAt) {
+  const pin=jdcCookie(cookie,'pt_pin'),key=jdcCookie(cookie,'pt_key');
+  if(!state||!state.modes||!pin||!key||state.pin!==pin)return false;
+  let changed=false;
+  for(const name of ['daily','scratch','blindbox']) {
+    const profile=state.modes[name];
+    if(!profile||!profile.headers||jdcCookie(profile.headers.Cookie,'pt_pin')!==pin)continue;
+    const latest=Number(profile.loginUpdatedAt||profile.capturedAt||0);
+    if(observedAt<latest)continue;
+    const pairs=String(profile.headers.Cookie||'').split(';').map(x=>x.trim()).filter(Boolean);
+    profile.headers.Cookie=pairs.filter(x=>!/^pt_(?:pin|key)=/.test(x)).concat(['pt_pin='+pin,'pt_key='+key]).join('; ');
+    profile.loginUpdatedAt=observedAt;
+    profile.loginSource=source;
+    changed=true;
+  }
+  return changed;
+}
+function jdcLoginObservedAt() {
+  const start=typeof $script!=='undefined'&&$script.startTime;
+  const value=start?Number(new Date(start)):NaN;
+  return Number.isFinite(value)&&value>0&&value<=Date.now()?value:Date.now();
+}
 (function () {
   try {
     if (typeof $request === 'undefined' || typeof $response === 'undefined') throw new Error('请通过插件响应规则获取凭据');
@@ -111,6 +134,7 @@ function jdcBoxToday(data) {
     previous.headers = headers;
     previous.capturedAt = Date.now();
     state.modes[mode] = previous;
+    jdcSyncLogin(state,cookie,'activity:'+mode,jdcLoginObservedAt());
     jdcWrite(JDC_KEY, state);
     console.log('[京东签到] 已保存' + jdcLabel(mode) + (kind === 'query' ? '任务查询凭据' : '领取请求模板') + '（未修改原请求）');
     if (isNew) $notification.post('京东签到测试', jdcLabel(mode) + '凭据已保存', kind === 'query' ? '可以在 Loon 中手动运行对应测试。' : '已保存领取模板；还需进入活动页面获取任务查询凭据。');
