@@ -1,4 +1,4 @@
-// Replace selected image dimensions with a transparent 1x1 PNG.
+// Reject selected actual image dimensions with an uncached HTTP 404.
 (function () {
   const bytes = $response.body;
   if (!(bytes instanceof Uint8Array) || bytes.length < 10) return $done({});
@@ -17,25 +17,17 @@
 
   const learnedId = learnMaterialId($request.url);
   const confirmed = learnedId && isConfirmedId(learnedId);
-  if ($argument && $argument.confirmed_only === true && !confirmed) {
-    console.log("[京东开屏图片] 尺寸命中但不是 start 已确认素材，仅学习不替换：" +
-      size.width + "x" + size.height + " " + $request.url);
-    return $done({});
-  }
-
-  const transparentPng = new Uint8Array([
-    137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,
-    0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,
-    8,29,99,248,207,192,240,31,0,5,128,2,63,73,194,250,89,0,
-    0,0,0,73,69,78,68,174,66,96,130
-  ]);
   const headers = Object.assign({}, $response.headers || {});
   removeHeader(headers, "content-length");
   removeHeader(headers, "content-encoding");
   removeHeader(headers, "transfer-encoding");
-  setHeader(headers, "Content-Type", "image/png");
+  removeHeader(headers, "etag");
+  removeHeader(headers, "last-modified");
+  setHeader(headers, "Content-Type", "text/plain");
+  setHeader(headers, "Cache-Control", "no-store");
+  setHeader(headers, "Expires", "0");
 
-  const message = "已替换 " + size.width + "x" + size.height +
+  const message = "已拒绝（HTTP 404） " + size.width + "x" + size.height +
     (learnedId ? "\n素材标识：" + learnedId + (confirmed ? "（start已确认）" : "（仅尺寸候选）") : "") +
     "\n" + $request.url;
   console.log("[京东开屏图片] " + message);
@@ -46,7 +38,7 @@
       console.log("[京东开屏图片] 通知发送失败：" + error);
     }
   }
-  $done({headers: headers, body: transparentPng});
+  $done({status:404, headers:headers, body:new Uint8Array(0)});
 
   function getImageSize(data) {
     return pngSize(data) || gifSize(data) || jpegSize(data) || webpSize(data) || ispeSize(data);
@@ -208,3 +200,4 @@
     }
   }
 })();
+
