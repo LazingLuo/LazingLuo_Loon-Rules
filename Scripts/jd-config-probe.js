@@ -33,8 +33,8 @@
   const learnedHits = learnedIds.filter(function (term) {
     return lower.indexOf(term.toLowerCase()) !== -1;
   });
-  const sizeHit = /1125\s*[xX*]\s*(?:2436|1602)/.test(body) ||
-    /s1125x(?:2436|1602)_jfs/i.test(body);
+  const sizeHit = /1125\s*[xX*]\s*2436/.test(body) ||
+    /s1125x2436_jfs/i.test(body);
 
   const cluePattern = /(?:splash|showtimes?|show_times?|countdown|duration|skip(?:time)?|swipe|slide|material(?:id|url)?|exposure|launchad|startupad|开屏|倒计时|上滑)/ig;
   const clueHits = unique((body.match(cluePattern) || []).map(function (x) {
@@ -75,7 +75,7 @@
   if (prefixIds.length) reasons.push("文件名前缀候选=" + prefixIds.join(","));
   if (explicitSplash) reasons.push("开屏关键词候选（待核实）");
   if (landingSource) reasons.push("包含开屏跳转来源（不代表配置）");
-  if (sizeHit) reasons.push("尺寸=1125x2436/1602");
+  if (sizeHit) reasons.push("尺寸=1125x2436");
   if (clueHits.length) reasons.push("字段=" + clueHits.join(","));
 
   const endpoint = functionId ? "functionId=" + functionId : shortUrl($request.url);
@@ -129,7 +129,7 @@
   function findFields(text, ids) {
     const results = [];
     let nodes = 0;
-    const marker = /launchSource=splash|splash|launchad|startupad|开屏|1125[x*](?:2436|1602)/i;
+    const marker = /launchSource=splash|splash|launchad|startupad|开屏|1125[x*]2436/i;
     function walk(value, path, depth, parent) {
       if (++nodes > 30000 || depth > 18 || results.length >= 30) return;
       if (typeof value === "string") {
@@ -158,7 +158,7 @@
       const at = text.toLowerCase().indexOf(id.toLowerCase());
       if (at >= 0) offsets.push(at);
     });
-    const pattern = /launchSource(?:=|%3d)splash|splash|launchad|startupad|开屏|1125[x*](?:2436|1602)/ig;
+    const pattern = /launchSource(?:=|%3d)splash|splash|launchad|startupad|开屏|1125[x*]2436/ig;
     let match;
     while (offsets.length < 12 && (match = pattern.exec(text))) offsets.push(match.index);
     return unique(offsets).slice(0, 12).map(function (at) {
