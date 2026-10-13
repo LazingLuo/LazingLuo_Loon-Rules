@@ -5,7 +5,7 @@
 
   const targetText = $argument && typeof $argument.sizes === "string"
     ? $argument.sizes
-    : "1125x2436,1125x1602";
+    : "1125x2436";
   const targets = new Set(
     targetText.split(",").map(function (item) {
       return item.trim().toLowerCase().replace(/\s+/g, "");
