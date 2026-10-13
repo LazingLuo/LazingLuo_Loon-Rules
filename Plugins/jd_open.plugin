@@ -10,7 +10,7 @@ probe_notify = switch,false,tag=配置线索通知
 dedup_minutes = input,30,tag=线索通知静默分钟
 max_body_kb = input,2048,tag=最大检测响应KB
 extra_keywords = input,"",tag=额外素材标识,desc=多个素材ID用英文逗号分隔
-sizes = input,"1125x2436,1125x1602",tag=图片尺寸,desc=多个宽x高用英文逗号分隔
+sizes = input,"1125x2436",tag=图片尺寸,desc=多个宽x高用英文逗号分隔
 notify = switch,true,tag=图片命中通知
 
 [Script]
