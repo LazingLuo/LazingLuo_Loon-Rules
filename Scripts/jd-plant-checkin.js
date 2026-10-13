@@ -66,6 +66,7 @@ const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
 function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
 function zSummary(result){
+ if(/签名环境版本不兼容|签名环境结构不完整/.test(result.message||''))return '失败，签名环境不兼容，请查看日志中的版本或结构说明。';
  if(result.status==='manual_required')return result.message;
  if(['signed_confirmed','already_done'].includes(result.status)){
   let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
@@ -136,7 +137,12 @@ function jdcDecodeEnvironment(encoded) {
   if(first<0||last<=first)throw new Error('原始签名环境不是 JSON');
   const json=decodeURIComponent(bytes.slice(first,last+1).map(b=>'%'+b.toString(16).padStart(2,'0')).join(''));
   const env=JSON.parse(json);
-  if(!env||env.v!=='h5_file_v5.3.5'||!env.extend||!env.pp||typeof env.fp!=='string')throw new Error('原始签名环境结构或版本不符');
+  if(!env||typeof env!=='object'||Array.isArray(env)||!env.extend||typeof env.extend!=='object'||Array.isArray(env.extend)||!env.pp||typeof env.pp!=='object'||Array.isArray(env.pp)||typeof env.fp!=='string')throw new Error('签名环境结构不完整，请保留当前凭据以便排查');
+  if(env.v!=='h5_file_v5.3.5'){
+    // Version identifiers are safe to report; never log decoded device/account data.
+    const version=typeof env.v==='string'&&/^h5_file_v[0-9.]{1,24}$/.test(env.v)?env.v:'缺失或无法识别';
+    throw new Error('签名环境版本不兼容：'+version+'；当前脚本仅支持h5_file_v5.3.5');
+  }
   return env;
 }
 function jdcInstallBrowser(profile) {
