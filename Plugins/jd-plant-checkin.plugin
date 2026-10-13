@@ -3,6 +3,7 @@
 #!loon_version = 3.5.1(983)
 
 [Argument]
+refreshLogin = switch,true,tag=日常更新登录凭据,desc=正常使用京东时更新已保存的同账号种豆登录凭据；首次仍需获取礼包凭据
 capture = switch,false,tag=获取礼包凭据,desc=开启后进入种豆得豆的连续签到礼包页，收到保存通知后关闭
 
 autoEnabled = switch,true,tag=自动签到,desc=关闭后仍可手动执行
@@ -12,6 +13,7 @@ delayMin = input,"0",tag=随机延迟最小秒数,desc=填写0–2000的整数�
 delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整数且不小于最小值；两者相同表示固定延迟
 
 [Script]
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^#&]*&)*functionId=(?:startup|logConfig|queryPagePopWindow|babelGetGuideTips)(?:&|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin-login-capture.js") with tag="种豆日常登录凭据同步", requires_body=true, timeout=10, enable=${refreshLogin}
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:weGameHome|weGameLottery)(?:&|$)/i && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin-capture.js") with tag="种豆签到凭据获取", requires_body=true, timeout=15, enable=${capture}
 cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", {${delayMin}, ${delayMax}}) with tag="种豆得豆礼包自动签到", timeout=2160, enable=${autoEnabled}
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-checkin.js", "manual") with tag="种豆得豆礼包手动签到", timeout=60
