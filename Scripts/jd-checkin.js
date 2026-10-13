@@ -290,6 +290,8 @@ async function jdcRun(mode, quiet) {
     const profile=state&&state.modes&&state.modes[['diagnose','query_compare'].includes(mode)?'daily':mode];
     if(!profile||!profile.query) throw new Error('缺少'+label+'凭据：请先打开京东对应活动页面');
     if(!profile.headers||jdcCookie(profile.headers.Cookie,'pt_pin')!==state.pin||!jdcCookie(profile.headers.Cookie,'pt_key')) throw new Error('账号凭据不完整，请重新获取');
+    result.credentialCapturedAt=profile.capturedAt;
+    if(profile.loginUpdatedAt){result.loginUpdatedAt=profile.loginUpdatedAt;result.loginSource=profile.loginSource;}
     if(!profile.capturedAt) throw new Error('凭据记录不完整，请重新打开活动页面更新');
     if(mode==='diagnose'||mode==='query_compare') {
       result.phase='local_sign';
