@@ -1,17 +1,25 @@
 #!name = 京东开屏处理
 #!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/JD.png
-#!desc = 清空 start 开屏任务；按真实尺寸替换图片为透明 PNG；拦截 material-video/video 目录的 MP4 并通知。保留素材学习和命中日志。
+#!desc = 将 start 展示日期推迟至2099年，保留素材及次数；按真实尺寸拒绝图片（404）；保留视频拦截、素材ID记录及只读配置检测。
 #!loon_version = 3.5.1(983)
 #!tag = 京东,开屏广告
 
 [Argument]
+probe_enabled = switch,true,tag=配置检测,desc=只读记录候选线索，不修改其他API响应
+probe_notify = switch,false,tag=配置线索通知
+dedup_minutes = input,30,tag=线索通知静默分钟
+max_body_kb = input,2048,tag=最大检测响应KB
+extra_keywords = input,"",tag=额外素材标识,desc=多个素材ID用英文逗号分隔
 sizes = input,"1125x2436,1125x1602",tag=图片尺寸,desc=多个宽x高用英文逗号分隔
 notify = switch,true,tag=图片命中通知
 
 [Script]
 request if ${url} ~= /^https:\/\/storage\.360buyimg\.com\/material-video\/video\/[^/?#]+\.mp4(?:\?[^#]*)?$/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-video-block.js") with tag="京东素材视频拦截通知", timeout=10
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js") with tag="京东 start 开屏配置净化", requires_body=true, timeout=15
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js") with tag="京东 start 展示推迟至2099", requires_body=true, timeout=15
 response if ${url} ~= /^https:\/\/(?:m(?:\d+)?|img\d+|nakedeye)\.360buyimg\.com\//i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /^image\//i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-image-size.js", {${sizes}, ${notify}}) with tag="京东开屏图片尺寸检查", timeout=20, requires_body=true, binary_body_mode=true
+
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?![^#]*[?&]functionId=start(?:&|$))/i && ${response.status} == 200 && ${response.header['Content-Type']} ~= /(?:json|text|javascript)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-config-probe.js", {${probe_notify}, ${dedup_minutes}, ${max_body_kb}, ${extra_keywords}}) with tag="京东开屏配置探测", timeout=15, requires_body=true, enable=${probe_enabled}
 
 [Mitm]
 hostname = api.m.jd.com,*.360buyimg.com
+
