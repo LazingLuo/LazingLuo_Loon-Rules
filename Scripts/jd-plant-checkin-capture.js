@@ -65,14 +65,49 @@ const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
 const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
 function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
+function zSummary(result){
+ if(result.status==='manual_required')return result.message;
+ if(['signed_confirmed','already_done'].includes(result.status)){
+  let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
+  if(result.continuousDays>0)text+='，连续 '+result.continuousDays+' 天';
+  return '成功，'+text+'。';
+ }
+ const text=[result.message,result.queryMessage,result.claimMessage].join(' ');
+ return '失败，'+(/未登[录陆]|登录|凭据|账号.*匹配|原始签名环境/.test(text)?'凭据可能失效或不完整，请重新获取种豆凭据。':'请查看执行日志或最近结果。');
+}
 function zStatus(data){
  if(!zAccepted(data))throw new Error('签到状态查询失败：'+String(data&&data.code)+' '+(data?zMessage(data):'无说明'));
  const main=data.data.signMainVo,list=data.data.signListVo;
  if(!main||!Array.isArray(list))throw new Error('签到状态结构变化，未继续领取');
  const today=list.find(x=>x.signDate===jdcDay()&&Number(x.status)===3);
  if(today)return {done:true,main};
+ const task=main.beforeTaskVo;
+ if(Number(main.currentStatus)===0&&task&&task.taskType==='BROWSE_RTB'&&task.taskFinished===false){
+  const seconds=Number(task.timeLimitPeriod);
+  const duration=Number.isInteger(seconds)&&seconds>0&&seconds<=3600?seconds+'秒':'';
+  throw Object.assign(new Error('请先到种豆活动页手动完成浏览页面'+duration+'，再执行签到。'),{status:'manual_required'});
+ }
  if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确，未继续领取');
  return {done:false,main};
+}
+// Only this plugin's existing same-account login fields are refreshed.
+function zSyncLogin(profile,cookie,source,observedAt){
+ const pin=jdcCookie(cookie,'pt_pin'),key=jdcCookie(cookie,'pt_key');
+ if(!profile||profile.pin!==pin||!pin||!key)return false;
+ let changed=false;
+ for(const kind of ['query','claim']){
+  const template=profile[kind];
+  if(!template||!template.headers||jdcCookie(template.headers.Cookie,'pt_pin')!==pin)continue;
+  if(observedAt<Number(template.loginUpdatedAt||template.capturedAt||0))continue;
+  template.headers.Cookie=String(template.headers.Cookie).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:pin|key)=/.test(x)).concat(['pt_pin='+pin,'pt_key='+key]).join('; ');
+  template.loginUpdatedAt=observedAt;template.loginSource=source;changed=true;
+ }
+ return changed;
+}
+function zLoginObservedAt(){
+ const start=typeof $script!=='undefined'&&$script.startTime;
+ const value=start?Number(new Date(start)):NaN;
+ return Number.isFinite(value)&&value>0&&value<=Date.now()?value:Date.now();
 }
 (function(){
  let stage='检查请求';
@@ -107,6 +142,7 @@ function zStatus(data){
   const old=jdcRead(Z_KEY,null),profile=old&&old.pin===pin?old:{pin};
   const first=!profile[kind];
   profile[kind]={endpoint,params,capturedAt:Date.now(),appId,encoding:sig[9],environment:sig[7],headers};
+  zSyncLogin(profile,headers.Cookie,'activity:plant',zLoginObservedAt());
   stage='保存本地凭据';
   jdcWrite(Z_KEY,profile);
   console.log('[种豆签到] 已保存'+(kind==='query'?'查询凭据':'领取模板')+'，未修改原请求');
