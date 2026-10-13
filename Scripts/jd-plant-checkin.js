@@ -298,6 +298,13 @@ function checkinScheduleArgument(value) {
    const last=jdcRead(LAST,null);console.log('[种豆签到] '+JSON.stringify(last));$notification.post('种豆得豆签到','最近结果',last?last.date+' '+zSummary(last):'暂无记录');return;
   }
   if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从定时或手动签到入口执行');
+  if(mode==='cron'){
+   const delaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
+   result.phase='waiting';result.randomDelaySeconds=delaySeconds;
+   console.log('[种豆签到] 定时执行，随机延迟 '+delaySeconds+' 秒');
+   if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
+   if(jdcDay()!==result.date)throw new Error('等待跨过零点，本次签到停止');
+  }
   const profile=jdcRead(Z_KEY,null);
   if(!profile||!profile.query)throw new Error('缺少种豆签到凭据，请开启获取开关后进入签到礼包页');
   function validate(t,kind){
@@ -311,13 +318,8 @@ function checkinScheduleArgument(value) {
    return env;
   }
   const queryEnv=validate(profile.query,'query');
-  if(mode==='cron'){
-   const delaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
-   result.phase='waiting';result.randomDelaySeconds=delaySeconds;
-   console.log('[种豆签到] 定时执行，随机延迟 '+delaySeconds+' 秒');
-   if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
-   if(jdcDay()!==result.date)throw new Error('等待跨过零点，本次签到停止');
-  }
+  result.credentialCapturedAt=profile.query.capturedAt;
+  if(profile.query.loginUpdatedAt){result.loginUpdatedAt=profile.query.loginUpdatedAt;result.loginSource=profile.query.loginSource;}
   if(Number($persistentStore.read(LOCK)||0)>Date.now()){recordResult=false;console.log('[种豆签到] 签到正在执行，请稍后查看结果');return;}
   lockValue=String(Date.now()+90000);
   if(!$persistentStore.write(lockValue,LOCK))throw new Error('执行锁保存失败');locked=true;
