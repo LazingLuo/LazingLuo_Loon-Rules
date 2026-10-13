@@ -3,7 +3,7 @@
   let result = {};
   try {
     const url = String($request.url || "");
-    console.log("[京东开屏] start 脚本进入 v20261009.2；状态类型=" +
+    console.log("[京东开屏] start 脚本进入 v20261013.2099；状态类型=" +
       typeof $response.status + "；状态=" + String($response.status) +
       "；正文类型=" + typeof $response.body);
     if (!/^https:\/\/api\.m\.jd\.com\/client\.action\?/i.test(url) ||
@@ -28,14 +28,22 @@
     const originalImageCount = materials.items;
     const originalDaily = obj.showTimesDaily;
     saveConfirmedMaterials(materials);
-    const changed = obj.images.length > 0 || Number(originalDaily) !== 0;
-    if (changed) {
-      obj.images = [];
-      obj.showTimesDaily = typeof originalDaily === "string" ? "0" : 0;
-      result = {body: JSON.stringify(obj)};
+    let dateFieldsChanged=0;
+    function postpone(value){
+      if(Array.isArray(value)){value.forEach(postpone);return;}
+      if(!value||typeof value!=="object")return;
+      const replacements={onlineTime:"2099-01-01 00:00:00",referralsTime:"2099-12-31 23:59:59",startTimeStamp:Date.UTC(2098,11,31,16,0,0),endTimeStamp:Date.UTC(2099,11,31,15,59,59)};
+      Object.keys(replacements).forEach(key=>{
+        if(!Object.prototype.hasOwnProperty.call(value,key))return;
+        const replacement=typeof value[key]==="string"?String(replacements[key]):replacements[key];
+        if(value[key]!==replacement){value[key]=replacement;dateFieldsChanged++;}
+      });
     }
+    postpone(obj.images);
+    const changed=dateFieldsChanged>0;
+    if(changed)result={body:JSON.stringify(obj)};
     const detail = `原始任务 ${originalImageCount} 个，图片 ${materials.images.length}，视频 ${materials.videos.length}，每日次数 ${originalDaily}；` +
-      (changed ? "已清空" : "原本已为空，无需修改") +
+      (changed ? "展示日期已推迟到2099年（"+dateFieldsChanged+"个字段）" : "无可修改的展示日期；保留素材和次数") +
       (originalSaved ? "；修改前原响应已保存" : "；原响应保存失败") +
       (materials.dates.length ? `；日期 ${materials.dates.join("、")}` : "") +
       (materials.ids.length ? `\n素材标识：${materials.ids.join(",")}` : "");
@@ -135,3 +143,4 @@
     return items.filter((item, index) => items.indexOf(item) === index);
   }
 })();
+
