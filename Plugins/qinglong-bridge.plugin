@@ -1,0 +1,21 @@
+#!name = 青龙任务接入
+#!desc = 手机保存京东登录凭据并同步到自己的青龙，支持连接检查、列出任务和触发指定任务。自动同步默认关闭，捕获和同步均不自动触发签到。
+#!loon_version = 3.5.1(983)
+#!date = 2026-10-14
+
+[Argument]
+qlUrl = input,"",tag=青龙面板地址,desc=填写你自己的NAS地址，例如 http://192.168.1.100:5700
+clientId = input,"",tag=Client ID,desc=仅在本机填写青龙应用ID
+clientSecret = input,"",tag=Client Secret,desc=仅在本机填写青龙应用密钥，请勿分享填写后的配置
+action = select,"检查连接","同步京东凭据","列出任务","执行指定任务","最近接入结果",tag=手动操作
+taskIds = input,"",tag=指定任务ID,desc=先列出任务，再填写一个需要执行的数字ID
+capture = switch,true,tag=日常获取京东凭据,desc=从指定的成功请求中保存登录凭据，只处理已绑定账号；不发送签到请求
+autoSync = switch,false,tag=自动同步凭据,desc=每30分钟尝试同步到青龙；需手机能访问NAS，捕获和同步均不自动触发任务
+
+[Script]
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261014-1", {${qlUrl}, ${clientId}, ${clientSecret}, ${action}, ${taskIds}}) with tag="青龙手动操作", timeout=90
+cron */30 * * * * then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261014-1", {${qlUrl}, ${clientId}, ${clientSecret}, ${autoSync}}) with tag="京东凭据同步到青龙", timeout=90, enable=${autoSync}
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=(?:startup|logConfig|queryPagePopWindow|babelGetGuideTips|findBeanSceneNew|bff_rightsCenter_jdInteractTask|bff_rightsCenter_interaction|bff_marketing_interaction)(?:&|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261014-1") with tag="青龙京东凭据获取", requires_body=true, timeout=10, enable=${capture}
+
+[Mitm]
+hostname = api.m.jd.com
