@@ -30,6 +30,16 @@ function jdcCookie(cookie, name) {
   return m ? m[1] : '';
 }
 function jdcDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
+function jdcIsScratchQuery(params) {
+  // This endpoint also serves ordinary sign-in. Only capture the observed
+  // scratch-page task scope; commonScene=secKillChannel selects the ordinary task.
+  try {
+    const body=JSON.parse(params.body||'{}');
+    const types=typeof body.taskType==='string'?body.taskType.split('_'):[];
+    return body.scene==='jdInteractTask'&&types.includes('beanDailySign')&&types.includes('beanDailyPlus')&&
+      (body.commonScene===undefined||body.commonScene==='');
+  } catch (_) {return false;}
+}
 function jdcTask(data, mode) {
   const list = mode === 'daily' ? data && data.data && data.data.signComponentInfoResult
     : data && data.rs && data.rs.beanTask && data.rs.beanTask.taskList;
@@ -65,7 +75,16 @@ const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
 const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
 function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
+function zStatusDetails(data){
+ const payload=data&&data.data,main=payload&&payload.signMainVo,list=payload&&payload.signListVo;
+ const number=v=>v!==null&&v!==undefined&&v!==''&&Number.isInteger(Number(v))&&Number(v)>=0&&Number(v)<=10000?Number(v):null;
+ const task=main&&main.beforeTaskVo;
+ return {mainPresent:!!main,listPresent:Array.isArray(list),currentStatus:number(main&&main.currentStatus),signDays:number(main&&main.signDays),
+  beforeTask:task?{type:task.taskType==='BROWSE_RTB'?'BROWSE_RTB':'other',finished:typeof task.taskFinished==='boolean'?task.taskFinished:null,seconds:number(task.timeLimitPeriod)}:null,
+  signList:Array.isArray(list)?list.slice(0,7).map(x=>({date:typeof x.signDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x.signDate)?x.signDate:null,status:number(x.status),todayFlag:number(x.todayFlag)})):[]};
+}
 function zSummary(result){
+ if(/签名环境版本不兼容|签名环境结构不完整/.test(result.message||''))return '失败，签名环境不兼容，请查看日志中的版本或结构说明。';
  if(result.status==='manual_required')return result.message;
  if(['signed_confirmed','already_done'].includes(result.status)){
   let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
@@ -87,7 +106,7 @@ function zStatus(data){
   const duration=Number.isInteger(seconds)&&seconds>0&&seconds<=3600?seconds+'秒':'';
   throw Object.assign(new Error('请先到种豆活动页手动完成浏览页面'+duration+'，再执行签到。'),{status:'manual_required'});
  }
- if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确，未继续领取');
+ if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确（状态值'+String(zStatusDetails(data).currentStatus)+'），未继续领取');
  return {done:false,main};
 }
 // Only this plugin's existing same-account login fields are refreshed.
@@ -142,6 +161,7 @@ function zLoginObservedAt(){
   const old=jdcRead(Z_KEY,null),profile=old&&old.pin===pin?old:{pin};
   const first=!profile[kind];
   profile[kind]={endpoint,params,capturedAt:Date.now(),appId,encoding:sig[9],environment:sig[7],headers};
+  if(kind==='query')profile.query.queryState=zStatusDetails(data);
   zSyncLogin(profile,headers.Cookie,'activity:plant',zLoginObservedAt());
   stage='保存本地凭据';
   jdcWrite(Z_KEY,profile);
