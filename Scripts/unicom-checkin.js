@@ -1,8 +1,8 @@
 function checkinScheduleArgument(value) {
  const raw=typeof value==='string'?value:'';
  let config=value && typeof value==='object' && !Array.isArray(value) ? Object.assign({},value) : {mode:raw};
- if(!config.mode && Object.prototype.hasOwnProperty.call(config,'delayMin') && Object.prototype.hasOwnProperty.call(config,'delayMax'))config.mode='cron';
  if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
+ if(!config.mode && Object.prototype.hasOwnProperty.call(config,'delayMin') && Object.prototype.hasOwnProperty.call(config,'delayMax'))config.mode='cron';
  const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
  if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
  return {mode:config.mode||'',min,max};
@@ -12,14 +12,32 @@ function checkinScheduleArgument(value) {
 (async function () {
   const KEY='UNICOM_CHECKIN_ACCOUNT_V1', LAST='UNICOM_CHECKIN_LAST_RESULT_V1';
   const HISTORY='UNICOM_CHECKIN_HISTORY_V1', ATTEMPT='UNICOM_CHECKIN_ATTEMPT_V1';
-  const LOCK='UNICOM_CHECKIN_LOCK_V1';
+  const LOCK='UNICOM_CHECKIN_LOCK_V1', RUN='UNICOM_CHECKIN_LAST_RUN_V1';
+  const VERSION='2026-10-14.1';
   const BASE='https://activity.10010.com/sixPalaceGridTurntableLottery/signin/';
-  let settings,mode;try{settings=checkinScheduleArgument(typeof $argument==='undefined'?'':$argument);mode=settings.mode;}catch(e){console.log('[联通签到] '+e.message);$notification.post('联通签到','参数错误',e.message);return $done({});}
+  const suppliedArgument=typeof $argument==='undefined'?undefined:$argument;
+  let settings,mode,argumentError;
+  try{
+    settings=checkinScheduleArgument(suppliedArgument);mode=settings.mode;
+    if(!['capture','status','manual','cron'].includes(mode)){mode='unknown';argumentError='签到入口参数无法识别，请更新插件和远程脚本';}
+  }catch(e){mode='unknown';argumentError=/^(随机延迟|签到参数)/.test(String(e.message))?e.message:'签到入口参数格式错误';}
   const day=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
-  const result={time:Date.now(),date:day(),mode,phase:'prepare'};
+  const result={time:Date.now(),date:day(),mode,phase:'prepare',scriptVersion:VERSION};
+  const isExecution=!['capture','status'].includes(mode)&&typeof $request==='undefined';
+  if(isExecution)result.argumentFormat=typeof suppliedArgument==='string'?(suppliedArgument.trim().startsWith('{')?'json_string':'string'):suppliedArgument&&typeof suppliedArgument==='object'?'object':'missing';
   let locked=false,lockValue,recordResult=true;
   function read(key,fallback) {try {const v=$persistentStore.read(key);return v?JSON.parse(v):fallback;}catch(_){return fallback;}}
   function write(key,value) {if(!$persistentStore.write(JSON.stringify(value),key))throw new Error('本地记录保存失败');}
+  function progress(phase){result.phase=phase;result.status='running';result.updatedAt=Date.now();write(RUN,result);}
+  function visibleMessage(value){
+    if(value.status!=='running')return value.message||'暂无结果';
+    if(value.phase==='waiting'){
+      if(Date.now()>Number(value.resumeAt||0)+90000)return '本次任务停在随机等待阶段，尚无结束记录，请查看任务日志';
+      return '定时任务正在随机等待，约 '+Math.max(0,Math.ceil((Number(value.resumeAt||Date.now())-Date.now())/1000))+' 秒后查询签到状态';
+    }
+    const label={prepare:'准备',query:'查询',sign:'签到',verify:'复查'}[value.phase]||'处理';
+    return Date.now()-Number(value.updatedAt||value.time)>90000?'本次任务停在'+label+'阶段，尚无结束记录，请查看任务日志':'签到正在'+label+'，请稍后查看结果';
+  }
   function headers(source) {
     const out={};
     Object.keys(source||{}).forEach(k=>{
@@ -71,6 +89,8 @@ function checkinScheduleArgument(value) {
     });
   }
   try {
+    if(isExecution){progress('prepare');console.log('[联通签到] 启动，版本 '+VERSION+'，入口 '+mode+'，参数形式 '+result.argumentFormat);}
+    if(argumentError)throw new Error(argumentError);
     if(mode==='capture') {
       if(typeof $request==='undefined'||typeof $response==='undefined')return;
       if(!/^https:\/\/activity\.10010\.com\/sixPalaceGridTurntableLottery\/signin\/getContinuous(?:\?|$)/.test($request.url)||String($request.method).toUpperCase()!=='GET')return;
@@ -88,28 +108,30 @@ function checkinScheduleArgument(value) {
       return;
     }
     if(mode==='status') {
-      const last=read(LAST,null);
-      console.log('[联通签到] 最近结果：'+JSON.stringify(last));
-      $notification.post('联通签到','最近执行结果',last?last.date+'：'+last.message:'暂无执行记录');
+      const last=read(LAST,null),run=read(RUN,null);
+      const current=run&&Number(run.updatedAt||run.finishedAt||run.time)>Number(last&&(last.finishedAt||last.time)||0)?run:last;
+      console.log('[联通签到] 最近结果：'+JSON.stringify(current));
+      $notification.post('联通签到','最近执行结果',current?current.date+'：'+visibleMessage(current):'暂无执行记录');
       return;
     }
     if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从联通签到定时或手动入口执行');
-    const profile=read(KEY,null);
-    if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据，请重新获取凭据。');
-    const h=headers(profile.headers), q=profile.query||{};
-    const query=Object.keys(q).filter(k=>['taskId','channel','imei'].includes(k)).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(q[k])).join('&');
-    const queryURL=BASE+'getContinuous'+(query?'?'+query:'');
     if(mode==='cron') {
       const delaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
-      result.phase='waiting';result.randomDelaySeconds=delaySeconds;
+      result.randomDelaySeconds=delaySeconds;result.resumeAt=Date.now()+delaySeconds*1000;progress('waiting');
       console.log('[联通签到] 定时任务随机等待 '+delaySeconds+' 秒');
       if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
       if(day()!==result.date)throw new Error('随机等待跨过零点');
     }
-    if(Number($persistentStore.read(LOCK)||0)>Date.now()){recordResult=false;console.log('[联通签到] 签到正在执行，请稍后查看结果');return;}
+    const profile=read(KEY,null);
+    if(!profile||!profile.headers||!profile.headers.cookie)throw new Error('缺少凭据，请重新获取凭据。');
+    result.credentialCapturedAt=profile.capturedAt||null;
+    const h=headers(profile.headers), q=profile.query||{};
+    const query=Object.keys(q).filter(k=>['taskId','channel','imei'].includes(k)).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(q[k])).join('&');
+    const queryURL=BASE+'getContinuous'+(query?'?'+query:'');
+    if(Number($persistentStore.read(LOCK)||0)>Date.now()){recordResult=false;result.status='skipped_busy';result.message='签到正在执行，请稍后查看结果';console.log('[联通签到] '+result.message);return;}
     lockValue=String(Date.now()+90000);
     if(!$persistentStore.write(lockValue,LOCK))throw new Error('执行锁保存失败');locked=true;
-    result.phase='query';
+    progress('query');
     const before=state(await request('get',queryURL,h));
     result.daysBefore=String(before.continueCountCur||before.continueCount||'');
     if(before.todayIsSignIn==='y') {
@@ -120,14 +142,14 @@ function checkinScheduleArgument(value) {
     if(attempt&&attempt.date===result.date)throw new Error('今天已发送过签到请求，结果尚未确认');
     // Persist before POST, including ambiguous network failures, to avoid retries.
     write(ATTEMPT,{date:result.date,time:Date.now()});
-    result.phase='sign';
+    progress('sign');
     const signed=await request('post',BASE+'daySign',Object.assign({},h,{'content-type':'application/x-www-form-urlencoded'}),'shareCl=&shareCode=');
     result.signCode=String(signed.code);
     result.businessStatus=String(signed.data&&signed.data.status);
     if(result.signCode!=='0000'||result.businessStatus!=='0000')throw new Error('签到接口返回异常（业务码 '+result.signCode+' / '+result.businessStatus+'）');
     const reward=String(signed.data.redSignMessage||'').match(/^\+?\d+(?:\.\d+)?元$/);
     result.reward=reward?reward[0]:'';
-    result.phase='verify';
+    progress('verify');
     try {
       const after=state(await request('get',queryURL,h));
       result.daysAfter=String(after.continueCountCur||after.continueCount||'');
@@ -148,11 +170,13 @@ function checkinScheduleArgument(value) {
     }
   } finally {
     if(locked&&$persistentStore.read(LOCK)===lockValue)$persistentStore.write(undefined,LOCK);
+    if(isExecution){result.finishedAt=Date.now();result.updatedAt=result.finishedAt;try{write(RUN,result);}catch(_){console.log('[联通签到] 启动与阶段记录保存失败');}}
     if(recordResult&&(mode==='manual'||mode==='cron')) {
       try {write(LAST,result);const history=read(HISTORY,[]);history.push(result);write(HISTORY,history.slice(-20));}catch(_){console.log('[联通签到] 执行结果保存失败');}
       console.log('[联通签到] '+JSON.stringify(result));
       $notification.post('联通签到',mode==='cron'?'定时签到结果':'手动签到结果',result.message||result.status);
     }
+    else if(isExecution&&recordResult){console.log('[联通签到] '+JSON.stringify(result));$notification.post('联通签到','执行失败',result.message||'签到入口参数无法识别');}
     $done({});
   }
 })();
