@@ -366,8 +366,8 @@ if (diagnostics) {
 function checkinScheduleArgument(value) {
  const raw=typeof value==='string'?value:'';
  let config=value && typeof value==='object' && !Array.isArray(value) ? Object.assign({},value) : {mode:raw};
- if(!config.mode && Object.prototype.hasOwnProperty.call(config,'delayMin') && Object.prototype.hasOwnProperty.call(config,'delayMax'))config.mode='cron';
  if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
+ if(!config.mode && Object.prototype.hasOwnProperty.call(config,'delayMin') && Object.prototype.hasOwnProperty.call(config,'delayMax'))config.mode='cron';
  const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
  if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
  return {mode:config.mode||'',min,max};
