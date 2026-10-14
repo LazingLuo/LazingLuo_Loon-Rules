@@ -31,6 +31,16 @@ function jdcCookie(cookie, name) {
   return m ? m[1] : '';
 }
 function jdcDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
+function jdcIsScratchQuery(params) {
+  // This endpoint also serves ordinary sign-in. Only capture the observed
+  // scratch-page task scope; commonScene=secKillChannel selects the ordinary task.
+  try {
+    const body=JSON.parse(params.body||'{}');
+    const types=typeof body.taskType==='string'?body.taskType.split('_'):[];
+    return body.scene==='jdInteractTask'&&types.includes('beanDailySign')&&types.includes('beanDailyPlus')&&
+      (body.commonScene===undefined||body.commonScene==='');
+  } catch (_) {return false;}
+}
 function jdcTask(data, mode) {
   const list = mode === 'daily' ? data && data.data && data.data.signComponentInfoResult
     : data && data.rs && data.rs.beanTask && data.rs.beanTask.taskList;
@@ -364,6 +374,7 @@ async function jdcRun(mode, quiet) {
     result.credentialCapturedAt=profile.capturedAt;
     if(profile.loginUpdatedAt){result.loginUpdatedAt=profile.loginUpdatedAt;result.loginSource=profile.loginSource;}
     if(!profile.capturedAt) throw new Error('凭据记录不完整，请重新打开活动页面更新');
+    if(mode==='scratch'&&!jdcIsScratchQuery(profile.query.params))throw new Error('刮卡查询模板来自其他页面，请开启凭据获取后进入每日刮卡页面更新');
     if(mode==='diagnose'||mode==='query_compare') {
       result.phase='local_sign';
       const browser=jdcInstallBrowser({pin:state.pin,headers:profile.headers});
@@ -605,6 +616,7 @@ function jdcSucceeded(r) {
 }
 function jdcResultLine(r) {
   const name=r.mode==='daily'?'普通签到':r.mode==='scratch'?'每日刮卡':r.mode==='blindbox'?'PLUS盲盒':'京东签到';
+  if((r.message||'').startsWith('刮卡查询模板来自其他页面'))return name+'：失败，查询模板来自其他页面，请重新获取刮卡凭据。';
   if(/签名环境版本不兼容|签名环境结构不完整/.test(r.message||''))return name+'：失败，签名环境不兼容，请查看日志中的版本或结构说明。';
   if(jdcSucceeded(r)) {
     let detail=r.beanQuantity>0?'获得 '+r.beanQuantity+' 京豆':r.status==='already_done'?'今天已完成':r.status==='no_chance'?'暂无开盒机会':'已完成，奖励见活动页';
