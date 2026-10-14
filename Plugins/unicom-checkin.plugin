@@ -12,10 +12,10 @@ delayMin = input,"0",tag=随机延迟最小秒数,desc=填写0–2000的整数�
 delayMax = input,"1200",tag=随机延迟最大秒数,desc=填写0–2000的整数且不小于最小值；两者相同表示固定延迟
 
 [Script]
-response if ${url} ~= /^https:\/\/activity\.10010\.com\/sixPalaceGridTurntableLottery\/signin\/getContinuous(?:\?|$)/ && ${request.method} == "GET" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", "capture") with tag="联通签到凭据获取", requires_body=true, timeout=15, enable=${capture}
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", {${delayMin}, ${delayMax}}) with tag="联通每日自动签到", timeout=2160, enable=${autoEnabled}
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", "manual") with tag="联通每日签到手动执行", timeout=60
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js", "status") with tag="联通签到最近结果", timeout=10
+response if ${url} ~= /^https:\/\/activity\.10010\.com\/sixPalaceGridTurntableLottery\/signin\/getContinuous(?:\?|$)/ && ${request.method} == "GET" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js?v=20261014-1", "capture") with tag="联通签到凭据获取", requires_body=true, timeout=15, enable=${capture}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js?v=20261014-1", {${delayMin}, ${delayMax}}) with tag="联通每日自动签到", timeout=2160, enable=${autoEnabled}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js?v=20261014-1", "manual") with tag="联通每日签到手动执行", timeout=60
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/unicom-checkin.js?v=20261014-1", "status") with tag="联通签到最近结果", timeout=10
 
 [Mitm]
 hostname = activity.10010.com
