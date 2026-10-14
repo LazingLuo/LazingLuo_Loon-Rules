@@ -30,6 +30,16 @@ function jdcCookie(cookie, name) {
   return m ? m[1] : '';
 }
 function jdcDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
+function jdcIsScratchQuery(params) {
+  // This endpoint also serves ordinary sign-in. Only capture the observed
+  // scratch-page task scope; commonScene=secKillChannel selects the ordinary task.
+  try {
+    const body=JSON.parse(params.body||'{}');
+    const types=typeof body.taskType==='string'?body.taskType.split('_'):[];
+    return body.scene==='jdInteractTask'&&types.includes('beanDailySign')&&types.includes('beanDailyPlus')&&
+      (body.commonScene===undefined||body.commonScene==='');
+  } catch (_) {return false;}
+}
 function jdcTask(data, mode) {
   const list = mode === 'daily' ? data && data.data && data.data.signComponentInfoResult
     : data && data.rs && data.rs.beanTask && data.rs.beanTask.taskList;
@@ -94,7 +104,10 @@ function jdcLoginObservedAt() {
     const fid = params.functionId;
     let mode, kind;
     if (fid === 'findBeanSceneNew' && params.appid === 'signed_wh5_ihub') { mode = 'daily'; kind = 'query'; }
-    else if (fid === 'bff_rightsCenter_jdInteractTask' && params.appid === 'plus_business') { mode = 'scratch'; kind = 'query'; }
+    else if (fid === 'bff_rightsCenter_jdInteractTask' && params.appid === 'plus_business') {
+      if(!jdcIsScratchQuery(params))return;
+      mode = 'scratch'; kind = 'query';
+    }
     else if (fid === 'bff_marketing_interaction' && params.appid === 'plus_business') {
       const body=JSON.parse(params.body||'{}');
       if(body.scene==='blindBox' && ['purePlusIndexNew2608','plusIndexHistory'].includes(body.touchPoint)) kind='query';
