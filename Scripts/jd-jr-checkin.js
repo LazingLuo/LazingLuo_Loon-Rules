@@ -36,7 +36,28 @@ function createAar(userAgent) {
     String(text || '').split('&').forEach(part => { const at = part.indexOf('='); if (at >= 0) obj[decodeURIComponent(part.slice(0, at).replace(/\+/g, ' '))] = decodeURIComponent(part.slice(at + 1).replace(/\+/g, ' ')); });
     return JSON.parse(obj.reqData || '{}');
   }
-  function body(response) {
+  function cashScope(params) {
+    if(!params||!['JD_JR_APP','H5'].includes(params.site)||typeof params.channelSource!=='string'||!params.channelSource||!Number.isInteger(Number(params.signVersion))||Number(params.signVersion)<=0)return null;
+    if(params.site==='JD_JR_APP'&&(!params.clientType||!params.clientVersion))return null;
+    // App upgrades do not select another activity. Refresh clientVersion from
+    // the latest query when signing, while keeping business/page scopes separate.
+    return JSON.stringify(['site','channelSource','channelLv','signVersion','clientType'].map(k=>String(params[k]===undefined||params[k]===null?'':params[k])));
+  }
+  function loginPin(headers) {
+    const cookie=headers&&headers.Cookie||'',pin=/(?:^|;\s*)pt_pin=([^;]+)/.exec(cookie);
+    return pin&&/(?:^|;\s*)pt_key=[^;]+/.test(cookie)?pin[1]:null;
+  }
+  function validateProfile(profile) {
+    if(!profile||!profile.ready||!profile.headers||!profile.riskDeviceParam)throw new Error('缺少凭据，请重新获取凭据');
+    if(!profile.pin||loginPin(profile.headers)!==profile.pin)throw new Error('登录凭据不完整或账号不匹配，请重新获取');
+    const scope=cashScope(profile.query);
+    if(!scope)throw new Error('现金签到查询模板不完整，请重新获取凭据');
+    if(profile.scopeKey&&profile.scopeKey!==scope||profile.riskScope&&profile.riskScope!==scope||profile.claim&&(cashScope(profile.claim)!==scope||profile.claim.signType!=='sign'))throw new Error('现金签到模板来源不一致，请进入同一现金签到页面重新获取凭据');
+    return scope;
+  }
+  function safeCode(value){return /^[A-Za-z0-9_-]{1,32}$/.test(String(value))?String(value):null;}
+  function body(response,trace) {
+    if(trace){trace.apiCode=safeCode(response&&response.resultCode);trace.apiSuccess=!!response&&response.success===true;trace.businessCode=safeCode(response&&response.resultData&&response.resultData.resBusiCode);}
     if (!response || Number(response.resultCode) !== 0 || response.success !== true) throw new Error('接口请求失败：' + String(response && response.resultMsg || '查看日志'));
     const data = response.resultData;
     if (!data || Number(data.resBusiCode) !== 0 || !data.resBusiData) throw new Error('业务请求失败：' + String(data && data.resBusiMsg || '查看日志'));
@@ -46,7 +67,8 @@ function createAar(userAgent) {
     if (r.status === 'signed_confirmed') return '签到成功，现金' + r.amount + '元' + (r.days ? '，连续' + r.days + '天。' : '。');
     if (r.status === 'already_done') return '今天已签到' + (r.amount !== undefined ? '，现金' + r.amount + '元' : '') + (r.days ? '，连续' + r.days + '天。' : '。');
     if (r.status === 'claim_success_verify_unconfirmed') return '接口返回签到成功，现金' + r.amount + '元；状态复查失败，请查看日志。';
-    if (/缺少凭据|未登录|未登陆|登录失效|登录过期|not.?login/i.test(r.message || '')) return '签到失败，凭据缺失或可能已过期，请重新获取。';
+    if(/现金签到模板来源不一致/.test(r.message||''))return '签到失败，模板来源不一致，请在同一现金签到页面重新获取凭据。';
+    if (/凭据|未登录|未登陆|登录失效|登录过期|not.?login/i.test(r.message || '')) return '签到失败，凭据缺失或可能已过期，请重新获取。';
     return '签到失败，请查看日志。';
   }
   function summary(r){return cashSummary(r)+(r.doubleSign?'\n'+doubleSummary(r.doubleSign):'');}
@@ -61,10 +83,13 @@ function createAar(userAgent) {
       });
     });
   }
-  function query(profile) {
+  function query(profile,field='queryState') {
     return http('post', BASE + 'queryWeekSignMain', profile.headers, 'reqData=' + encodeURIComponent(JSON.stringify(profile.query))).then(text => {
       let response; try { response = JSON.parse(text); } catch (_) { throw new Error('接口响应不是有效JSON'); }
-      const data = body(response);
+      const trace=result[field]={};
+      const data = body(response,trace);
+      trace.sign=typeof data.sign==='boolean'?data.sign:null;
+      trace.today=/^\d{8}$/.test(String(data.today))?String(data.today):null;
       if (typeof data.sign !== 'boolean' || String(data.today) !== day().replace(/-/g, '')) throw new Error('签到状态或日期异常');
       return data;
     });
@@ -119,6 +144,7 @@ function createAar(userAgent) {
     try{
       if(day()!==result.date)throw new Error('执行日期已变化，双签礼包停止领取');
       const headers=doubleHeaders(profile),before=await doubleQuery(headers);
+      d.queryState={date:String(before.dateTime).slice(0,10),signInJd:before.signInJd,signInJr:before.signInJr,claimed:before.get};
       d.signInJd=before.signInJd;d.signInJr=before.signInJr;
       if(before.get){d.status='already_done';return;}
       if(!before.signInJd||!before.signInJr){d.status='not_eligible';d.message=(!before.signInJd&&!before.signInJr?'京东和金融均未完成签到':!before.signInJd?'京东尚未完成签到':'金融尚未完成签到')+'，暂不能领取。';return;}
@@ -133,12 +159,13 @@ function createAar(userAgent) {
       if(String(award.createTime||'').slice(0,10)!==result.date)throw new Error('双签奖励日期异常，请到活动页查看');
       d.beanQuantity=Array.isArray(award.awardListVo)?award.awardListVo.filter(x=>x.type===1&&/京豆/.test(String(x.name))&&Number.isInteger(Number(x.count))&&Number(x.count)>0).reduce((sum,x)=>sum+Number(x.count),0):0;
       d.phase='verify';
-      try{const after=await doubleQuery(headers);if(!after.get)throw new Error();d.status='signed_confirmed';}
+      try{const after=await doubleQuery(headers);d.verifyState={date:String(after.dateTime).slice(0,10),claimed:after.get};if(!after.get)throw new Error();d.status='signed_confirmed';}
       catch(_){d.status='claim_success_verify_unconfirmed';d.message='双签领取返回成功，状态复查失败';}
     }catch(e){d.status='stopped';d.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'双签处理失败，请查看日志';}
   }
   function capture() {
     const url = $request.url || '', endpoint = url.split('?')[0].split('/').pop();
+    if($request.method!=='POST'||Number($response.status)!==200)return;
     if(endpoint==='getPageInfoDoubleSignInForH5'){
       if(!/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/legogw\/h5\/m\/getPageInfoDoubleSignInForH5(?:\?|$)/.test(url))return;
       const response=JSON.parse($response.body),params=form($request.body);
@@ -158,20 +185,26 @@ function createAar(userAgent) {
       return;
     }
     if (!['queryWeekSignMain', 'queryCashSignSub', 'dailyCashSignReceive'].includes(endpoint)) return;
+    if(!/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)(?:\?|$)/.test(url))return;
     const response = JSON.parse($response.body), data = body(response), params = form($request.body);
+    const scope=cashScope(params);
+    if(!scope||endpoint==='dailyCashSignReceive'&&params.signType!=='sign')return;
     const h = {}; Object.keys($request.headers || {}).forEach(k => { h[k.toLowerCase()] = $request.headers[k]; });
-    if (!h.cookie) throw new Error('没有取得登录Cookie');
+    if (!h.cookie||!loginPin({Cookie:h.cookie})) throw new Error('没有取得完整登录Cookie');
     let profile = read(ACCOUNT) || {};
     const identity = /(?:^|;\s*)pt_pin=([^;]+)/.exec(h.cookie);
     if (!identity) throw new Error('没有取得账号标识');
     if (profile.pin !== identity[1]) profile = {};
+    const priorScope=profile.scopeKey||cashScope(profile.query||profile.claim);
+    if(priorScope&&priorScope!==scope)profile={pin:identity[1],doubleSign:profile.doubleSign};
     profile.pin = identity[1];
+    profile.scopeKey=scope;
     profile.headers = { Cookie: h.cookie, 'User-Agent': h['user-agent'] || '', 'Content-Type': 'application/x-www-form-urlencoded', Origin: 'https://member.jr.jd.com', Referer: 'https://member.jr.jd.com/activity/new-sign-in/home/' };
     if (endpoint === 'queryWeekSignMain') {
       if (typeof data.sign !== 'boolean') throw new Error('查询响应没有签到状态');
       profile.query = params;
     }
-    if (params.riskDeviceParam) profile.riskDeviceParam = params.riskDeviceParam;
+    if (params.riskDeviceParam) {profile.riskDeviceParam = params.riskDeviceParam;profile.riskScope=scope;}
     if (endpoint === 'dailyCashSignReceive') {
       const template = Object.assign({}, params); delete template.signData; delete template.nonce; delete template.signature;
       profile.claim = template;
@@ -179,7 +212,7 @@ function createAar(userAgent) {
     }
     profile.capturedAt = Date.now();
     const wasReady = !!(read(ACCOUNT) || {}).ready;
-    profile.ready = !!(profile.query && profile.riskDeviceParam);
+    profile.ready = !!(profile.query && profile.riskDeviceParam && cashScope(profile.query)===scope && (!profile.riskScope||profile.riskScope===scope));
     save(ACCOUNT, profile);
     console.log('[京东金融签到] 凭据已更新，完整=' + profile.ready);
     if (profile.ready && !wasReady) tell('签到凭据已保存，可手动执行一次验证。');
@@ -192,15 +225,16 @@ function createAar(userAgent) {
     }
     if (mode === 'status') { recordResult = false; const r = read(LAST); console.log(JSON.stringify(r || { message: '暂无签到记录' })); tell(r ? summary(r) : '暂无签到记录'); return; }
     if (!['manual', 'cron'].includes(mode)) { recordResult = false; return; }
-    const profile = read(ACCOUNT);
-    if (!profile || !profile.ready || !profile.headers || !profile.headers.Cookie) throw new Error('缺少凭据，请重新获取凭据');
-    executionPin=profile.pin;
     if (mode === 'cron') {
       result.phase = 'waiting'; result.randomDelaySeconds = settings.min + Math.floor(Math.random() * (settings.max - settings.min + 1));
       console.log('[京东金融签到] 随机等待' + result.randomDelaySeconds + '秒');
       await new Promise(resolve => setTimeout(resolve, result.randomDelaySeconds * 1000));
     }
     if (day() !== result.date) throw new Error('执行日期已变化');
+    const profile = read(ACCOUNT);
+    validateProfile(profile);executionPin=profile.pin;
+    result.credentialCapturedAt=profile.capturedAt||null;
+    result.queryContext={site:profile.query.site,channelLv:profile.query.channelLv||'',signVersion:profile.query.signVersion};
     if (Number(read(LOCK)) > Date.now()) { recordResult = false; console.log('[京东金融签到] 签到正在执行，请稍后查看结果'); return; }
     acquiredLock = Date.now() + 180000; save(LOCK, acquiredLock); ownsLock = true;
     result.phase = 'query'; const before = await query(profile); noteState(before);
@@ -215,6 +249,7 @@ function createAar(userAgent) {
     const sdk = new AAR2();
     const q = profile.query;
     const params = profile.claim ? Object.assign({}, profile.claim) : { enId: '', userDay: '', signType: 'sign', site: q.site, channelLv: q.channelLv, channelSource: q.channelSource, signVersion: q.signVersion, clientVersion: q.clientVersion, clientType: q.clientType, riskDeviceParam: '' };
+    ['clientVersion','clientType'].forEach(k=>{if(q[k]!==undefined)params[k]=q[k];});
     params.userDay = result.date.replace(/-/g, ''); params.signType = 'sign'; params.riskDeviceParam = profile.riskDeviceParam;
     const signData = JSON.stringify(params), nonce = sdk.nonce(), signature = sdk.sign(signData, nonce);
     if (typeof nonce !== 'string' || !/^\d{20}$/.test(nonce) || typeof signature !== 'string' || !/^[0-9a-f]{66}$/i.test(signature)) throw new Error('签名输出格式异常');
@@ -223,10 +258,10 @@ function createAar(userAgent) {
     result.phase = 'claim';
     const raw = await http('post', BASE + 'dailyCashSignReceive', profile.headers, 'reqData=' + encodeURIComponent(JSON.stringify(Object.assign(params, { signData, nonce, signature }))));
     let received; try { received = JSON.parse(raw); } catch (_) { throw new Error('签到响应不是有效JSON'); }
-    const award = body(received);
+    const award = body(received,result.claimState={});
     if (award.signType !== 'sign' || !/^\d+(\.\d+)?$/.test(String(award.todaySignAmount))) throw new Error('签到奖励响应不完整');
     result.amount = String(award.todaySignAmount); result.phase = 'verify';
-    try { const after = await query(profile); if (!after.sign) throw new Error(); noteState(after); result.status = 'signed_confirmed'; }
+    try { const after = await query(profile,'verifyState'); if (!after.sign) throw new Error(); noteState(after); result.status = 'signed_confirmed'; }
     catch (_) { result.status = 'claim_success_verify_unconfirmed'; result.message = '领取返回成功，状态复查失败'; }
   }
   run().then(async()=>{
@@ -239,6 +274,7 @@ function createAar(userAgent) {
   }).catch(error => { result.status = 'stopped'; result.message = error.message || '执行失败'; }).finally(() => {
     if (ownsLock && read(LOCK) === acquiredLock) $persistentStore.write('', LOCK);
     if (recordResult) {
+      result.finishedAt=Date.now();
       try { save(LAST, result); const h = read(HISTORY); save(HISTORY, (Array.isArray(h) ? h : []).concat(result).slice(-30)); } catch (_) { console.log('[京东金融签到] 结果保存失败'); }
       console.log('[京东金融签到] ' + JSON.stringify(result)); tell(summary(result));
     }
