@@ -30,6 +30,16 @@ function jdcCookie(cookie, name) {
   return m ? m[1] : '';
 }
 function jdcDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
+function jdcIsScratchQuery(params) {
+  // This endpoint also serves ordinary sign-in. Only capture the observed
+  // scratch-page task scope; commonScene=secKillChannel selects the ordinary task.
+  try {
+    const body=JSON.parse(params.body||'{}');
+    const types=typeof body.taskType==='string'?body.taskType.split('_'):[];
+    return body.scene==='jdInteractTask'&&types.includes('beanDailySign')&&types.includes('beanDailyPlus')&&
+      (body.commonScene===undefined||body.commonScene==='');
+  } catch (_) {return false;}
+}
 function jdcTask(data, mode) {
   const list = mode === 'daily' ? data && data.data && data.data.signComponentInfoResult
     : data && data.rs && data.rs.beanTask && data.rs.beanTask.taskList;
@@ -65,6 +75,14 @@ const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
 const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
 function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
 function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
+function zStatusDetails(data){
+ const payload=data&&data.data,main=payload&&payload.signMainVo,list=payload&&payload.signListVo;
+ const number=v=>v!==null&&v!==undefined&&v!==''&&Number.isInteger(Number(v))&&Number(v)>=0&&Number(v)<=10000?Number(v):null;
+ const task=main&&main.beforeTaskVo;
+ return {mainPresent:!!main,listPresent:Array.isArray(list),currentStatus:number(main&&main.currentStatus),signDays:number(main&&main.signDays),
+  beforeTask:task?{type:task.taskType==='BROWSE_RTB'?'BROWSE_RTB':'other',finished:typeof task.taskFinished==='boolean'?task.taskFinished:null,seconds:number(task.timeLimitPeriod)}:null,
+  signList:Array.isArray(list)?list.slice(0,7).map(x=>({date:typeof x.signDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x.signDate)?x.signDate:null,status:number(x.status),todayFlag:number(x.todayFlag)})):[]};
+}
 function zSummary(result){
  if(/签名环境版本不兼容|签名环境结构不完整/.test(result.message||''))return '失败，签名环境不兼容，请查看日志中的版本或结构说明。';
  if(result.status==='manual_required')return result.message;
@@ -88,7 +106,7 @@ function zStatus(data){
   const duration=Number.isInteger(seconds)&&seconds>0&&seconds<=3600?seconds+'秒':'';
   throw Object.assign(new Error('请先到种豆活动页手动完成浏览页面'+duration+'，再执行签到。'),{status:'manual_required'});
  }
- if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确，未继续领取');
+ if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确（状态值'+String(zStatusDetails(data).currentStatus)+'），未继续领取');
  return {done:false,main};
 }
 // Standard SHA-256 for the UTF-8 request body; JD's SDK handles its own signing hashes.
@@ -409,6 +427,7 @@ function checkinScheduleArgument(value) {
   }
   result.phase='query';
   const before=await http(profile.query,sign(profile.query,queryEnv));result.queryCode=String(before.code);result.queryMessage=zMessage(before);
+  result.queryState=zStatusDetails(before);
   const state=zStatus(before);
   if(state.done){if(Number.isInteger(Number(state.main.signDays))&&Number(state.main.signDays)>0)result.continuousDays=Number(state.main.signDays);result.status='already_done';result.message='种豆得豆礼包今天已领取，未重复提交。';return;}
   const begin=String(state.main.startTime||'').slice(0,10),end=String(state.main.endTime||'').slice(0,10);
@@ -432,7 +451,9 @@ function checkinScheduleArgument(value) {
   if(award&&award.awardName==='BEAN'&&/^\d+$/.test(String(award.awardGivenNumber)))result.beanQuantity=Number(award.awardGivenNumber);
   result.phase='verify';
   try{
-   const after=zStatus(await http(profile.query,sign(profile.query,queryEnv)));
+   const verification=await http(profile.query,sign(profile.query,queryEnv));
+   result.verifyState=zStatusDetails(verification);
+   const after=zStatus(verification);
    if(!after.done)throw new Error('未更新');
    if(Number.isInteger(Number(after.main.signDays))&&Number(after.main.signDays)>0)result.continuousDays=Number(after.main.signDays);
    result.status='signed_confirmed';result.message='种豆得豆礼包今日领取已确认'+(result.beanQuantity>0?'，获得 '+result.beanQuantity+' 京豆。':'，请到活动页查看奖励。');
@@ -441,6 +462,7 @@ function checkinScheduleArgument(value) {
  finally{
   if(locked&&$persistentStore.read(LOCK)===lockValue)$persistentStore.write(undefined,LOCK);
   if(mode!=='status'&&recordResult){
+   result.finishedAt=Date.now();
    try{jdcWrite(LAST,result);const history=jdcRead(HISTORY,[]);history.push(result);jdcWrite(HISTORY,history.slice(-20));}catch(_){}
    console.log('[种豆签到] '+JSON.stringify(result));$notification.post('种豆得豆签到',mode==='cron'?'自动签到结果':'手动签到结果',zSummary(result));
   }
