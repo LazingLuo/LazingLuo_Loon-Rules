@@ -8,7 +8,8 @@ const crypto = require('node:crypto');
 const TASKS = {
   scratch: {label:'京东每日刮卡',core:'jd-core.js',account:'JD_CHECKIN_TEST_ACCOUNT_V1',last:'JD_CHECKIN_TEST_LAST_RESULT_V1',prefix:'JD_CHECKIN_TEST_',argument:'scratch'},
   blindbox: {label:'京东PLUS盲盒',core:'jd-core.js',account:'JD_CHECKIN_TEST_ACCOUNT_V1',last:'JD_CHECKIN_TEST_LAST_RESULT_V1',prefix:'JD_CHECKIN_TEST_',argument:'blindbox'},
-  jxzy: {label:'京喜自营签到',core:'jxzy-core.js',account:'JXZY_CHECKIN_ACCOUNT_V1',last:'JXZY_CHECKIN_LAST_RESULT_V1',prefix:'JXZY_CHECKIN_',argument:'manual'}
+  jxzy: {label:'京喜自营签到',core:'jxzy-core.js',account:'JXZY_CHECKIN_ACCOUNT_V1',last:'JXZY_CHECKIN_LAST_RESULT_V1',prefix:'JXZY_CHECKIN_',argument:'manual'},
+  finance: {label:'京东金融签到＋双签',core:'jr-core.js',account:'JD_JR_CHECKIN_ACCOUNT_V1',last:'JD_JR_CHECKIN_LAST_RESULT_V1',prefix:'JD_JR_CHECKIN_',extraKeys:['JD_JR_DOUBLE_SIGN_ATTEMPT_V1'],argument:'manual'}
 };
 function fail(message) { const e=new Error(message);e.safe=true;throw e; }
 function pair(cookie) {
@@ -17,7 +18,7 @@ function pair(cookie) {
   if(keys.length!==1||pins.length!==1||!keys[0].slice(7)||!pins[0].slice(7)||/[\s\r\n]/.test(keys[0]+pins[0]))fail('登录凭据格式错误，请重新同步');
   return {pin:pins[0].slice(7),cookie:keys[0]+';'+pins[0]+';'};
 }
-function credentials(env) {
+function credentials(env,mode) {
   let packs;
   try {packs=JSON.parse(env.LAZING_JD_ACTIVITY_V1||'null');}catch(_){fail('活动凭据格式错误，请在 Loon 重新同步活动凭据');}
   if(!packs)fail('缺少活动凭据：请更新青龙接入插件，执行“同步活动凭据”');
@@ -28,6 +29,16 @@ function credentials(env) {
     if(!p||p.version!==1||typeof p.pin!=='string'||!p.pin||!p.activities||seen.has(p.pin))fail('活动凭据版本、账号或结构不符，请重新同步');
     seen.add(p.pin);
   }
+  // Finance keeps its own captured login/device context. Updating the retail
+  // JD_COOKIE must not silently replace its login pair or page cookies.
+  if(mode==='finance')return packs.map(p=>{
+    const profile=p.activities.finance;
+    if(!profile||!profile.headers)fail('缺少金融凭据，请更新接入插件并同步金融签到凭据');
+    const cookie=pair(profile.headers.Cookie);
+    cookie.source='finance_capture';
+    if(cookie.pin!==p.pin||profile.pin!==p.pin||profile.doubleSign&&profile.doubleSign.pin!==p.pin)fail('金融凭据与活动账号不一致，请重新同步');
+    return {pack:p,cookie};
+  });
   const cookies=String(env.JD_COOKIE||'').split(/&|\r?\n/).map(x=>x.trim()).filter(Boolean).map(pair);
   return packs.map(p=>{
     const matching=cookies.filter(x=>x.pin===p.pin);
@@ -41,7 +52,7 @@ function overlay(profile,cookie) {
   if(!cookieKey||pair(headers[cookieKey]).pin!==cookie.pin)fail('活动凭据与登录账号不一致，请重新同步');
   const extra=String(headers[cookieKey]).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x));
   delete headers[cookieKey];headers.Cookie=cookie.cookie+(extra.length?extra.join(';')+';':'');
-  profile.loginSource='qinglong:JD_COOKIE';
+  profile.loginSource='qinglong:'+(cookie.source||'JD_COOKIE');
   return profile;
 }
 function atomic(file,data) {
@@ -67,6 +78,19 @@ function acquire(file) {
 }
 function target(mode,options) {
   const url=new URL(options.url);
+  if(mode==='finance'){
+    if(url.protocol!=='https:'||url.port||url.username||url.password||url.hash)fail('金融请求目标不符，未发送');
+    if(url.hostname==='aks.jdpay.com'&&url.pathname==='/aar2/getJS'&&url.searchParams.get('version')==='2.1.0'&&url.searchParams.get('name')==='browser'){
+      if(Object.keys(options.headers||{}).some(k=>/cookie|authorization/i.test(k)))fail('签名初始化不得携带登录凭据');
+      return url;
+    }
+    const paths=['/gw2/generic/jrSign/h5/m/queryWeekSignMain','/gw2/generic/jrSign/h5/m/dailyCashSignReceive',
+      '/gw2/generic/legogw/h5/m/getPageInfoDoubleSignInForH5','/gw2/generic/DoubleSign/h5/m/jrSendSignAward'];
+    if(url.hostname!=='ms.jr.jd.com'||url.search||!paths.includes(url.pathname))fail('金融请求目标不符，未发送');
+    const fields=new URLSearchParams(options.body);
+    if(!fields.get('reqData'))fail('金融请求参数不完整，未发送');
+    return url;
+  }
   const allowed=mode==='jxzy'?['jxzy_active_querySign','jxzy_active_drawSign']:
     mode==='blindbox'?['bff_marketing_interaction']:['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction'];
   const form=new URLSearchParams(options.body);
@@ -91,7 +115,7 @@ function transport(mode,options,callback,active) {
 function redactor(profile,cookie) {
   const secrets=new Set([cookie.pin,pair(cookie.cookie).cookie, cookie.cookie.match(/pt_key=([^;]+)/)[1]]);
   function collect(value,key=''){
-    if(typeof value==='string'&&value.length>=4&&/cookie|token|environment|uuid|openudid|eid|h5st/i.test(key))secrets.add(value);
+    if(typeof value==='string'&&value.length>=4&&/cookie|token|environment|uuid|openudid|eid|h5st|risk|device|sgm|x-mlaas|x-rp|signature|nonce|signData/i.test(key))secrets.add(value);
     else if(value&&typeof value==='object')for(const [k,v]of Object.entries(value))collect(v,k);
   }
   collect(profile);
@@ -112,19 +136,22 @@ async function execute(mode,entry,options={}) {
     if(!stored||typeof stored!=='object'||Array.isArray(stored))fail('任务数据结构错误；本次停止');
     // A dead Node process cannot still own an in-core timer lock.
     for(const key of Object.keys(stored))if(/_LOCK_/.test(key))delete stored[key];
-    const attemptKey=mode==='jxzy'?'JXZY_CHECKIN_ATTEMPT_V1':'JD_CHECKIN_TEST_ATTEMPT_'+mode;
-    const imported=entry.pack.attempts&&entry.pack.attempts[mode];
-    let existing;try{existing=JSON.parse(stored[attemptKey]||'null');}catch(_){fail('领取记录损坏；本次停止');}
-    if(imported&&imported.pin===entry.pack.pin&&/^\d{4}-\d{2}-\d{2}$/.test(imported.date)&&(!existing||imported.date>existing.date)){
-      stored[attemptKey]=JSON.stringify(imported);atomic(file,stored);
+    const attemptKeys=mode==='finance'?{finance:'JD_JR_CHECKIN_ATTEMPT_V1',financeDouble:'JD_JR_DOUBLE_SIGN_ATTEMPT_V1'}:
+      {[mode]:mode==='jxzy'?'JXZY_CHECKIN_ATTEMPT_V1':'JD_CHECKIN_TEST_ATTEMPT_'+mode};
+    for(const [name,attemptKey]of Object.entries(attemptKeys)){
+      const imported=entry.pack.attempts&&entry.pack.attempts[name];
+      let existing;try{existing=JSON.parse(stored[attemptKey]||'null');}catch(_){fail('领取记录损坏；本次停止');}
+      if(imported&&imported.pin===entry.pack.pin&&/^\d{4}-\d{2}-\d{2}$/.test(imported.date)&&(!existing||imported.date>existing.date)){
+        stored[attemptKey]=JSON.stringify(imported);atomic(file,stored);
+      }
     }
-    const account=mode==='jxzy'?current:{pin:entry.pack.pin,modes:{[mode]:current}};
+    const account=['jxzy','finance'].includes(mode)?current:{pin:entry.pack.pin,modes:{[mode]:current}};
     let finish,reject;const done=new Promise((resolve,no)=>{finish=resolve;reject=no;});
     const sandbox={
       console:{log:(...args)=>(options.log||console.log)(redact(args.join(' ')))},
       $argument:spec.argument,
       $persistentStore:{read:key=>key===spec.account?JSON.stringify(account):stored[key]||'',write:(value,key)=>{
-        if(completed||!key.startsWith(spec.prefix)||key===spec.account)return false;
+        if(completed||!(key.startsWith(spec.prefix)||(spec.extraKeys||[]).includes(key))||key===spec.account)return false;
         if(value===undefined||value===null||value==='')delete stored[key];else stored[key]=String(value);
         atomic(file,stored);return true;
       }},
@@ -146,7 +173,8 @@ async function execute(mode,entry,options={}) {
     let result;try{result=JSON.parse(stored[spec.last]||'null');}catch(_){}
     if(!result)fail('任务未保存本次结果，请查看日志');
     const summary=notices.length?notices[notices.length-1][2]:result.message;
-    const ok=['reward_received','box_confirmed','already_done','no_chance','signed_confirmed'].includes(result.status);
+    let ok=['reward_received','box_confirmed','already_done','no_chance','signed_confirmed'].includes(result.status);
+    if(mode==='finance'&&(!result.doubleSign||!['already_done','signed_confirmed','not_eligible'].includes(result.doubleSign.status)))ok=false;
     return {ok,message:redact(summary||'请查看日志'),result};
   }finally{
     completed=true;clearTimeout(watchdog);for(const timer of timers){clearTimeout(timer);clearInterval(timer);}for(const req of active)req.destroy();release();
@@ -163,7 +191,7 @@ async function notify(title,message) {
 async function main(mode,options={}) {
   const spec=TASKS[mode];if(!spec)throw new Error('unknown task');
   const log=options.log||console.log;let entries;
-  try{entries=credentials(options.env||process.env);}catch(e){const text=e.safe?e.message:'凭据读取失败';log('['+spec.label+'] '+text);if(!options.noNotify)await notify(spec.label+'：失败',text);return 1;}
+  try{entries=credentials(options.env||process.env,mode);}catch(e){const text=e.safe?e.message:'凭据读取失败';log('['+spec.label+'] '+text);if(!options.noNotify)await notify(spec.label+'：失败',text);return 1;}
   const lines=[];let code=0;
   for(let i=0;i<entries.length;i++){
     log('['+spec.label+'] 开始账号 '+(i+1));

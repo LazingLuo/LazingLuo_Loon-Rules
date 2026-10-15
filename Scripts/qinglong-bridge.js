@@ -1,6 +1,6 @@
 // Loon -> Qinglong OpenAPI bridge. No JD requests, signing or automatic task runs.
 (async function () {
-  const VERSION = '2026-10-15.1';
+  const VERSION = '2026-10-15.2';
   const PREFIX = 'QL_BRIDGE_';
   const capture = typeof $request !== 'undefined';
   let config, lock, result = {time: Date.now(), version: VERSION};
@@ -33,6 +33,10 @@
   }
   function existingJX() {
     try { return JSON.parse($persistentStore.read('JXZY_CHECKIN_ACCOUNT_V1') || 'null'); }
+    catch (_) { return null; }
+  }
+  function existingFinance() {
+    try { return JSON.parse($persistentStore.read('JD_JR_CHECKIN_ACCOUNT_V1') || 'null'); }
     catch (_) { return null; }
   }
   function latestCredential() {
@@ -158,20 +162,23 @@
   }
   async function tasks(token) { return rows(await request('get', '/crons', undefined, token)); }
   function activityPack() {
-    const credential = latestCredential(), existing = readExistingJD(), jx = existingJX();
+    const credential = latestCredential(), existing = readExistingJD(), jx = existingJX(), finance = existingFinance();
     const pack = {version: 1, pin: credential.pin, activities: {}, attempts: {}};
-    for (const mode of ['scratch', 'blindbox', 'jxzy']) {
-      const original = mode === 'jxzy' ? jx : existing && existing.modes && existing.modes[mode];
-      if (!original || !original.query || !original.query.params) continue;
+    for (const mode of ['scratch', 'blindbox', 'jxzy', 'finance']) {
+      const original = mode === 'finance' ? finance : mode === 'jxzy' ? jx : existing && existing.modes && existing.modes[mode];
+      if (!original || !original.query || (mode === 'finance' ? !original.ready || !original.riskDeviceParam : !original.query.params)) continue;
       const pair = cookiePair(header(original.headers, 'cookie'));
-      if (!pair || pair.pin !== credential.pin || mode === 'jxzy' && original.pin !== credential.pin) fail('青龙活动凭据的账号不一致，请先核对本机账号；未同步');
+      if (!pair || pair.pin !== credential.pin || ['jxzy', 'finance'].includes(mode) && original.pin !== credential.pin) fail('青龙活动凭据的账号不一致，请先核对本机账号；未同步');
+      if (mode === 'finance' && original.doubleSign && original.doubleSign.pin !== credential.pin) fail('青龙金融双签凭据的账号不一致，请先核对本机账号；未同步');
       // Export only the selected activities, never the full persistence, diagnostics or other accounts.
       const profile = {};
-      for (const key of ['pin', 'capturedAt', 'updatedAt', 'loginUpdatedAt', 'loginSource', 'query', 'interaction', 'claim', 'signing']) {
+      const keys = ['pin', 'capturedAt', 'updatedAt', 'loginUpdatedAt', 'loginSource', 'query', 'interaction', 'claim', 'signing'];
+      if (mode === 'finance') keys.push('ready', 'scopeKey', 'riskScope', 'riskDeviceParam', 'doubleSign');
+      for (const key of keys) {
         if (original[key] !== undefined) profile[key] = JSON.parse(JSON.stringify(original[key]));
       }
       profile.headers = {};
-      for (const key of ['Cookie', 'User-Agent', 'Referer', 'Origin', 'Accept', 'Accept-Language']) {
+      for (const key of ['Cookie', 'User-Agent', 'Referer', 'Origin', 'Accept', 'Accept-Language', 'Content-Type']) {
         const value = header(original.headers, key.toLowerCase());
         if (value) profile.headers[key] = value;
       }
@@ -179,12 +186,15 @@
         if (profile[key] && profile[key].params) delete profile[key].params.h5st;
       }
       pack.activities[mode] = profile;
-      const key = mode === 'jxzy' ? 'JXZY_CHECKIN_ATTEMPT_V1' : 'JD_CHECKIN_TEST_ATTEMPT_' + mode;
-      let attempt;
-      try { attempt = JSON.parse($persistentStore.read(key) || 'null'); } catch (_) { fail('青龙领取记录损坏，请先检查本机记录；未同步'); }
-      if (attempt && attempt.pin === credential.pin) pack.attempts[mode] = attempt;
+      const attemptKeys = mode === 'finance' ? {finance:'JD_JR_CHECKIN_ATTEMPT_V1',financeDouble:'JD_JR_DOUBLE_SIGN_ATTEMPT_V1'} :
+        {[mode]:mode === 'jxzy' ? 'JXZY_CHECKIN_ATTEMPT_V1' : 'JD_CHECKIN_TEST_ATTEMPT_' + mode};
+      for (const name of Object.keys(attemptKeys)) {
+        let attempt;
+        try { attempt = JSON.parse($persistentStore.read(attemptKeys[name]) || 'null'); } catch (_) { fail('青龙领取记录损坏，请先检查本机记录；未同步'); }
+        if (attempt && attempt.pin === credential.pin) pack.attempts[name] = attempt;
+      }
     }
-    if (!Object.keys(pack.activities).length) fail('尚无这三个活动的请求记录，请开启对应获取开关、进入活动页面后再同步');
+    if (!Object.keys(pack.activities).length) fail('尚无可同步的独立活动请求记录，请开启对应获取开关、进入活动页面后再同步');
     return pack;
   }
   async function syncActivities(token, pack) {
@@ -203,6 +213,7 @@
       // Keep older activities when one capture switch was temporarily off. NAS attempt records are separate.
       const old = JSON.parse(target.value);
       pack.activities = Object.assign({}, old.activities || {}, pack.activities);
+      pack.attempts = Object.assign({}, old.attempts || {}, pack.attempts);
       const value = JSON.stringify(pack);
       if (value !== target.value) {
         const body = {id: idOf(target), name, value, remarks: target.remarks || 'Loon 独立活动凭据'};
@@ -210,7 +221,7 @@
         await request('put', '/envs', body, token);
       }
     } else await request('post', '/envs', [{name, value: JSON.stringify(pack), remarks: 'Loon 独立活动凭据'}], token);
-    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营'};
+    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营', finance:'金融签到＋双签'};
     result.activities = Object.keys(pack.activities).filter(x => labels[x]).map(x => labels[x]);
     return '活动凭据已同步：' + result.activities.join('、') + (target && Number(target.status) === 1 ? '；活动变量仍处于禁用状态' : '') + '。未触发签到。';
   }
