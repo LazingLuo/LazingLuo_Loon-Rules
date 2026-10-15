@@ -1,21 +1,63 @@
-# 每天22点的微信日报
+# 每天22点的 Telegram / Bark 日报
 
-新增入口 `lazing_jd_report.js`，默认定时 `0 22 * * *`，按北京时间汇总青龙里已启用的京东任务。只读取任务及最新日志，不触发签到、资产查询或重试领取。包括 Faker 的 `jd_*.js` 和本仓库四个独立签到入口，排除日报自身、禁用任务和订阅更新任务。
+入口 `lazing_jd_report.js` 默认定时 `0 22 * * *`，按北京时间汇总青龙里已启用的京东任务。只读取任务及最新日志，不触发签到、资产查询或重试领取。包括 Faker 的 `jd_*.js` 和本仓库四个独立签到入口，排除日报自身、禁用任务和订阅更新任务。
 
-## 微信配置
+## 选择通知渠道
 
-1. 在 [PushPlus 一对一消息](https://www.pushplus.plus/push1.html) 登录，按页面指引关注公众号、完成微信绑定，取得自己的用户令牌或消息令牌。
-2. 在青龙「环境变量」中新增并启用三项，值只填到自己的面板，不需要发给别人：
+支持 Telegram 和 Bark。只配置一种，就只发送该渠道；两种都配置，则每天各发一份，同一渠道不会因为另一渠道失败而重复发送。旧的 PushPlus 变量不再使用，可以删除或禁用。
+
+日报使用下面的专用变量。不要为它填写青龙全局 `TG_BOT_TOKEN`、`TG_USER_ID` 或 `BARK_PUSH`，避免 Faker 任务也逐项通知。已有其他渠道的通知配置不由日报修改。
+
+## 两个渠道都需要的青龙参数
+
+在青龙「环境变量」中填写并启用，值不加引号，只填在自己的面板中：
 
 | 变量名 | 填什么 |
 | --- | --- |
-| `LAZING_JD_REPORT_PUSHPLUS_TOKEN` | PushPlus 的令牌 |
 | `LAZING_JD_REPORT_CLIENT_ID` | 之前青龙接入所用的 Client ID |
 | `LAZING_JD_REPORT_CLIENT_SECRET` | 同一个青龙应用的 Client Secret |
 
 青龙应用需要「定时任务」读取权限。此前给 Loon 接入创建的应用通常已包含该权限，可以直接复用。默认访问容器内 `http://127.0.0.1:5700`，无需把面板开放到公网。自定义面板路径或端口时可设置 `LAZING_JD_REPORT_QL_URL`，HTTP 只允许本机回环地址，其他地址需 HTTPS。
 
-日报使用专用 PushPlus 变量，只发给自己的微信，不填群组或好友接收人。无需为日报设置全局 `PUSH_PLUS_TOKEN`；该全局变量会被很多其他脚本读取，可能产生逐项推送。已有其他渠道通知不由日报脚本修改。
+## Bark 配置：iPhone 通知中心
+
+Bark [官网](https://bark.day.app/)说明基本推送免费，App 内购买是自愿赞助。无需实名、关注公众号或部署额外的 NAS 服务。
+
+1. 从 [App Store](https://apps.apple.com/cn/app/id1403753865) 安装「Bark - 给你的手机发推送」，打开并允许通知。
+2. App 中会显示推送地址，例如 `https://api.day.app/设备Key/这里改成推送内容`。先按 App 的示例测试，确认手机能收到。
+3. 在青龙新增并启用：
+
+| 变量名 | 填什么 |
+| --- | --- |
+| `LAZING_JD_REPORT_BARK_URL` | `https://api.day.app/你自己的设备Key` |
+
+只保留服务器地址和设备 Key，去掉 Key 后面的测试标题、正文和查询参数。地址不用发给别人。默认直接连接 Bark 官方服务器，不走 Telegram 的代理；也支持自行部署的 HTTPS Bark 地址和路径前缀。
+
+Bark 使用苹果 APNs，每条通知的容量有限。日报会发送一条按容量限制截取的摘要，优先保留失败和待处理项；超长时末尾提示查看青龙日报日志，日志中保留完整汇总。不拆成多条通知。
+
+## Telegram 配置：自己的机器人
+
+1. 在 Telegram 打开官方 [@BotFather](https://t.me/BotFather)，发送 `/newbot`，按提示设置名称和以 `bot` 结尾的用户名，保存它给出的 Bot Token。
+2. 打开刚创建的机器人对话，点击「Start / 开始」，发一条消息。机器人必须先收到你的消息，才能主动给你推送。
+3. 在自己的浏览器打开下面地址，把 `你的BotToken` 换成刚取得的令牌：
+
+```text
+https://api.telegram.org/bot你的BotToken/getUpdates
+```
+
+在返回内容中找到 `message` → `chat` → `id`，这是接收日报的 Chat ID。若 `result` 为空，重新给自己的机器人发一条消息再刷新。只取自己与该机器人私聊的数字 ID，不要复制其他对话信息。
+
+4. 在青龙新增并启用：
+
+| 变量名 | 填什么 |
+| --- | --- |
+| `LAZING_JD_REPORT_TG_BOT_TOKEN` | BotFather 给出的完整 Token |
+| `LAZING_JD_REPORT_TG_CHAT_ID` | 上一步找到的数字 Chat ID |
+| `LAZING_JD_REPORT_TG_PROXY_URL` | 当前 NAS 填 `http://mihomo:7890` |
+
+Token 不用发给别人。代理是 NAS 已安装的 Mihomo，青龙与 Mihomo 需要在可互通的容器网络上，并允许 Mihomo 接收容器连接。支持无账号密码的 HTTP CONNECT 代理；不支持 SOCKS 地址。留空则 Telegram 直连。代理只作用于 Telegram 推送，读取青龙仍走容器本机，不改变京东签到或 Faker 请求。
+
+Telegram 每份日报发送一条纯文本消息，超过长度限制时截取摘要并提示查看日志，不拆分多条。
 
 ## 安装和22点执行
 
@@ -27,7 +69,7 @@ Qinglong/lazing_jd_(plus|scratch|jxzy|finance|report)\.js$
 
 依赖文件仍为 `Qinglong/function/`。保存后运行订阅，会新增日报任务。
 
-编辑「京东每日22点微信日报」任务：
+编辑已有的日报任务（旧名称可能仍是「京东每日22点微信日报」，可自行改名，无需再新增）：
 
 - 定时规则：`0 22 * * *`。
 - 命令末尾添加 `now`。如果订阅使用现有仓库名，完整命令为：
@@ -38,7 +80,7 @@ task LazingLuo_LazingLuo_Loon-Rules_main/Qinglong/lazing_jd_report.js now
 
 `now` 在这里让任务按计划启动并跳过青龙全局随机等待，不会立刻取消定时或改为重复运行。请保留其他签到任务原来的随机等待设置。容器时区应为 `Asia/Shanghai`；本项目之前提供的 Compose 已设置该时区。
 
-配置后等待22点即可。若手动运行正式日报测试微信接收，这会算作当天的一条日报，当晚22点不再重复提交。只想检查内容时，可以临时在命令后追加 `--preview` 运行，预览会输出汇总但不发送、不占用当天推送次数；预览完成后去掉 `--preview`。
+配置后等待22点即可。若手动运行正式日报测试接收，这会算作当天该渠道的一条日报，当晚22点不再向该渠道重复提交。只想检查内容时，可以临时在命令后追加 `--preview` 运行，预览会输出汇总但不发送、不占用当天推送次数；预览完成后去掉 `--preview`。
 
 ## 日报如何判断
 
@@ -51,7 +93,7 @@ Faker 任务格式并不统一，日报采用保守识别，必要时仍查看�
 
 推送为纯文本摘要，不上传原日志、Cookie、设备令牌、昵称或账号标识。账户只用「账号1」等编号。汇总不改变青龙任务、签到提交记录或 Faker 的缓存。
 
-每天保存一次提交记录到 `/ql/data/lazing-jd/report/push.json`。PushPlus 返回200只表示接受请求，实际送达以微信和平台发送记录为准。网络结果不明确时不自动重发，以免同一天重复通知；先核对 PushPlus 记录。明确拒绝请求时，可修正令牌或绑定后手动重试。
+按渠道分别保存提交记录到 `/ql/data/lazing-jd/report/push-telegram.json` 和 `push-bark.json`，不保存令牌、设备 Key 或原日志。旧 `push.json` 不会阻止迁移后的新渠道首次发送。Telegram/Bark 接口成功表示服务器接受请求，实际送达以手机接收为准。网络超时、5xx或响应不明确时不自动重发，以免重复通知；先核对接收端。明确的4xx拒绝允许修正凭据或权限后手动重试。两种渠道相互独立，其中一种失败不妨碍另一种发送；重跑也只处理尚未提交或明确被拒绝的渠道。
 
 预览日志或配置错误通知出现读取权限问题时，检查青龙应用的定时任务权限和上面两个 Client 参数。签名、Cookie 问题应查看具体签到任务，日报不会刷新登录。
 
@@ -70,6 +112,8 @@ Faker 任务格式并不统一，日报采用保守识别，必要时仍查看�
 
 ## 验证与依据
 
-离线测试：`node Qinglong/report-test.cjs`。覆盖当前日/旧日志、Cron逗号和步长、低频和未来任务、结构化签到及金融双签部分失败、Faker 403及不明确结果、资产与流水区分、禁用/日报排除、只读API、专用微信渠道、预览、同日防重复和发送结果不明确保护。全部HTTP模拟，未发送真实微信。
+离线测试：`node Qinglong/report-test.cjs`。覆盖当前日/旧日志、Cron逗号和步长、低频和未来任务、结构化签到及金融双签部分失败、Faker 403及不明确结果、资产与流水区分、禁用/日报排除、只读API、Telegram/Bark专用配置、代理隔离、通知容量限制、预览、分渠道防重复、迁移和发送结果不明确保护。全部HTTP模拟，未发送真实通知。
 
-接口依据：青龙2.23.0的 [Cron API](https://github.com/whyour/qinglong/blob/v2.23.0/back/api/cron.ts)、[任务服务](https://github.com/whyour/qinglong/blob/v2.23.0/back/services/cron.ts)，以及 [PushPlus 消息接口](https://www.pushplus.plus/doc/guide/api.html)。
+本地代理传输测试：`node Qinglong/report-transport-test.cjs`，需要本机能监听回环端口并安装 openssl。临时证书和本地模拟代理验证 HTTP CONNECT、TLS证书校验、4xx响应和5xx不明确保护，不访问公共网络。
+
+接口依据：青龙2.23.0的 [Cron API](https://github.com/whyour/qinglong/blob/v2.23.0/back/api/cron.ts)、[任务服务](https://github.com/whyour/qinglong/blob/v2.23.0/back/services/cron.ts)，[Telegram 机器人入门](https://core.telegram.org/bots/tutorial)、[Telegram Bot API](https://core.telegram.org/bots/api#sendmessage)，以及 [Bark 官方接口说明](https://github.com/Finb/Bark/blob/master/docs/tutorial.md)。

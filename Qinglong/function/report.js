@@ -1,6 +1,7 @@
 'use strict';
 // Read-only Qinglong report. Never calls JD, starts tasks or evaluates task logs.
-const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),http=require('node:http'),https=require('node:https');
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {channels,request}=require('./report-notify');
 const OWN={lazing_jd_plus:'blindbox',lazing_jd_scratch:'scratch',lazing_jd_jxzy:'jxzy',lazing_jd_finance:'finance'};
 const day=ms=>new Date(ms+8*3600000).toISOString().slice(0,10);
 const clock=ms=>new Date(ms+8*3600000).toISOString().slice(11,16);
@@ -146,16 +147,6 @@ function render(rows,now,warnings=[]){
   let content=lines.join('\n');if(Buffer.byteLength(content)>18000){while(Buffer.byteLength(content)>17500)content=content.slice(0,-128);content+='\n内容较多，剩余请查看青龙任务日志。';}
   return content;
 }
-function request(url,method,body,headers={}){
-  return new Promise((resolve,reject)=>{
-    const data=body===undefined?null:JSON.stringify(body),parsed=new URL(url),client=parsed.protocol==='https:'?https:http;
-    let settled=false;const finish=(e,v)=>{if(settled)return;settled=true;e?reject(e):resolve(v);};
-    const req=client.request(parsed,{method,headers:{Accept:'application/json',...headers,...(data?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)}:{})},rejectUnauthorized:true},res=>{
-      let length=0;const parts=[];res.on('data',chunk=>{length+=chunk.length;if(length>2*1024*1024){finish(new Error('response limit'));req.destroy();}else parts.push(chunk);});
-      res.on('end',()=>{if(res.statusCode!==200)return finish(new Error('http status'));try{finish(null,JSON.parse(Buffer.concat(parts).toString('utf8')));}catch(_){finish(new Error('json'));}});res.on('error',()=>finish(new Error('network')));
-    });req.on('error',()=>finish(new Error('network')));req.setTimeout(10000,()=>req.destroy(new Error('timeout')));if(data)req.write(data);req.end();
-  });
-}
 function panelUrl(value){
   const url=new URL(value||'http://127.0.0.1:5700');
   if(url.username||url.password||url.search||url.hash||!['http:','https:'].includes(url.protocol))fail('青龙地址格式错误');
@@ -195,24 +186,35 @@ function save(file,value){const temp=file+'.'+process.pid+'.'+crypto.randomBytes
 async function main(options={}){
   const env=options.env||process.env,now=options.now||Date.now(),log=options.log||console.log,send=options.request||request;
   const preview=options.preview===undefined?process.argv.includes('--preview'):options.preview;
-  const token=String(env.LAZING_JD_REPORT_PUSHPLUS_TOKEN||'').trim();
-  if(!preview&&!/^[A-Za-z0-9_-]{12,128}$/.test(token)){log('[京东日报] 请在青龙填写 LAZING_JD_REPORT_PUSHPLUS_TOKEN');return 1;}
+  if(!preview){
+    try{if(!channels(env,'','').length){log('[京东日报] 请配置日报的 Telegram 或 Bark 专用变量');return 1;}}
+    catch(e){log('[京东日报] '+(e.safe?e.message:'通知配置错误'));return 1;}
+  }
   let content;
   try{content=await collect(env,now,send);}catch(e){content='京东任务日报读取失败：'+(e.safe?e.message:'青龙连接或响应异常，请查看面板')+'。未触发任何签到。';}
   const title='京东任务日报 '+day(now);log(title+'\n'+content);
-  if(preview){log('[京东日报] 仅预览，没有发送微信消息');return 0;}
+  if(preview){log('[京东日报] 仅预览，没有发送通知');return 0;}
   const dir=path.join(options.dataDir||env.LAZING_JD_DATA_DIR||'/ql/data/lazing-jd','report');fs.mkdirSync(dir,{recursive:true,mode:0o700});
-  const lock=path.join(dir,'running.lock'),journal=path.join(dir,'push.json');let fd;
+  const lock=path.join(dir,'running.lock');let fd;
   try{fd=fs.openSync(lock,'wx',0o600);fs.writeFileSync(fd,String(process.pid));}catch(_){log('[京东日报] 另一份日报正在处理或残留执行锁，本次未重复发送');return 1;}
   try{
-    let previous;try{previous=JSON.parse(fs.readFileSync(journal,'utf8'));}catch(e){if(e.code!=='ENOENT'){log('[京东日报] 推送记录损坏，本次未发送');return 1;}}
-    if(previous&&previous.date===day(now)&&['sending','accepted'].includes(previous.state)){log('[京东日报] 今天已提交过推送；若未收到请先查看 PushPlus 发送记录，未重复发送');return 0;}
-    const record={date:day(now),time:now,state:'sending',hash:crypto.createHash('sha256').update(content).digest('hex')};save(journal,record);
-    let result;
-    try{result=await send('https://www.pushplus.plus/send','POST',{token,title,content,template:'txt',channel:'wechat'});}
-    catch(_){log('[京东日报] 推送结果不明确，未自动重试；请先检查 PushPlus 发送记录');return 1;}
-    if(!result||Number(result.code)!==200){record.state='rejected';save(journal,record);log('[京东日报] PushPlus 拒绝请求，请检查令牌、微信绑定和发送额度');return 1;}
-    record.state='accepted';save(journal,record);log('[京东日报] PushPlus 已接收日报，实际送达请以微信及 PushPlus 发送记录为准');return 0;
+    let failed=false;
+    for(const channel of channels(env,title,content)){
+      const journal=path.join(dir,'push-'+channel.id+'.json');
+      let previous;try{previous=JSON.parse(fs.readFileSync(journal,'utf8'));}catch(e){if(e.code!=='ENOENT'){log('[京东日报] '+channel.name+' 推送记录损坏，本次未发送');failed=true;continue;}}
+      if(previous&&previous.date===day(now)&&['sending','accepted'].includes(previous.state)){log('[京东日报] '+channel.name+' 今天已提交过推送；若未收到请先核对接收端，未重复发送');continue;}
+      const record={date:day(now),time:now,state:'sending',hash:crypto.createHash('sha256').update(content).digest('hex')};save(journal,record);
+      let result;
+      try{result=await send(channel.url,'POST',channel.body,{},channel.options);}
+      catch(_){log('[京东日报] '+channel.name+' 推送结果不明确，未自动重试；请先核对接收端和网络');failed=true;continue;}
+      if(!channel.accepted(result)){
+        if(channel.rejected(result)){record.state='rejected';save(journal,record);log('[京东日报] '+channel.name+' 拒绝请求，请核对该渠道的凭据、接收人及权限');}
+        else log('[京东日报] '+channel.name+' 响应不明确，未自动重试；请先核对接收端');
+        failed=true;continue;
+      }
+      record.state='accepted';save(journal,record);log('[京东日报] '+channel.name+' 已接收日报，实际送达请以手机接收为准');
+    }
+    return failed?1:0;
   }finally{fs.closeSync(fd);fs.unlinkSync(lock);}
 }
 module.exports={main,collect,classify,render,assets,structured,due,taskDue,fileOf,panelUrl};
