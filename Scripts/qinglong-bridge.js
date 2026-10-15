@@ -1,6 +1,6 @@
 // Loon -> Qinglong OpenAPI bridge. No JD requests, signing or automatic task runs.
 (async function () {
-  const VERSION = '2026-10-14.1';
+  const VERSION = '2026-10-15.1';
   const PREFIX = 'QL_BRIDGE_';
   const capture = typeof $request !== 'undefined';
   let config, lock, result = {time: Date.now(), version: VERSION};
@@ -31,8 +31,12 @@
     try { return JSON.parse($persistentStore.read('JD_CHECKIN_TEST_ACCOUNT_V1') || 'null'); }
     catch (_) { return null; }
   }
+  function existingJX() {
+    try { return JSON.parse($persistentStore.read('JXZY_CHECKIN_ACCOUNT_V1') || 'null'); }
+    catch (_) { return null; }
+  }
   function latestCredential() {
-    const existing = readExistingJD(), saved = read('CREDENTIAL_V1', null);
+    const existing = readExistingJD(), jx = existingJX(), saved = read('CREDENTIAL_V1', null);
     const bound = read('ACCOUNT_V1', null);
     const candidates = saved ? [saved] : [];
     if (existing && existing.modes) {
@@ -44,7 +48,13 @@
         }));
       }
     }
-    const pin = bound && bound.pin || existing && existing.pin || saved && saved.pin;
+    if (jx && jx.headers) {
+      const pair = cookiePair(header(jx.headers, 'cookie'));
+      if (pair && pair.pin === jx.pin) candidates.push(Object.assign(pair, {
+        capturedAt: Number(jx.loginUpdatedAt || jx.capturedAt || 0), source: 'existing_jxzy'
+      }));
+    }
+    const pin = bound && bound.pin || existing && existing.pin || saved && saved.pin || jx && jx.pin;
     const valid = candidates.filter(x => x && x.pin === pin && cookiePair(x.cookie));
     valid.sort((a, b) => Number(b.capturedAt || 0) - Number(a.capturedAt || 0));
     if (!valid.length) fail('尚无可同步的京东凭据，请打开凭据获取开关并正常使用京东');
@@ -147,6 +157,63 @@
     return message + '。凭据是否有效仍需由具体任务确认；本次未触发签到。';
   }
   async function tasks(token) { return rows(await request('get', '/crons', undefined, token)); }
+  function activityPack() {
+    const credential = latestCredential(), existing = readExistingJD(), jx = existingJX();
+    const pack = {version: 1, pin: credential.pin, activities: {}, attempts: {}};
+    for (const mode of ['scratch', 'blindbox', 'jxzy']) {
+      const original = mode === 'jxzy' ? jx : existing && existing.modes && existing.modes[mode];
+      if (!original || !original.query || !original.query.params) continue;
+      const pair = cookiePair(header(original.headers, 'cookie'));
+      if (!pair || pair.pin !== credential.pin || mode === 'jxzy' && original.pin !== credential.pin) fail('青龙活动凭据的账号不一致，请先核对本机账号；未同步');
+      // Export only the selected activities, never the full persistence, diagnostics or other accounts.
+      const profile = {};
+      for (const key of ['pin', 'capturedAt', 'updatedAt', 'loginUpdatedAt', 'loginSource', 'query', 'interaction', 'claim', 'signing']) {
+        if (original[key] !== undefined) profile[key] = JSON.parse(JSON.stringify(original[key]));
+      }
+      profile.headers = {};
+      for (const key of ['Cookie', 'User-Agent', 'Referer', 'Origin', 'Accept', 'Accept-Language']) {
+        const value = header(original.headers, key.toLowerCase());
+        if (value) profile.headers[key] = value;
+      }
+      for (const key of ['query', 'interaction', 'claim']) {
+        if (profile[key] && profile[key].params) delete profile[key].params.h5st;
+      }
+      pack.activities[mode] = profile;
+      const key = mode === 'jxzy' ? 'JXZY_CHECKIN_ATTEMPT_V1' : 'JD_CHECKIN_TEST_ATTEMPT_' + mode;
+      let attempt;
+      try { attempt = JSON.parse($persistentStore.read(key) || 'null'); } catch (_) { fail('青龙领取记录损坏，请先检查本机记录；未同步'); }
+      if (attempt && attempt.pin === credential.pin) pack.attempts[mode] = attempt;
+    }
+    if (!Object.keys(pack.activities).length) fail('尚无这三个活动的请求记录，请开启对应获取开关、进入活动页面后再同步');
+    return pack;
+  }
+  async function syncActivities(token, pack) {
+    const name = 'LAZING_JD_ACTIVITY_V1';
+    const envs = rows(await request('get', '/envs?searchValue=' + name, undefined, token));
+    const matches = [];
+    for (const item of envs.filter(x => x.name === name)) {
+      let value;
+      try { value = JSON.parse(item.value); } catch (_) { fail('青龙活动凭据变量损坏，请先在面板整理；未修改'); }
+      if (!value || value.version !== 1 || !value.pin) fail('青龙活动凭据变量版本不符，请先在面板整理；未修改');
+      if (value.pin === pack.pin) matches.push(item);
+    }
+    if (matches.length > 1) fail('青龙中有同账号的多条活动凭据，请先在面板整理；未修改');
+    const target = matches[0];
+    if (target) {
+      // Keep older activities when one capture switch was temporarily off. NAS attempt records are separate.
+      const old = JSON.parse(target.value);
+      pack.activities = Object.assign({}, old.activities || {}, pack.activities);
+      const value = JSON.stringify(pack);
+      if (value !== target.value) {
+        const body = {id: idOf(target), name, value, remarks: target.remarks || 'Loon 独立活动凭据'};
+        if (target.labels !== undefined) body.labels = target.labels;
+        await request('put', '/envs', body, token);
+      }
+    } else await request('post', '/envs', [{name, value: JSON.stringify(pack), remarks: 'Loon 独立活动凭据'}], token);
+    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营'};
+    result.activities = Object.keys(pack.activities).filter(x => labels[x]).map(x => labels[x]);
+    return '活动凭据已同步：' + result.activities.join('、') + (target && Number(target.status) === 1 ? '；活动变量仍处于禁用状态' : '') + '。未触发签到。';
+  }
   try {
     if (capture) { captureCredential(); return; }
     config = settings(typeof $argument === 'undefined' ? null : $argument);
@@ -159,11 +226,12 @@
       console.log('[青龙接入] ' + (last ? JSON.stringify(last) : '暂无接入记录'));
       return;
     }
-    if (!['检查连接', '同步京东凭据', '列出任务', '执行指定任务'].includes(action)) fail('请选择青龙接入操作');
+    if (!['检查连接', '同步京东凭据', '同步活动凭据', '列出任务', '执行指定任务'].includes(action)) fail('请选择青龙接入操作');
     config.base = baseUrl(config.qlUrl);
     const clientId = String(config.clientId || '').trim(), secret = String(config.clientSecret || '').trim();
     if (!clientId || !secret) fail('请在插件参数中填写 Client ID 和 Client Secret');
-    if (action === '同步京东凭据' || action === '执行指定任务') takeLock();
+    if (['同步京东凭据', '同步活动凭据', '执行指定任务'].includes(action)) takeLock();
+    const pack = action === '同步活动凭据' || action === '同步京东凭据' && config.syncActivities === true ? activityPack() : null;
     const auth = await request('get', '/auth/token?client_id=' + encodeURIComponent(clientId) + '&client_secret=' + encodeURIComponent(secret));
     if (!auth || typeof auth.token !== 'string' || !auth.token) fail('青龙未返回有效授权令牌');
     const token = auth.token;
@@ -172,7 +240,14 @@
       const list = await tasks(token);
       result.taskCount = list.length;
       result.message = '青龙连接及环境变量、定时任务读取权限正常，当前查到 ' + list.length + ' 个任务。未执行任务。';
-    } else if (action === '同步京东凭据') result.message = await sync(token);
+    } else if (action === '同步京东凭据' || action === '同步活动凭据') {
+      result.message = await sync(token);
+      if (pack) {
+        // Cookie and activity writes cannot be transactional in OpenAPI; report a partial update explicitly.
+        try { result.message += '\n' + await syncActivities(token, pack); }
+        catch (e) { fail('青龙登录凭据已同步，但活动凭据同步失败：' + (e.message || '请查看面板') + '；未触发任务，请核对后再同步'); }
+      }
+    }
     else if (action === '列出任务') {
       const list = await tasks(token);
       result.tasks = list.map(x => ({id: idOf(x), name: String(x.name || '').slice(0, 160), disabled: !!x.isDisabled}));
