@@ -1,9 +1,0 @@
-#!name=京东 start 展示推迟至2099
-#!desc=命中京东 start 时记录素材并将展示日期及时间戳推迟到2099年，保留素材列表和展示次数。完整开屏处理请使用jd_open.plugin，避免重复开启。
-#!loon_version = 3.5.1(983)
-
-[Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js") with tag="京东 start 开屏配置净化", requires_body=true, timeout=15
-
-[Mitm]
-hostname = api.m.jd.com
