@@ -9,7 +9,7 @@
 | 接口 | 处理 |
 | --- | --- |
 | apTaskList、apTaskDetail | 保留原业务参数和未签名的查询方式，使用正确的 HTTPS 地址与手机请求头；查询成功后才允许提交任务 |
-| apStartTaskTime | 保留原任务ID、素材ID和 pipeExt，使用官方SDK重新签名；签名appId为 acb1e |
+| apStartTaskTime | 保留原任务ID、素材ID和 pipeExt；请求路由appid按手机成功请求修正为 activity_platform_se，使用官方SDK重新签名，签名appId仍为 acb1e |
 | apDoLimitTimeTask | 保留原浏览完成请求，只有开始任务被接受后才提交；签名appId为 ebecc |
 | apsDoTask | 保留原任务参数；签名appId为54ed7 |
 | apTaskDrawAward | 保留原奖励领取参数；签名appId为f0f3f |
@@ -19,6 +19,14 @@
 **当前的环境来源是已同步的刮卡或PLUS活动，尚不是种豆浏览任务本身的成功模板。** 这是跨活动复用手机环境的对照试验，服务器是否接受仍需真实运行确认。业务参数、渠道等沿用Faker，不保证符合今天App的任务要求；若仍403，应对比App成功完成一个种豆任务的抓包，不能据此继续猜改参数或换签名反复提交。
 
 原 `weGameHome` / `weGameLottery` 连续签到与其他种豆操作继续由原脚本处理。本入口会运行原脚本的其他既有流程，不是仅执行这六个接口的独立业务重写，也不是对Faker代码的隔离沙箱。与原种豆任务、Loon种豆签到错开执行。
+
+## 2026-10-17.3更新：修正开始任务的路由appid
+
+对手机成功请求的本机核对发现：`apStartTaskTime`使用`appid=activity_platform_se`，签名应用标识仍为`acb1e`；`apTaskList`及`apDoLimitTimeTask`仍使用`activities_platform`。旧试验版统一填写`activities_platform`，与手机端开始任务的请求不一致。新版只修正这一接口的路由appid，并让新值参与新签名的计算，不在签名完成后改参数。日志增加`requestAppid`，入口显示适配器版本`2026-10-17.3`。
+
+这份手机记录中开始任务和浏览完成均成功。手机使用`h5_file_v5.3.6`，本机官方SDK能生成匹配其签名字段集合的签名。该记录还带有页面及设备扩展参数；当前试验仍沿用已同步的跨活动环境，不强行把旧环境版本改成5.3.6，也没有把私人HAR或设备令牌放入仓库。因此修正了明确的请求差异，403是否消失仍待青龙实际运行确认。
+
+已有试验任务只需更新自有仓库订阅，再手动运行同一任务。无需改白名单、任务命令或重新安装依赖；同项任务避免与App和原Faker任务同时执行。若仍失败，保留本次接口、requestAppid、环境版本及HTTP结果，不自动改其他参数反复提交。
 
 ## 怎样试一次
 

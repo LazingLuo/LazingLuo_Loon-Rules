@@ -4,13 +4,16 @@
 // their existing behavior. This is not a security sandbox for the Faker script.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),https=require('node:https');
 const signer=require('./plant-signer');
-const VERSION='2026-10-17.2';
+const VERSION='2026-10-17.3';
 // Hash the audited source after normalizing only a leading UTF-8 BOM, line
 // endings and trailing file whitespace. An extra newline in a review copy must
 // not reject the byte-exact GitHub file. All substantive code remains pinned.
 const EXPECTED='0e0f582b8f1ab05cc666bad46342e6a82cd60e956eabb9a0a1905c4d62b8748d';
 const MARKER='async function sgySJb_(vcYj9Vz,...doOZbP){';
 const IDS={apTaskList:null,apTaskDetail:null,apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f'};
+// The authenticated phone start request uses a separate routing appid. Its
+// signing application remains acb1e; completion/list requests keep the old appid.
+const APPIDS={apStartTaskTime:'activity_platform_se'};
 function safe(message){const e=Error(message);e.safe=true;return e;}
 function pair(cookie){
  const fields=String(cookie||'').split(';').map(s=>s.trim()).filter(Boolean);
@@ -102,7 +105,7 @@ function create(options={}){
    for(const name of ['User-Agent','Referer','Origin','Accept','Accept-Language','wg-sdk-token','x-rp-client','x-referer-page','request-from']){const v=header(s.profile.headers,name);if(v)headers[name]=v;}
    const extras=header(s.profile.headers,'Cookie').split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(key|pin)=/.test(x));
    headers.Cookie=s.login.cookie+extras.join(';')+';';headers['Content-Type']='application/x-www-form-urlencoded';headers['Accept-Encoding']='identity';
-   const params={functionId:fid,appid:'activities_platform',body:JSON.stringify(body),t:String(Date.now()),client:template.client||q.client||'apple',clientVersion:template.clientVersion||q.clientVersion||ua.split(';')[2]||'',platform:'3',loginType:'2',loginWQBiz:'wegame','x-api-eid-token':s.token};
+   const params={functionId:fid,appid:APPIDS[fid]||'activities_platform',body:JSON.stringify(body),t:String(Date.now()),client:template.client||q.client||'apple',clientVersion:template.clientVersion||q.clientVersion||ua.split(';')[2]||'',platform:'3',loginType:'2',loginWQBiz:'wegame','x-api-eid-token':s.token};
    let version;
    if(mutation){const signed=(options.sign||signer.sign)(params,appId,s.profile,s.login.pin);params.h5st=signed.h5st;version=signed.version;}
    else params.h5st='null'; // Preserve the upstream query contract; no invented query appId.
@@ -115,7 +118,7 @@ function create(options={}){
    if(response.status!==200){
     // 401/403 explicitly reject the request. Server errors/redirects remain ambiguous.
     if([401,403].includes(response.status)){delete s.state.pending;atomic(s.file,s.state);}
-    s.blocked=true;record(s,{functionId:fid,httpStatus:response.status,status:'http_rejected',environmentVersion:version,message:'本账号后续任务已停止；没有重试或切换签名路径'});process.exitCode=1;return;
+    s.blocked=true;record(s,{functionId:fid,requestAppid:params.appid,httpStatus:response.status,status:'http_rejected',environmentVersion:version,message:'本账号后续任务已停止；没有重试或切换签名路径'});process.exitCode=1;return;
    }
    let data;try{data=JSON.parse(response.body);}catch(_){throw safe('响应不是JSON，结果不明确，已停止');}
    if(!data||typeof data!=='object'||typeof data.success!=='boolean')throw safe('响应状态不明确，已停止');
@@ -123,7 +126,7 @@ function create(options={}){
    if(data.success){if(fid==='apTaskList')s.validated.add(context.linkId);if(fid==='apStartTaskTime')s.started.add(context.linkId);if(fid==='apDoLimitTimeTask')s.started.delete(context.linkId);}
    else s.blocked=true;
    const code=String(data.code??data.errCode??'');
-   record(s,{functionId:fid,httpStatus:200,status:data.success?'accepted':'business_rejected',environmentVersion:version,...(/^[A-Za-z0-9_-]{1,40}$/.test(code)?{businessCode:code}:{}),message:data.success?'接口接受请求；奖励以活动页面及原脚本复查为准':'接口拒绝任务，本账号后续任务已停止'});
+   record(s,{functionId:fid,requestAppid:params.appid,httpStatus:200,status:data.success?'accepted':'business_rejected',environmentVersion:version,...(/^[A-Za-z0-9_-]{1,40}$/.test(code)?{businessCode:code}:{}),message:data.success?'接口接受请求；奖励以活动页面及原脚本复查为准':'接口拒绝任务，本账号后续任务已停止'});
    if(!data.success){process.exitCode=1;return;}
    return data;
   }catch(error){if(s){s.blocked=true;try{record(s,{functionId:fid,status:'stopped',message:error.safe?error.message:'准备或解析失败，任务已停止'});}catch(_){log('[种豆任务试验] 结果保存失败，任务已停止');}}else log('[种豆任务试验] '+(error.safe?error.message:'凭据或本地记录处理失败'));process.exitCode=1;}

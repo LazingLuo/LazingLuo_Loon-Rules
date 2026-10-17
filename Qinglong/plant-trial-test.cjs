@@ -17,7 +17,7 @@ const context={cookie,linkId:'offline-link'};
  await check('Both audited SDK revisions sign all four task appIds with the captured phone context',async()=>{
 
   for(const version of ['h5_file_v5.3.5','h5_file_v5.3.6'])for(const [functionId,appId]of Object.entries({apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f'})){
-   const params={appid:'activities_platform',functionId,body:'{"linkId":"offline-link"}',t:String(Date.now()),client:'ios',clientVersion:'16.0.70'};
+   const params={appid:functionId==='apStartTaskTime'?'activity_platform_se':'activities_platform',functionId,body:'{"linkId":"offline-link"}',t:String(Date.now()),client:'ios',clientVersion:'16.0.70'};
    const signed=sdk.sign(params,appId,profile(version),pin),parts=signed.h5st.split(';'),env=sdk.environment({...profile(version),query:{referenceEnvironmentEncoded:parts[7]}},pin);
    assert.equal(parts[2],appId);assert.equal(parts[5],'5.3');assert.equal(env.v,version);assert.equal(env.pp.p1,pin);assert.equal(env.ai,appId);assert.equal(env.fp,parts[1]);assert.equal(env.canvas,'a'.repeat(32));
   }
@@ -27,9 +27,21 @@ const context={cookie,linkId:'offline-link'};
   const r=rig();try{
    assert(await r.a.request('apTaskList',[0],context));assert(await r.a.request('apStartTaskTime',['task','item',{}],context));assert(await r.a.request('apDoLimitTimeTask',[],context));
    assert.equal(r.calls.length,3);const o=r.calls[1],p=new URLSearchParams(o.body);
-   assert.equal(o.url,'https://api.m.jd.com/api?functionId=apStartTaskTime');assert.equal(p.get('h5st'),'offline-signature');assert.equal(p.get('x-api-eid-token'),'OFFLINE_EID');assert.equal(p.get('client'),'ios');assert.equal(o.headers['User-Agent'],profile().headers['User-Agent']);assert(o.headers.Cookie.includes('OFFLINE_DEVICE'));assert.equal(p.get('appid'),'activities_platform');
+   assert.equal(o.url,'https://api.m.jd.com/api?functionId=apStartTaskTime');assert.equal(p.get('h5st'),'offline-signature');assert.equal(p.get('x-api-eid-token'),'OFFLINE_EID');assert.equal(p.get('client'),'ios');assert.equal(o.headers['User-Agent'],profile().headers['User-Agent']);assert(o.headers.Cookie.includes('OFFLINE_DEVICE'));assert.equal(p.get('appid'),'activity_platform_se');assert.equal(new URLSearchParams(r.calls[0].body).get('appid'),'activities_platform');assert.equal(new URLSearchParams(r.calls[2].body).get('appid'),'activities_platform');
    const state=JSON.parse(fs.readFileSync(path.join(r.dir,fs.readdirSync(r.dir)[0],'plant-trial/state.json')));assert.equal(state.pending,undefined);
    const logs=r.logs.join('\n');for(const secret of ['OFFLINE_KEY','OFFLINE_DEVICE','OFFLINE_EID',pin,'offline-signature'])assert(!logs.includes(secret));
+  }finally{r.a.close();}
+ });
+ await check('Start routing appid is signed before submission and does not leak into other task interfaces',async()=>{
+  const signed=[];const r=rig(null,{sign:(params,appId)=>{signed.push({functionId:params.functionId,appid:params.appid,appId});return fakeSign();}});
+  try{
+   await r.a.request('apTaskList',[],context);
+   await r.a.request('apStartTaskTime',['t','i',{}],context);
+   await r.a.request('apDoLimitTimeTask',[],context);
+   await r.a.request('apsDoTask',['BROWSE_CHANNEL','t',{}],context);
+   await r.a.request('apTaskDrawAward',['BROWSE_CHANNEL','t',{}],context);
+   assert.deepEqual(signed,[{functionId:'apStartTaskTime',appid:'activity_platform_se',appId:'acb1e'},{functionId:'apDoLimitTimeTask',appid:'activities_platform',appId:'ebecc'},{functionId:'apsDoTask',appid:'activities_platform',appId:'54ed7'},{functionId:'apTaskDrawAward',appid:'activities_platform',appId:'f0f3f'}]);
+   assert(r.logs.some(s=>s.includes('\"requestAppid\":\"activity_platform_se\"')));
   }finally{r.a.close();}
  });
  await check('Task mutations cannot precede the task list query',async()=>{const r=rig();try{await r.a.request('apStartTaskTime',['t','i',{}],context);assert.equal(r.calls.length,0);}finally{r.a.close();}});
