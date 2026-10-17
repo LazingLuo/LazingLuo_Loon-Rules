@@ -4,7 +4,7 @@
 // their existing behavior. This is not a security sandbox for the Faker script.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),https=require('node:https');
 const signer=require('./plant-signer');
-const VERSION='2026-10-17.3';
+const VERSION='2026-10-18.1';
 // Hash the audited source after normalizing only a leading UTF-8 BOM, line
 // endings and trailing file whitespace. An extra newline in a review copy must
 // not reject the byte-exact GitHub file. All substantive code remains pinned.
@@ -27,20 +27,21 @@ function packs(env){
  data=Array.isArray(data)?data:[data];const profiles=new Map();
  for(const p of data){
   if(!p||p.version!==1||typeof p.pin!=='string'||profiles.has(p.pin))throw safe('缺少或存在重复的活动账号，请同步活动凭据');
-  const candidates=['scratch','blindbox'].map(mode=>({mode,profile:p.activities&&p.activities[mode]})).filter(x=>x.profile&&x.profile.query).sort((a,b)=>(b.profile.capturedAt||0)-(a.profile.capturedAt||0));
-  let selected;
-  for(const candidate of candidates){
-   const profile=candidate.profile,raw=pair(header(profile.headers,'Cookie'));
-   if(raw.pin!==p.pin)throw safe('活动记录账号不匹配');
-   if(!header(profile.headers,'User-Agent')||!header(profile.headers,'Referer'))continue;
-   try{signer.environment(profile,p.pin);}catch(_){continue;}
-   const template=profile.interaction&&profile.interaction.referenceEnvironmentEncoded?profile.interaction:profile.query;
-   const token=template.params&&template.params['x-api-eid-token']||profile.query.params&&profile.query.params['x-api-eid-token'];
-   if(!token)continue;
-   selected={mode:candidate.mode,profile,token};break;
+  const profile=p.activities&&p.activities.plantTasks;
+  if(!profile||profile.version!==1||profile.pin!==p.pin||!profile.ready||profile.linkId!=='4HcenxuZM4XiHesOb1HG4g')throw safe('缺少完整种豆任务上下文：请更新Loon青龙接入，完成一次种豆浏览任务，再同步活动凭据');
+  if(pair(header(profile.headers,'Cookie')).pin!==p.pin)throw safe('种豆任务上下文账号不匹配');
+  for(const fid of ['apTaskList','apStartTaskTime','apDoLimitTimeTask']){
+   const t=profile.templates&&profile.templates[fid];
+   if(!t||t.endpoint!=='https://api.m.jd.com/api'||!t.params||!t.headers||pair(header(t.headers,'Cookie')).pin!==p.pin)throw safe('种豆任务模板不完整或账号不一致，请重新获取');
+   for(const key of ['client','clientVersion','x-api-eid-token','uuid','wg-sdk-token'])if(typeof t.params[key]!=='string'||!t.params[key])throw safe('种豆任务缺少页面及设备参数，请重新获取');
+   if(t.params.uuid!==profile.uuid||t.params.clientVersion!==profile.clientVersion||header(t.headers,'User-Agent')!==header(profile.headers,'User-Agent'))throw safe('种豆任务模板来自不同设备或版本，请重新获取');
+   if(t.params.appid!==(APPIDS[fid]||'activities_platform'))throw safe('种豆任务路由参数变化，请核对手机成功请求');
+   if(IDS[fid]){
+    if(t.signatureAppId!==IDS[fid]||!t.signatureParameterEncoding)throw safe('种豆任务签名配置不完整');
+    try{signer.environment({query:t},p.pin);}catch(_){throw safe('种豆任务签名环境不匹配或不兼容，请重新获取');}
+   }
   }
-  if(!selected)throw safe('缺少可用的同账号手机环境，请进入刮卡或PLUS页并同步活动凭据');
-  profiles.set(p.pin,selected);
+  profiles.set(p.pin,{profile});
  }
  return profiles;
 }
@@ -87,7 +88,7 @@ function create(options={}){
   try{state=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};if(!state||typeof state!=='object'||Array.isArray(state))throw Error();}catch(_){fs.unlinkSync(lock);throw safe('种豆任务提交记录损坏，已停止');}
   const s={...selected,login,file,lock,owner,state,validated:new Set(),started:new Set(),blocked:false};sessions.set(login.pin,s);
   if(state.pending)s.blocked=true;
-  log('[种豆任务试验] 使用同步的'+(s.mode==='scratch'?'刮卡':'PLUS')+'手机环境；跨活动复用是否被接受仍需验证。');
+  log('[种豆任务试验] 使用种豆任务专用页面上下文；未借用刮卡或PLUS环境。');
   return s;
  }
  function record(s,fields){s.state.last={time:Date.now(),...fields};atomic(s.file,s.state);log('[种豆任务试验] '+JSON.stringify(s.state.last));}
@@ -99,16 +100,25 @@ function create(options={}){
    const appId=IDS[fid],mutation=!!appId;
    if(mutation&&!s.validated.has(context.linkId))throw safe('任务列表尚未查询成功，不提交任务');
    if(fid==='apDoLimitTimeTask'&&!s.started.has(context.linkId))throw safe('尚未确认任务开始，不提交浏览完成');
-   const body=build(fid,args,context.linkId),q=s.profile.query.params||{},headers={};
-   const template=s.profile.interaction&&s.profile.interaction.params||q;
-   const ua=header(s.profile.headers,'User-Agent');
-   for(const name of ['User-Agent','Referer','Origin','Accept','Accept-Language','wg-sdk-token','x-rp-client','x-referer-page','request-from']){const v=header(s.profile.headers,name);if(v)headers[name]=v;}
-   const extras=header(s.profile.headers,'Cookie').split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(key|pin)=/.test(x));
+   if(context.linkId!==s.profile.linkId)throw safe('活动编号与种豆上下文不一致，未提交');
+   const body=build(fid,args,context.linkId),base=s.profile.templates;
+   // Exact task contexts take priority. Legacy detail/award calls reuse the
+   // same plant page's list/completion context, never another activity.
+   const contextSource=base[fid]?fid:mutation?'apDoLimitTimeTask':'apTaskList';
+   const template=base[contextSource],headers={};
+   if(!template)throw safe('缺少该种豆任务接口上下文，未提交');
+   if(base[fid]&&mutation&&template.signatureAppId!==appId)throw safe('种豆任务签名应用不匹配，未提交');
+   for(const name of ['User-Agent','Referer','Origin','Accept','Accept-Language','x-rp-client','x-referer-page','request-from','sec-fetch-site','sec-fetch-mode','sec-fetch-dest','priority']){const v=header(template.headers,name);if(v)headers[name]=v;}
+   const extras=header(template.headers,'Cookie').split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(key|pin)=/.test(x));
    headers.Cookie=s.login.cookie+extras.join(';')+';';headers['Content-Type']='application/x-www-form-urlencoded';headers['Accept-Encoding']='identity';
-   const params={functionId:fid,appid:APPIDS[fid]||'activities_platform',body:JSON.stringify(body),t:String(Date.now()),client:template.client||q.client||'apple',clientVersion:template.clientVersion||q.clientVersion||ua.split(';')[2]||'',platform:'3',loginType:'2',loginWQBiz:'wegame','x-api-eid-token':s.token};
+   const params={...template.params,functionId:fid,appid:APPIDS[fid]||'activities_platform',body:JSON.stringify(body),t:String(Date.now())};delete params.h5st;
    let version;
-   if(mutation){const signed=(options.sign||signer.sign)(params,appId,s.profile,s.login.pin);params.h5st=signed.h5st;version=signed.version;}
-   else params.h5st='null'; // Preserve the upstream query contract; no invented query appId.
+   if(mutation){
+    const signed=(options.sign||signer.sign)(params,appId,{headers,query:template},s.login.pin);
+    const parts=String(signed.h5st||'').split(';');
+    if(parts.length!==10||parts[9]!==template.signatureParameterEncoding)throw safe('种豆任务签名字段与手机模板不一致，未提交');
+    params.h5st=signed.h5st;version=signed.version;
+   }else if(template.unsignedH5st)params.h5st='null';
    const query=new URLSearchParams({functionId:fid});
    const bodyText=new URLSearchParams(params).toString();
    if(mutation){s.state.pending={time:Date.now(),functionId:fid};atomic(s.file,s.state);}
@@ -118,7 +128,7 @@ function create(options={}){
    if(response.status!==200){
     // 401/403 explicitly reject the request. Server errors/redirects remain ambiguous.
     if([401,403].includes(response.status)){delete s.state.pending;atomic(s.file,s.state);}
-    s.blocked=true;record(s,{functionId:fid,requestAppid:params.appid,httpStatus:response.status,status:'http_rejected',environmentVersion:version,message:'本账号后续任务已停止；没有重试或切换签名路径'});process.exitCode=1;return;
+    s.blocked=true;record(s,{functionId:fid,requestAppid:params.appid,contextSource,contextCapturedAt:template.capturedAt,httpStatus:response.status,status:'http_rejected',environmentVersion:version,message:'本账号后续任务已停止；没有重试或切换签名路径'});process.exitCode=1;return;
    }
    let data;try{data=JSON.parse(response.body);}catch(_){throw safe('响应不是JSON，结果不明确，已停止');}
    if(!data||typeof data!=='object'||typeof data.success!=='boolean')throw safe('响应状态不明确，已停止');
@@ -126,7 +136,7 @@ function create(options={}){
    if(data.success){if(fid==='apTaskList')s.validated.add(context.linkId);if(fid==='apStartTaskTime')s.started.add(context.linkId);if(fid==='apDoLimitTimeTask')s.started.delete(context.linkId);}
    else s.blocked=true;
    const code=String(data.code??data.errCode??'');
-   record(s,{functionId:fid,requestAppid:params.appid,httpStatus:200,status:data.success?'accepted':'business_rejected',environmentVersion:version,...(/^[A-Za-z0-9_-]{1,40}$/.test(code)?{businessCode:code}:{}),message:data.success?'接口接受请求；奖励以活动页面及原脚本复查为准':'接口拒绝任务，本账号后续任务已停止'});
+   record(s,{functionId:fid,requestAppid:params.appid,contextSource,contextCapturedAt:template.capturedAt,httpStatus:200,status:data.success?'accepted':'business_rejected',environmentVersion:version,...(/^[A-Za-z0-9_-]{1,40}$/.test(code)?{businessCode:code}:{}),message:data.success?'接口接受请求；奖励以活动页面及原脚本复查为准':'接口拒绝任务，本账号后续任务已停止'});
    if(!data.success){process.exitCode=1;return;}
    return data;
   }catch(error){if(s){s.blocked=true;try{record(s,{functionId:fid,status:'stopped',message:error.safe?error.message:'准备或解析失败，任务已停止'});}catch(_){log('[种豆任务试验] 结果保存失败，任务已停止');}}else log('[种豆任务试验] '+(error.safe?error.message:'凭据或本地记录处理失败'));process.exitCode=1;}

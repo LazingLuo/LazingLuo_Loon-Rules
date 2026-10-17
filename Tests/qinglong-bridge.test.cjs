@@ -125,6 +125,39 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
     const r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(a),JXZY_CHECKIN_ACCOUNT_V1:JSON.stringify({pin:'OTHER',headers:{Cookie:'pt_key=OTHER;pt_pin=OTHER;'},query:{params:{}}})});
     assert.equal(r.result.status,'failed');assert.equal(r.calls.length,0);
   });
+  const plantFixture=()=>({version:1,pin:'TEST_PIN',linkId:'4HcenxuZM4XiHesOb1HG4g',uuid:'TEST_UUID',clientVersion:'16.1.30',ready:true,capturedAt:300,updatedAt:300,
+    headers:{Cookie:'pt_key=NEW_KEY;pt_pin=TEST_PIN;','User-Agent':'TEST_UA'},templates:{apStartTaskTime:{endpoint:'https://api.m.jd.com/api',capturedAt:300,
+      headers:{Cookie:'pt_key=NEW_KEY;pt_pin=TEST_PIN;','User-Agent':'TEST_UA'},params:{appid:'activity_platform_se','wg-sdk-token':'PRIVATE_PLANT_TOKEN',uuid:'TEST_UUID',body:'PRIVATE_TASK',h5st:'OLD_SIGNATURE',t:'123'},
+      referenceEnvironmentEncoded:'PRIVATE_PLANT_ENV',signatureParameterEncoding:'TEST_STK',signatureAppId:'acb1e',environmentVersion:'h5_file_v5.3.6',privateUnused:'DO_NOT_EXPORT'}}});
+  await test('plant-only capture exports native context without task bodies or old signatures',async()=>{
+    let exported;
+    const r=await run({action:'同步活动凭据'},{JD_PLANT_TASK_CONTEXT_V1:JSON.stringify(plantFixture())},(method,path,o)=>{
+      if(method==='post'){
+        const item=JSON.parse(o.body)[0];
+        if(item.name==='JD_COOKIE')assert.equal(item.value,'pt_key=NEW_KEY;pt_pin=TEST_PIN;');
+        if(item.name==='LAZING_JD_ACTIVITY_V1')exported=JSON.parse(item.value);
+      }
+    });
+    assert.equal(r.result.status,'success');assert(r.result.activities.includes('种豆任务上下文'));
+    const t=exported.activities.plantTasks.templates.apStartTaskTime;
+    assert.equal(t.params['wg-sdk-token'],'PRIVATE_PLANT_TOKEN');assert.equal(t.referenceEnvironmentEncoded,'PRIVATE_PLANT_ENV');
+    for(const k of ['body','h5st','t'])assert.equal(t.params[k],undefined);assert.equal(t.privateUnused,undefined);
+    assert.equal(r.calls.filter(x=>x.method==='post').length,2);assert(r.calls.every(x=>x.url.startsWith('http://192.168.1.100:5700/open/')));
+    for(const s of ['PRIVATE_PLANT_TOKEN','PRIVATE_PLANT_ENV','PRIVATE_TASK','OLD_SIGNATURE'])assert(!JSON.stringify({logs:r.logs,notices:r.notices,result:r.result}).includes(s));
+  });
+  await test('partial plant context stays partial and rejects mixed account templates before upload',async()=>{
+    const partial=plantFixture();partial.ready=false;
+    let exported;
+    let r=await run({action:'同步活动凭据'},{JD_PLANT_TASK_CONTEXT_V1:JSON.stringify(partial)},(method,path,o)=>{
+      if(method==='post'){const item=JSON.parse(o.body)[0];if(item.name==='LAZING_JD_ACTIVITY_V1')exported=JSON.parse(item.value);}
+    });
+    assert.equal(r.result.status,'success');assert.equal(exported.activities.plantTasks.ready,false);
+    for(const field of ['profile','template']){
+      const p=plantFixture();if(field==='profile')p.pin='OTHER';else p.templates.apStartTaskTime.headers.Cookie='pt_key=OTHER;pt_pin=OTHER;';
+      r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(account),JD_PLANT_TASK_CONTEXT_V1:JSON.stringify(p)});
+      assert.equal(r.result.status,'failed');assert.equal(r.calls.length,0);
+    }
+  });
   await test('activity update preserves disabled state and unrelated labels, partial failure is explicit',async()=>{
     const a=JSON.parse(JSON.stringify(account));a.modes.scratch.query={params:{}};
     let r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(a)},(method,path,o)=>{

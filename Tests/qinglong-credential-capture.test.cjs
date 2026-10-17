@@ -18,6 +18,14 @@ function jdRequest(mode){
  const response=mode==='daily'?{code:'0',data:{signComponentInfoResult:[task]}}:mode==='scratch'?{code:'1711000',msg:'成功',rs:{beanTask:{taskList:[task]}}}:{code:'1711000',msg:'成功',rs:{sendBenefitList:[]}};
  return {request:{method:'POST',url:'https://api.m.jd.com/api?functionId='+id,headers,body:form(p)},response};
 }
+function plantRequest(fid){
+ const env={v:'h5_file_v5.3.6',fp:'TEST_FP',pp:{p1:'TEST_PIN'},extend:{},canvas:'a'.repeat(32),webglFp:'b'.repeat(32)};
+ const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/',map='rqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_9876543210zyxwvuts';
+ const encoded=[...Buffer.from(JSON.stringify(env)+'x').toString('base64').replace(/=+$/,'')].map(c=>map[chars.indexOf(c)]).reverse().join('');
+ const signApp={apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'}[fid];
+ const p={functionId:fid,appid:fid==='apStartTaskTime'?'activity_platform_se':'activities_platform',body:JSON.stringify({linkId:'4HcenxuZM4XiHesOb1HG4g',taskId:'TEST_TASK',itemId:'TEST_ITEM'}),client:'ios',clientVersion:'16.1.30',uuid:'TEST_UUID','wg-sdk-token':'TEST_WG','x-api-eid-token':'TEST_EID',ext:'TEST_EXT',cthr:'TEST_CTHR',h5st:signApp?h5(signApp,encoded):'null'};
+ return {request:{method:'POST',url:'https://api.m.jd.com/api?functionId='+fid,headers,body:form(p)},response:{code:0,success:true,data:fid==='apTaskList'?[]:{finished:true}}};
+}
 function cashRequest(endpoint,risk=false){return {request:{method:'POST',url:'https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/'+endpoint,headers,body:form({reqData:JSON.stringify({...cashContext,...risk?{riskDeviceParam:'TEST_RISK'}:{}})})},response:ok(endpoint==='queryWeekSignMain'?{sign:false}:{access:true})};}
 function doubleRequest(){return {request:{method:'POST',url:'https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoDoubleSignInForH5',headers,body:form({reqData:JSON.stringify({pageId:11046})})},response:{resultCode:0,success:true,resultData:{hasError:false,resultList:[{templateData:{data:{businessCode:'000sq',businessData:{dateTime:today()+' 10:00:00',signInJd:true,signInJr:true,get:false}}}}]}}};}
 function jxRequest(kind){
@@ -40,7 +48,7 @@ async function run({request,response,config={capture:true,captureActivities:true
  if(now){const OriginalDate=Date;ctx.Date=class extends OriginalDate{constructor(...args){super(...args.length?args:[now]);}static now(){return now;}};}
  vm.runInNewContext(source,ctx,{timeout:3000});await completed;
  assert.equal(done,1);assert.equal(network,0);assert.equal(notices.length,0);
- for(const secret of ['TEST_KEY','TEST_TOKEN','TEST_RISK','TEST_PAGE','TEST_PIN'])assert(!logs.join('\n').includes(secret),'secret in log: '+secret);
+ for(const secret of ['TEST_KEY','TEST_TOKEN','TEST_RISK','TEST_PAGE','TEST_PIN','TEST_UUID','TEST_WG','TEST_EID','TEST_EXT','TEST_CTHR'])assert(!logs.join('\n').includes(secret),'secret in log: '+secret);
  for(const key of writes)assert(!/ATTEMPT|LOCK|LAST_RESULT|JD_COOKIE|LAZING_JD_ACTIVITY/.test(key),'capture touched execution/upload state: '+key);
  return {store,logs,writes,result:JSON.parse(store[LAST]||'null')};
 }
@@ -53,7 +61,7 @@ async function run({request,response,config={capture:true,captureActivities:true
   for(const endpoint of ['api','client.action'])for(const query of ['', '?appid=wh5']){
    const request={method:'POST',url:'https://api.m.jd.com/'+endpoint+query,headers,body:form({functionId:'logConfig',body:'{}'})},before=JSON.stringify(request);
    const r=await run({request,response:{code:0}});
-   assert(r.store[LOGIN]);assert(!r.store[JD]);assert.equal(r.result.functionIdSource,'body');assert.equal(r.result.version,'2026-10-17.3');assert.equal(JSON.stringify(request),before);
+   assert(r.store[LOGIN]);assert(!r.store[JD]);assert.equal(r.result.functionIdSource,'body');assert.equal(r.result.version,'2026-10-18.1');assert.equal(JSON.stringify(request),before);
   }
  });
  await check('body-only activity identifiers capture all JD modes and Jingxi query/environment',async()=>{
@@ -157,6 +165,27 @@ async function run({request,response,config={capture:true,captureActivities:true
   assert(uploads.some(x=>x.name==='JD_COOKIE'));const pack=JSON.parse(uploads.find(x=>x.name==='LAZING_JD_ACTIVITY_V1').value);
   assert.deepEqual(Object.keys(pack.activities).sort(),['blindbox','finance','jxzy','scratch']);assert(pack.activities.finance.ready&&pack.activities.finance.doubleSign);assert(!calls.some(x=>x.url.includes('/crons')));
  });
+ await check('plant captures three native task templates without storing task IDs, old signatures or request bodies',async()=>{
+  const store={};for(const fid of ['apTaskList','apStartTaskTime','apDoLimitTimeTask'])await run({...plantRequest(fid),store});
+  const p=JSON.parse(store.JD_PLANT_TASK_CONTEXT_V1);assert(p.ready);assert.equal(p.templates.apStartTaskTime.params.appid,'activity_platform_se');assert.equal(p.templates.apStartTaskTime.params['wg-sdk-token'],'TEST_WG');assert.equal(p.templates.apDoLimitTimeTask.environmentVersion,'h5_file_v5.3.6');
+  for(const t of Object.values(p.templates)){assert(!('body'in t.params));assert(!('h5st'in t.params));assert(!('t'in t.params));}
+  const last=JSON.parse(store[LAST]);assert(last.complete);assert.equal(last.source,'种豆任务');assert(store[LOGIN]);
+ });
+ await check('different plant UUID resets readiness instead of combining devices',async()=>{
+  const store={};for(const fid of ['apTaskList','apStartTaskTime','apDoLimitTimeTask'])await run({...plantRequest(fid),store});
+  const s=plantRequest('apTaskList'),p=Object.fromEntries(new URLSearchParams(s.request.body));p.uuid='CHANGED_UUID';s.request.body=form(p);await run({...s,store});
+  const captured=JSON.parse(store.JD_PLANT_TASK_CONTEXT_V1);assert(!captured.ready);assert(!captured.templates.apStartTaskTime);
+ });
+ await check('other activities, rejected tasks and malformed plant environments preserve native context',async()=>{
+  const store={};await run({...plantRequest('apTaskList'),store});const previous=store.JD_PLANT_TASK_CONTEXT_V1;
+  for(const change of [p=>{p.body=JSON.stringify({linkId:'OTHER_LINK'});},p=>{p.h5st=h5('wrong');}]){const sample=plantRequest('apStartTaskTime'),p=Object.fromEntries(new URLSearchParams(sample.request.body));change(p);sample.request.body=form(p);await run({...sample,store});assert.equal(store.JD_PLANT_TASK_CONTEXT_V1,previous);}
+  await run({...plantRequest('apStartTaskTime'),store,response:{code:403,success:false}});assert.equal(store.JD_PLANT_TASK_CONTEXT_V1,previous);
+ });
+ await check('plant capture switches and account binding remain independent',async()=>{
+  let r=await run({...plantRequest('apTaskList'),config:{capture:false,captureActivities:true}});assert(r.store.JD_PLANT_TASK_CONTEXT_V1);assert(!r.store[LOGIN]);
+  r=await run({...plantRequest('apTaskList'),config:{capture:true,captureActivities:false}});assert.equal(r.writes.length,0);
+  r=await run({...plantRequest('apTaskList'),store:{QL_BRIDGE_ACCOUNT_V1:JSON.stringify({pin:'OTHER_PIN'})}});assert(!r.store.JD_PLANT_TASK_CONTEXT_V1);
+ });
  const arg=process.argv.indexOf('--har');
  if(arg>=0)await check('private HAR replay captures financial context without network or leaking it',async()=>{
   const data=JSON.parse(fs.readFileSync(process.argv[arg+1],'utf8'));const store={};let count=0;
@@ -183,6 +212,30 @@ async function run({request,response,config={capture:true,captureActivities:true
    matched++;
   }
   assert(matched>0&&updated>0);assert(store[LOGIN]);console.log('Private JD replay: '+matched+' API responses; '+updated+' login updates. No credential values printed.');
+ });
+ const plantArg=process.argv.indexOf('--plant-har');
+ if(plantArg>=0)await check('private plant HAR capture and native signing work end-to-end offline',async()=>{
+  const entries=JSON.parse(fs.readFileSync(process.argv[plantArg+1],'utf8')).log.entries.sort((a,b)=>Date.parse(a.startedDateTime)-Date.parse(b.startedDateTime));
+  const store={};const decode=p=>p.encoding==='base64'?Buffer.from(p.text||'','base64').toString('utf8'):p.text||'';
+  for(const e of entries){
+   if(!/^https:\/\/api\.m\.jd\.com\/api(?:\?|$)/.test(e.request.url)||e.request.method!=='POST'||e.response.status!==200)continue;
+   const headers={};for(const h of e.request.headers){const k=h.name.toLowerCase();headers[k]=k==='cookie'&&headers[k]?headers[k]+'; '+h.value:h.value;}
+   await run({store,now:Date.parse(e.startedDateTime),request:{url:e.request.url,method:e.request.method,headers,body:decode(e.request.postData||{})},response:decode(e.response.content||{}),status:e.response.status});
+  }
+  const p=JSON.parse(store.JD_PLANT_TASK_CONTEXT_V1||'null');assert(p&&p.ready);
+  const sdk=require(local?'../nas-qinglong-own/function/plant-signer':'../Qinglong/function/plant-signer');
+  for(const fid of ['apStartTaskTime','apDoLimitTimeTask']){const t=p.templates[fid],params={...t.params,functionId:fid,body:JSON.stringify({linkId:p.linkId}),t:String(Date.now())};const signed=sdk.sign(params,t.signatureAppId,{headers:t.headers,query:t},p.pin);assert.equal(signed.version,t.environmentVersion);assert.equal(signed.h5st.split(';')[9],t.signatureParameterEncoding);}
+  const adapter=require(local?'../nas-qinglong-own/function/plant-trial':'../Qinglong/function/plant-trial');
+  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'plant-native-replay-')),sent=[],logs=[];
+  const trial=adapter.create({env:{LAZING_JD_ACTIVITY_V1:JSON.stringify({version:1,pin:p.pin,activities:{plantTasks:p}})},dataDir:dir,noExitHook:true,log:s=>logs.push(s),transport:async o=>{sent.push(o);return {status:200,body:'{"code":0,"success":true,"data":{}}'};}});
+  try{
+   const cookie=Object.entries(p.headers).find(([k])=>k.toLowerCase()==='cookie')[1],context={cookie,linkId:p.linkId};
+   await trial.request('apTaskList',[0],context);await trial.request('apStartTaskTime',['OFFLINE_TASK','OFFLINE_ITEM',{}],context);await trial.request('apDoLimitTimeTask',[],context);
+   assert.equal(sent.length,3);
+   for(const o of sent){const params=Object.fromEntries(new URLSearchParams(o.body)),t=p.templates[params.functionId];for(const [k,v]of Object.entries(t.params))assert(params[k]===v,'native generic parameter changed: '+k);if(t.signatureAppId)assert(params.h5st.split(';')[9]===t.signatureParameterEncoding,'native signature parameter set changed');}
+   for(const t of Object.values(p.templates))for(const k of ['wg-sdk-token','uuid','x-api-eid-token'])if(t.params[k])assert(!logs.join('\n').includes(t.params[k]),'private context leaked');
+  }finally{trial.close();fs.rmSync(dir,{recursive:true,force:true});}
+  console.log('Private plant replay: native capture feeds the adapter; all three mocked requests retain phone context and matching fresh signatures.');
  });
  console.log(checks+' unified capture checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

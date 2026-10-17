@@ -4,7 +4,7 @@ const {$request,$response,$argument,$persistentStore,$notification,$script,$http
 const $done=()=>{};
 // Loon -> Qinglong OpenAPI bridge. No JD requests, signing or automatic task runs.
 return (async function () {
-  const VERSION = '2026-10-17.1';
+  const VERSION = '2026-10-18.1';
   const PREFIX = 'QL_BRIDGE_';
   const capture = typeof $request !== 'undefined';
   let config, lock, result = {time: Date.now(), version: VERSION};
@@ -43,8 +43,12 @@ return (async function () {
     try { return JSON.parse($persistentStore.read('JD_JR_CHECKIN_ACCOUNT_V1') || 'null'); }
     catch (_) { return null; }
   }
+  function existingPlant() {
+    try { return JSON.parse($persistentStore.read('JD_PLANT_TASK_CONTEXT_V1') || 'null'); }
+    catch (_) { return null; }
+  }
   function latestCredential() {
-    const existing = readExistingJD(), jx = existingJX(), saved = read('CREDENTIAL_V1', null);
+    const existing = readExistingJD(), jx = existingJX(), plant = existingPlant(), saved = read('CREDENTIAL_V1', null);
     const bound = read('ACCOUNT_V1', null);
     const candidates = saved ? [saved] : [];
     if (existing && existing.modes) {
@@ -62,7 +66,11 @@ return (async function () {
         capturedAt: Number(jx.loginUpdatedAt || jx.capturedAt || 0), source: 'existing_jxzy'
       }));
     }
-    const pin = bound && bound.pin || existing && existing.pin || saved && saved.pin || jx && jx.pin;
+    if (plant && plant.headers) {
+      const pair = cookiePair(header(plant.headers, 'cookie'));
+      if (pair && pair.pin === plant.pin) candidates.push(Object.assign(pair, {capturedAt:Number(plant.updatedAt || plant.capturedAt || 0), source:'existing_plant_tasks'}));
+    }
+    const pin = bound && bound.pin || existing && existing.pin || saved && saved.pin || jx && jx.pin || plant && plant.pin;
     const valid = candidates.filter(x => x && x.pin === pin && cookiePair(x.cookie));
     valid.sort((a, b) => Number(b.capturedAt || 0) - Number(a.capturedAt || 0));
     if (!valid.length) fail('尚无可同步的京东凭据，请打开凭据获取开关并正常使用京东');
@@ -198,6 +206,24 @@ return (async function () {
         if (attempt && attempt.pin === credential.pin) pack.attempts[name] = attempt;
       }
     }
+    const plant = existingPlant();
+    if (plant && plant.templates && Object.keys(plant.templates).length) {
+      const login = cookiePair(header(plant.headers, 'cookie'));
+      if (!login || plant.pin !== credential.pin || login.pin !== credential.pin) fail('青龙种豆任务凭据账号不一致，未同步');
+      const profile = {};
+      for (const key of ['version','pin','linkId','uuid','clientVersion','capturedAt','updatedAt','ready','headers']) if (plant[key] !== undefined) profile[key] = JSON.parse(JSON.stringify(plant[key]));
+      profile.templates = {};
+      for (const fid of ['apTaskList','apTaskDetail','apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward']) {
+        const t = plant.templates[fid]; if (!t) continue;
+        const pair = cookiePair(header(t.headers, 'cookie'));
+        if (!pair || pair.pin !== credential.pin) fail('青龙种豆任务模板账号不一致，未同步');
+        const copy = {};
+        for (const key of ['endpoint','params','headers','capturedAt','unsignedH5st','referenceEnvironmentEncoded','signatureParameterEncoding','signatureAppId','environmentVersion']) if (t[key] !== undefined) copy[key] = JSON.parse(JSON.stringify(t[key]));
+        if (copy.params) {delete copy.params.body;delete copy.params.h5st;delete copy.params.t;}
+        profile.templates[fid] = copy;
+      }
+      pack.activities.plantTasks = profile;
+    }
     if (!Object.keys(pack.activities).length) fail('尚无可同步的独立活动请求记录，请开启对应获取开关、进入活动页面后再同步');
     return pack;
   }
@@ -225,7 +251,7 @@ return (async function () {
         await request('put', '/envs', body, token);
       }
     } else await request('post', '/envs', [{name, value: JSON.stringify(pack), remarks: 'Loon 独立活动凭据'}], token);
-    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营', finance:'金融签到＋双签'};
+    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营', finance:'金融签到＋双签', plantTasks:'种豆任务上下文'};
     result.activities = Object.keys(pack.activities).filter(x => labels[x]).map(x => labels[x]);
     return '活动凭据已同步：' + result.activities.join('、') + (target && Number(target.status) === 1 ? '；活动变量仍处于禁用状态' : '') + '。未触发签到。';
   }
@@ -719,12 +745,60 @@ const tell=message=>$notification.post('京东金融签到','',message);
   }
 capture();
 }
+function runPlantTaskCapture(context){
+const {$request,$response,$argument,$persistentStore,$notification,$script,$httpClient,console}=context;
+const $done=()=>{};
+// Runs inside the unified local capture wrapper. No signing or HTTP requests.
+const KEY='JD_PLANT_TASK_CONTEXT_V1',LINK='4HcenxuZM4XiHesOb1HG4g';
+const apps={apTaskList:null,apTaskDetail:null,apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f'};
+const fields=['appid','client','clientVersion','platform','loginType','loginWQBiz','x-api-eid-token','uuid','build','screen','networkType','d_brand','d_model','lang','osVersion','partner','wg-sdk-token','ext','cthr','openudid','adid'];
+function form(text){const out={};for(const part of String(text||'').split('&')){const i=part.indexOf('=');if(i<0)continue;out[decodeURIComponent(part.slice(0,i).replace(/\+/g,' '))]=decodeURIComponent(part.slice(i+1).replace(/\+/g,' '));}return out;}
+function header(name){const key=Object.keys($request.headers||{}).find(k=>k.toLowerCase()===name.toLowerCase());const v=key?$request.headers[key]:'';return Array.isArray(v)?v.join('; '):String(v||'');}
+function environment(encoded){
+ const map='rqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_9876543210zyxwvuts';let bits=0,value=0,bytes=[];
+ if(typeof encoded!=='string'||encoded.length<16||encoded.length>12000)throw Error('environment');
+ for(let i=encoded.length-1;i>=0;i--){const n=map.indexOf(encoded[i]);if(n<0)throw Error('environment');value=value<<6|n;bits+=6;if(bits>=8){bits-=8;bytes.push(value>>>bits&255);}}
+ const a=bytes.indexOf(123),b=bytes.lastIndexOf(125);if(a<0||b<=a)throw Error('environment');
+ const env=JSON.parse(decodeURIComponent(bytes.slice(a,b+1).map(v=>'%'+v.toString(16).padStart(2,'0')).join('')));
+ if(!['h5_file_v5.3.5','h5_file_v5.3.6'].includes(env.v)||!env.pp||!env.extend||typeof env.fp!=='string')throw Error('environment');return env;
+}
+if(!/^https:\/\/api\.m\.jd\.com\/api(?:\?|$)/.test($request.url))return;
+const params=Object.assign(form(($request.url.split('?')[1]||'').split('#')[0]),form($request.body));
+const fid=params.functionId;if(!Object.prototype.hasOwnProperty.call(apps,fid))return;
+const body=JSON.parse(params.body||'{}'),response=JSON.parse($response.body||'{}');
+if(body.linkId!==LINK||response.success!==true||String(response.code)!=='0')return;
+if(params.appid!==(fid==='apStartTaskTime'?'activity_platform_se':'activities_platform'))return;
+const headers={};for(const name of ['Cookie','User-Agent','Referer','Origin','Accept','Accept-Language','x-rp-client','x-referer-page','request-from','sec-fetch-site','sec-fetch-mode','sec-fetch-dest','priority']){const v=header(name);if(v)headers[name]=v;}
+const pins=(headers.Cookie||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_pin='));
+const keys=(headers.Cookie||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_key='));
+if(pins.length!==1||keys.length!==1||!pins[0].slice(7)||!keys[0].slice(7)||!headers['User-Agent']||!/^https:\/\/(?:pro|h5)\.m\.jd\.com\//.test(headers.Referer||''))return;
+const pin=pins[0].slice(7),sig=String(params.h5st||'').split(';'),app=apps[fid];
+let env;
+if(app){if(sig.length!==10||sig[2]!==app||sig[5]!=='5.3')return;env=environment(sig[7]);if(![pin,decodeURIComponent(pin)].includes(env.pp.p1))return;}
+for(const field of ['client','clientVersion','x-api-eid-token','uuid','wg-sdk-token'])if(!params[field])return;
+const start=$script&&$script.startTime?Number(new Date($script.startTime)):NaN;
+const now=Number.isFinite(start)&&start>0&&start<=Date.now()?start:Date.now();
+const raw=$persistentStore.read(KEY),old=raw?JSON.parse(raw):null;if(old&&old.pin!==pin)return;
+const previous=old&&old.templates&&old.templates[fid];if(previous&&now<Number(previous.capturedAt||0))return;
+const changed=old&&(old.uuid!==params.uuid||old.clientVersion!==params.clientVersion||old.headers['User-Agent']!==headers['User-Agent']);
+if(changed&&now<Number(old.updatedAt||0))return;
+const profile=!old||changed?{version:1,pin,linkId:LINK,uuid:params.uuid,clientVersion:params.clientVersion,templates:{}}:old;
+const clean={};for(const key of fields)if(params[key]!==undefined)clean[key]=params[key];
+const template={endpoint:'https://api.m.jd.com/api',params:clean,headers,capturedAt:now,unsignedH5st:params.h5st==='null'};
+if(app){template.referenceEnvironmentEncoded=sig[7];template.signatureParameterEncoding=sig[9];template.signatureAppId=app;template.environmentVersion=env.v;}
+profile.templates[fid]=template;
+if(now>=Number(profile.updatedAt||0)){profile.headers=headers;profile.updatedAt=now;profile.capturedAt=now;}
+profile.ready=['apTaskList','apStartTaskTime','apDoLimitTimeTask'].every(k=>!!profile.templates[k]);
+if(!$persistentStore.write(JSON.stringify(profile),KEY))throw Error('save');
+
+}
 // One response rule per request. Reuse local stores consumed by the NAS bridge.
 (async function () {
-  const VERSION='2026-10-17.3';
+  const VERSION='2026-10-18.1';
   const LAST='QL_BRIDGE_CAPTURE_LAST_V1', HISTORY='QL_BRIDGE_CAPTURE_HISTORY_V1';
   const JD='JD_CHECKIN_TEST_ACCOUNT_V1', JX='JXZY_CHECKIN_ACCOUNT_V1', JR='JD_JR_CHECKIN_ACCOUNT_V1', LOGIN='QL_BRIDGE_CREDENTIAL_V1';
-  const allowed=new Set([JD,JX,JR,LOGIN]);
+  const PLANT='JD_PLANT_TASK_CONTEXT_V1';
+  const allowed=new Set([JD,JX,JR,LOGIN,PLANT]);
   let record;
   function read(key){const raw=$persistentStore.read(key);return raw?JSON.parse(raw):null;}
   function enabled(value, fallback=true){return value===undefined?fallback:value===true||value==='true';}
@@ -759,19 +833,20 @@ capture();
     const daily=['startup','logConfig','queryPagePopWindow','babelGetGuideTips'];
     const retail=['findBeanSceneNew','bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction','bff_marketing_interaction'];
     const jx=['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'];
+    const plant=['apTaskList','apTaskDetail','apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward'].includes(fid);
     const cash=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)(?:\?|$)/.test(url);
     const double=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/legogw\/h5\/m\/getPageInfoDoubleSignInForH5(?:\?|$)/.test(url);
-    const activity=activities&&(retail.includes(fid)||jx.includes(fid)||cash||double);
+    const activity=activities&&(retail.includes(fid)||jx.includes(fid)||cash||double||plant);
     const shared=login&&(daily.includes(fid)||retail.includes(fid));
     if(!activity&&!shared)return;
-    const label=cash?'金融现金签到':double?'金融双签':jx.includes(fid)?'京喜自营':retail.includes(fid)?'京东签到活动':'京东登录';
+    const label=cash?'金融现金签到':double?'金融双签':plant?'种豆任务':jx.includes(fid)?'京喜自营':retail.includes(fid)?'京东签到活动':'京东登录';
     record={time:Date.now(),version:VERSION,source:label,endpoint:fid||url.split('?')[0].split('/').pop(),...(fid?{functionIdSource:location}:{}),status:'ignored',message:'请求未通过活动校验或凭据不完整，保留原记录'};
     const headers={};Object.keys($request.headers||{}).forEach(k=>{headers[k.toLowerCase()]=Array.isArray($request.headers[k])?$request.headers[k].join('; '):$request.headers[k];});
     const cookie=String(headers.cookie||''), pins=cookie.split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_pin='));
     const keys=cookie.split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_key='));
     if(pins.length!==1||keys.length!==1||!pins[0].slice(7)||!keys[0].slice(7))throw Error('凭据不完整');
     const pin=pins[0].slice(7);
-    const bound=read('QL_BRIDGE_ACCOUNT_V1')||read(JD)||read(LOGIN)||read(JX)||read(JR);
+    const bound=read('QL_BRIDGE_ACCOUNT_V1')||read(JD)||read(LOGIN)||read(JX)||read(JR)||read(PLANT);
     if(bound&&bound.pin&&bound.pin!==pin){record.status='account_mismatch';record.message='账号与已绑定凭据不一致，未覆盖或上传';return;}
     const before=Object.fromEntries([...allowed].map(k=>[k,$persistentStore.read(k)||'']));
     const blocked=()=>{throw Error('凭据获取不得发送网络请求');};
@@ -788,20 +863,26 @@ capture();
       $httpClient:Object.fromEntries(['get','post','put','delete','patch','head'].map(k=>[k,blocked]))
     };
     if(activity){
-      if(retail.includes(fid))runRetailCapture(context);
+      if(plant)runPlantTaskCapture(context);
+      else if(retail.includes(fid))runRetailCapture(context);
       else if(jx.includes(fid))runJxCapture(context);
       else runFinanceCapture(context);
     }
     if(shared)await runLoginCapture(context);
+    if(login&&plant&&($persistentStore.read(PLANT)||'')!==before[PLANT]){
+      const p=read(PLANT),saved=read(LOGIN),time=Number(p.capturedAt||0);
+      if(!saved||time>=Number(saved.capturedAt||0))$persistentStore.write(JSON.stringify({pin,cookie:keys[0]+';'+pins[0]+';',capturedAt:time,source:'plant-task:'+fid}),LOGIN);
+    }
     const changed=[...allowed].filter(k=>($persistentStore.read(k)||'')!==before[k]);
-    record.updated=changed.map(k=>({[JD]:'京东签到活动',[JX]:'京喜自营',[JR]:'金融签到／双签',[LOGIN]:'京东登录'})[k]);
-    const activityKey=retail.includes(fid)?JD:jx.includes(fid)?JX:JR;
+    record.updated=changed.map(k=>({[JD]:'京东签到活动',[JX]:'京喜自营',[JR]:'金融签到／双签',[LOGIN]:'京东登录',[PLANT]:'种豆任务'})[k]);
+    const activityKey=plant?PLANT:retail.includes(fid)?JD:jx.includes(fid)?JX:JR;
     if(activity)record.activityStatus=changed.includes(activityKey)?'updated':'not_saved';
     if(changed.length){
       record.status=activity&&!changed.includes(activityKey)?'partial':'updated';
       if(changed.includes(JD))record.jdModes=Object.keys((read(JD)||{}).modes||{});
       if(changed.includes(JX)){const p=read(JX);record.complete=!!(p.query&&p.signing);}
       if(changed.includes(JR)){const p=read(JR);record.complete=!!p.ready;record.doublePagePresent=!!p.doubleSign;}
+      if(changed.includes(PLANT)){const p=read(PLANT);record.complete=!!p.ready;record.templates=Object.keys(p.templates||{});}
       record.message='已更新'+record.updated.join('、')+'；仅保存在手机，未上传或执行签到';
       if(record.status==='partial')record.message+='；活动请求未通过保存条件，请查看页面和签名环境';
     }

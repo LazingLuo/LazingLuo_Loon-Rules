@@ -7,12 +7,21 @@ function profile(version='h5_file_v5.3.6'){
  const env={v:version,fp:'offline-old-fp',ai:'b63ff',pp:{p1:pin},extend:{bu6:33,bu13:'F3'},canvas:'a'.repeat(32),webglFp:'b'.repeat(32)};
  return {capturedAt:Date.now(),headers:{Cookie:cookie+'device=OFFLINE_DEVICE;','User-Agent':'jdapp;iPhone;16.0.70;;;M/5.0;appBuild/170070;Mozilla/5.0 (iPhone; CPU iPhone OS 27_0_1 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',Referer:'https://pro.m.jd.com/'},query:{capturedAt:Date.now(),referenceEnvironmentEncoded:encode(env),params:{client:'ios',clientVersion:'16.0.70','x-api-eid-token':'OFFLINE_EID'}}};
 }
-const fakeSign=()=>({h5st:'offline-signature',version:'h5_file_v5.3.6'});
-function config(p=profile()){return {LAZING_JD_ACTIVITY_V1:JSON.stringify({version:1,pin,activities:{scratch:p}})};}
+const fakeSign=(params,appId)=>({h5st:['date','fp',appId,'token','hash','5.3','time','env','hash','OFFLINE_STK'].join(';'),version:'h5_file_v5.3.6'});
+function native(p=profile()){
+ const templates={};
+ for(const [fid,appId]of Object.entries({apTaskList:null,apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'})){
+  templates[fid]={endpoint:'https://api.m.jd.com/api',capturedAt:Date.now(),headers:p.headers,params:{...p.query.params,appid:fid==='apStartTaskTime'?'activity_platform_se':'activities_platform',uuid:'OFFLINE_UUID','wg-sdk-token':'OFFLINE_WG',ext:'OFFLINE_EXT'},unsignedH5st:!appId};
+  if(appId)Object.assign(templates[fid],{referenceEnvironmentEncoded:p.query.referenceEnvironmentEncoded,signatureAppId:appId,signatureParameterEncoding:'OFFLINE_STK'});
+ }
+ return {version:1,pin,ready:true,linkId:'4HcenxuZM4XiHesOb1HG4g',uuid:'OFFLINE_UUID',clientVersion:'16.0.70',headers:p.headers,templates};
+}
+function config(p=profile()){return {LAZING_JD_ACTIVITY_V1:JSON.stringify({version:1,pin,activities:{plantTasks:native(p)}})};}
+
 const parent=fs.mkdtempSync(path.join(os.tmpdir(),'plant-trial-tests-'));let count=0;
 async function check(name,fn){process.exitCode=0;try{await fn();count++;console.log('OK '+name);}finally{process.exitCode=0;}}
 function rig(responder,extra={}){const calls=[],logs=[],dir=fs.mkdtempSync(path.join(parent,'case-'));const a=core.create({env:config(),dataDir:dir,noExitHook:true,sign:fakeSign,log:s=>logs.push(s),transport:async o=>{calls.push(o);return responder?responder(o,calls.length):{status:200,body:'{"success":true,"data":[]}'};},...extra});return {a,calls,logs,dir};}
-const context={cookie,linkId:'offline-link'};
+const context={cookie,linkId:'4HcenxuZM4XiHesOb1HG4g'};
 (async()=>{
  await check('Both audited SDK revisions sign all four task appIds with the captured phone context',async()=>{
 
@@ -27,13 +36,13 @@ const context={cookie,linkId:'offline-link'};
   const r=rig();try{
    assert(await r.a.request('apTaskList',[0],context));assert(await r.a.request('apStartTaskTime',['task','item',{}],context));assert(await r.a.request('apDoLimitTimeTask',[],context));
    assert.equal(r.calls.length,3);const o=r.calls[1],p=new URLSearchParams(o.body);
-   assert.equal(o.url,'https://api.m.jd.com/api?functionId=apStartTaskTime');assert.equal(p.get('h5st'),'offline-signature');assert.equal(p.get('x-api-eid-token'),'OFFLINE_EID');assert.equal(p.get('client'),'ios');assert.equal(o.headers['User-Agent'],profile().headers['User-Agent']);assert(o.headers.Cookie.includes('OFFLINE_DEVICE'));assert.equal(p.get('appid'),'activity_platform_se');assert.equal(new URLSearchParams(r.calls[0].body).get('appid'),'activities_platform');assert.equal(new URLSearchParams(r.calls[2].body).get('appid'),'activities_platform');
+   assert.equal(o.url,'https://api.m.jd.com/api?functionId=apStartTaskTime');assert.equal(p.get('h5st').split(';')[2],'acb1e');assert.equal(p.get('wg-sdk-token'),'OFFLINE_WG');assert.equal(p.get('uuid'),'OFFLINE_UUID');assert.equal(p.get('ext'),'OFFLINE_EXT');assert.equal(p.get('x-api-eid-token'),'OFFLINE_EID');assert.equal(p.get('client'),'ios');assert.equal(o.headers['User-Agent'],profile().headers['User-Agent']);assert(o.headers.Cookie.includes('OFFLINE_DEVICE'));assert.equal(p.get('appid'),'activity_platform_se');assert.equal(new URLSearchParams(r.calls[0].body).get('appid'),'activities_platform');assert.equal(new URLSearchParams(r.calls[2].body).get('appid'),'activities_platform');
    const state=JSON.parse(fs.readFileSync(path.join(r.dir,fs.readdirSync(r.dir)[0],'plant-trial/state.json')));assert.equal(state.pending,undefined);
    const logs=r.logs.join('\n');for(const secret of ['OFFLINE_KEY','OFFLINE_DEVICE','OFFLINE_EID',pin,'offline-signature'])assert(!logs.includes(secret));
   }finally{r.a.close();}
  });
  await check('Start routing appid is signed before submission and does not leak into other task interfaces',async()=>{
-  const signed=[];const r=rig(null,{sign:(params,appId)=>{signed.push({functionId:params.functionId,appid:params.appid,appId});return fakeSign();}});
+  const signed=[];const r=rig(null,{sign:(params,appId)=>{signed.push({functionId:params.functionId,appid:params.appid,appId});return fakeSign(params,appId);}});
   try{
    await r.a.request('apTaskList',[],context);
    await r.a.request('apStartTaskTime',['t','i',{}],context);
@@ -53,6 +62,14 @@ const context={cookie,linkId:'offline-link'};
  await check('Mismatched and missing phone environments stop before any task request',async()=>{assert.throws(()=>core.create({env:{},noExitHook:true}));const p=profile();p.headers.Cookie='pt_key=OTHER;pt_pin=other;';assert.throws(()=>core.create({env:config(p),noExitHook:true}));});
  await check('HTTP business rejection stops later task submissions',async()=>{const r=rig(()=>({status:200,body:'{"success":false,"errCode":"F10002","errMsg":"OFFLINE_KEY"}'}));try{await r.a.request('apTaskList',[],context);await r.a.request('apStartTaskTime',['t','i',{}],context);assert.equal(r.calls.length,1);assert(!r.logs.join('').includes('OFFLINE_KEY'));}finally{r.a.close();}});
  await check('Unrelated签到 interfaces are excluded from the adapter',async()=>{const r=rig();try{for(const id of ['weGameHome','weGameLottery','plantBeanIndex','bff_marketing_interaction'])assert.equal(r.a.handles(id),false);}finally{r.a.close();}});
+ await check('Legacy scratch-only credentials do not silently fall back to cross-activity signing',async()=>{
+  assert.throws(()=>core.create({env:{LAZING_JD_ACTIVITY_V1:JSON.stringify({version:1,pin,activities:{scratch:profile()}})},noExitHook:true}),/缺少完整种豆/);
+ });
+ await check('Partial, foreign and mixed-device native contexts fail before networking',async()=>{
+  for(const alter of [p=>{delete p.templates.apStartTaskTime;},p=>{p.templates.apStartTaskTime.params.uuid='OTHER';},p=>{p.templates.apDoLimitTimeTask.headers={...p.headers,Cookie:'pt_key=OTHER;pt_pin=other;'};}]){
+   const p=native();alter(p);assert.throws(()=>core.create({env:{LAZING_JD_ACTIVITY_V1:JSON.stringify({version:1,pin,activities:{plantTasks:p}})},noExitHook:true}));
+  }
+ });
  await check('Unknown upstream versions cannot be patched silently',async()=>{assert.throws(()=>core.patch('unknown source','adapter-path'),/版本/);});
  await check('Native transport blocks credential forwarding outside the exact task API',async()=>{await assert.rejects(core.transport({url:'https://example.com/api',body:'',headers:{Cookie:cookie}}));await assert.rejects(core.transport({url:'http://api.m.jd.com/api',body:'',headers:{Cookie:cookie}}));});
  if(process.env.FAKER_PLANT_SOURCE){await check('Pinned upstream injection is parseable, affects one dispatcher and preserves the complete original file on disk',async()=>{const file=process.env.FAKER_PLANT_SOURCE,source=fs.readFileSync(file,'utf8'),patched=core.patch(source,path.join(__dirname,'function/plant-trial.js'));assert.equal(fs.readFileSync(file,'utf8'),source);assert.equal(patched.split('if(__lazingPlantAdapter.handles').length,2);assert(patched.includes('process.exit(process.exitCode||0)'));assert(!patched.includes('$["outFlag"]=true;return;}return await _kerw_'));new vm.Script('(function(require,module,exports,__filename,__dirname){'+patched+'\n})');});}
