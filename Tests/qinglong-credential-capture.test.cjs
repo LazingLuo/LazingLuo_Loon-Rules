@@ -131,6 +131,17 @@ async function run({request,response,config={capture:true,captureActivities:true
    const matches=rules.filter(rule=>new RegExp(rule.split(' ~= /')[1].split('/ && ')[0]).test(sample.request.url));assert.equal(matches.length,1);
   }
  });
+ await check('capture rule reserves start responses for the splash handler while retaining startup and logConfig',async()=>{
+  const rule=plugin.split('\n').find(x=>x.startsWith('response if ')&&x.includes('api\\.m\\.jd'));
+  const match=new RegExp(rule.split(' ~= /')[1].split('/ && ')[0]);
+  for(const endpoint of ['api','client.action']){
+   assert.equal(match.test('https://api.m.jd.com/'+endpoint+'?functionId=start'),false);
+   assert.equal(match.test('https://api.m.jd.com/'+endpoint+'?appid=wh5&functionId=start&x=1'),false);
+   assert.equal(match.test('https://api.m.jd.com/'+endpoint+'?functionId=startup'),true);
+   assert.equal(match.test('https://api.m.jd.com/'+endpoint+'?functionId=logConfig'),true);
+   assert.equal(match.test('https://api.m.jd.com/'+endpoint),true);
+  }
+ });
  await check('new capture stores feed existing activity sync without old plugins',async()=>{
   const store={};
   for(const sample of [jdRequest('daily'),jdRequest('scratch'),jdRequest('blindbox'),jxRequest('query'),jxRequest('environment'),cashRequest('queryWeekSignMain'),cashRequest('queryCashSignSub',true),doubleRequest()])await run({...sample,store});
@@ -157,6 +168,21 @@ async function run({request,response,config={capture:true,captureActivities:true
    for(const field of headers.cookie.split(';')){const value=field.trim().split('=').slice(1).join('=');if(value.length>8)assert(!r.logs.join('\n').includes(value));}count++;
   }
   assert(count>0);const profile=JSON.parse(store[JR]);assert(profile.ready&&profile.doubleSign);console.log('Replayed '+count+' private financial requests; only safe summary printed.');
+ });
+ const jdArg=process.argv.indexOf('--jd-har');
+ if(jdArg>=0)await check('private JD HAR replay refreshes eligible login requests offline',async()=>{
+  const entries=JSON.parse(fs.readFileSync(process.argv[jdArg+1],'utf8')).log.entries.sort((a,b)=>Date.parse(a.startedDateTime)-Date.parse(b.startedDateTime));
+  const store={};let matched=0,updated=0;
+  const decode=p=>p.encoding==='base64'?Buffer.from(p.text||'','base64').toString('utf8'):p.text||'';
+  for(const e of entries){
+   if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/.test(e.request.url)||e.request.method!=='POST'||e.response.status!==200)continue;
+   const headers={};for(const h of e.request.headers){const k=h.name.toLowerCase();headers[k]=k==='cookie'&&headers[k]?headers[k]+'; '+h.value:h.value;}
+   const before=store[LOGIN],r=await run({store,now:Date.parse(e.startedDateTime),request:{url:e.request.url,method:e.request.method,headers,body:decode(e.request.postData||{})},response:decode(e.response.content||{}),status:e.response.status});
+   if(store[LOGIN]!==before)updated++;
+   for(const field of String(headers.cookie||'').split(';')){const v=field.trim().split('=').slice(1).join('=');if(v.length>8)assert(!r.logs.join('\n').includes(v),'private cookie value leaked');}
+   matched++;
+  }
+  assert(matched>0&&updated>0);assert(store[LOGIN]);console.log('Private JD replay: '+matched+' API responses; '+updated+' login updates. No credential values printed.');
  });
  console.log(checks+' unified capture checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
