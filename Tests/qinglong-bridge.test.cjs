@@ -2,7 +2,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(__dirname + '/../Scripts/qinglong-bridge.js', 'utf8');
+const scriptPath = fs.existsSync(__dirname + '/qinglong-bridge.js') ? __dirname + '/qinglong-bridge.js' : __dirname + '/../Scripts/qinglong-bridge.js';
+const source = fs.readFileSync(scriptPath, 'utf8');
 const base = {qlUrl: 'http://192.168.1.100:5700/', clientId: 'TEST_ID', clientSecret: 'TEST_SECRET', action: '检查连接'};
 const account = {pin: 'TEST_PIN', modes: {daily: {headers: {Cookie: 'pt_key=OLD_KEY;pt_pin=TEST_PIN;'}, capturedAt: 100},
   scratch: {headers: {cookie: 'pt_key=NEW_KEY;pt_pin=TEST_PIN;'}, loginUpdatedAt: 200}}};
@@ -35,6 +36,12 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
   const test = async (name, fn) => {await fn(); checks++; console.log('PASS ' + name);};
   await test('connection checks both read permissions without writes', async () => {
     const r = await run(); assert.equal(r.result.status, 'success'); assert.equal(r.calls.length, 3); assert(r.calls.every(x => x.method === 'get'));
+  });
+  await test('local capture status requires no NAS credentials and preserves sync result', async () => {
+    const previous=JSON.stringify({status:'success',message:'previous sync'});
+    const capture=JSON.stringify({status:'updated',source:'金融现金签到',complete:true});
+    const r=await run({action:'最近凭据获取结果',clientSecret:''},{QL_BRIDGE_LAST_RESULT_V1:previous,QL_BRIDGE_CAPTURE_LAST_V1:capture});
+    assert.equal(r.calls.length,0);assert.equal(r.store.QL_BRIDGE_LAST_RESULT_V1,previous);assert(r.logs.some(x=>x.includes('金融现金签到')));
   });
   await test('missing authorization stops before networking', async () => {
     const r = await run({clientSecret: ''}); assert.equal(r.calls.length, 0); assert.equal(r.result.status, 'failed');

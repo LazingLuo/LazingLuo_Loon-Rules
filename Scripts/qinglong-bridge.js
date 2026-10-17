@@ -1,6 +1,6 @@
 // Loon -> Qinglong OpenAPI bridge. No JD requests, signing or automatic task runs.
 (async function () {
-  const VERSION = '2026-10-15.2';
+  const VERSION = '2026-10-17.1';
   const PREFIX = 'QL_BRIDGE_';
   const capture = typeof $request !== 'undefined';
   let config, lock, result = {time: Date.now(), version: VERSION};
@@ -235,6 +235,11 @@
     if (action === '最近接入结果') {
       const last = read('LAST_RESULT_V1', null);
       console.log('[青龙接入] ' + (last ? JSON.stringify(last) : '暂无接入记录'));
+      return;
+    }
+    if (action === '最近凭据获取结果') {
+      const last = read('CAPTURE_LAST_V1', null);
+      console.log('[青龙凭据获取] ' + (last ? JSON.stringify(last) : '暂无获取记录，请开启获取开关并进入对应活动页面'));
       return;
     }
     if (!['检查连接', '同步京东凭据', '同步活动凭据', '列出任务', '执行指定任务'].includes(action)) fail('请选择青龙接入操作');
