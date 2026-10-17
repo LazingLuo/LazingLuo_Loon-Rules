@@ -49,6 +49,42 @@ async function run({request,response,config={capture:true,captureActivities:true
  await check('no request context cannot sign, upload or modify stores',async()=>{const r=await run();assert.equal(r.writes.length,0);});
  for(const mode of ['daily','scratch','blindbox'])await check('captures '+mode+' with original plugin disabled',async()=>{const r=await run(jdRequest(mode));assert(JSON.parse(r.store[JD]).modes[mode].query);assert(r.store[LOGIN]);assert.equal(r.result.status,'updated');});
  await check('daily-use cookie capture does not create activity profiles',async()=>{const r=await run({request:{method:'POST',url:'https://api.m.jd.com/client.action?functionId=logConfig',headers,body:''},response:{code:0}});assert(r.store[LOGIN]);assert(!r.store[JD]);});
+ await check('body-only daily-use identifiers capture login on both JD paths without rewriting live requests',async()=>{
+  for(const endpoint of ['api','client.action'])for(const query of ['', '?appid=wh5']){
+   const request={method:'POST',url:'https://api.m.jd.com/'+endpoint+query,headers,body:form({functionId:'logConfig',body:'{}'})},before=JSON.stringify(request);
+   const r=await run({request,response:{code:0}});
+   assert(r.store[LOGIN]);assert(!r.store[JD]);assert.equal(r.result.functionIdSource,'body');assert.equal(r.result.version,'2026-10-17.3');assert.equal(JSON.stringify(request),before);
+  }
+ });
+ await check('body-only activity identifiers capture all JD modes and Jingxi query/environment',async()=>{
+  for(const sample of [jdRequest('daily'),jdRequest('scratch'),jdRequest('blindbox'),jxRequest('query'),jxRequest('environment')]){
+   const before=sample.request.body;sample.request.url='https://api.m.jd.com/api?appid=wh5';
+   const r=await run(sample);assert.equal(r.result.functionIdSource,'body');assert.equal(r.result.status,'updated');assert(r.store[JD]||r.store[JX]);assert.equal(sample.request.body,before);
+  }
+ });
+ await check('URL-only and matching URL/body identifiers retain capture support',async()=>{
+  let sample=jdRequest('scratch'),params=Object.fromEntries(new URLSearchParams(sample.request.body));delete params.functionId;sample.request.body=form(params);
+  let r=await run(sample);assert(r.store[JD]);assert.equal(r.result.functionIdSource,'url');
+  r=await run(jdRequest('scratch'));assert(r.store[JD]);assert.equal(r.result.functionIdSource,'url_and_body');
+ });
+ await check('conflicting, duplicate or malformed function identifiers cannot replace login or activity records',async()=>{
+  for(const update of [
+   sample=>{sample.request.url='https://api.m.jd.com/api?functionId=findBeanSceneNew';},
+   sample=>{sample.request.body+='&functionId=bff_rightsCenter_jdInteractTask';},
+   sample=>{sample.request.url+='&functionId=bff_rightsCenter_jdInteractTask';},
+   sample=>{sample.request.body='functionId=%ZZ';}
+  ]){
+   const sample=jdRequest('scratch');update(sample);const r=await run(sample);
+   assert(!r.store[LOGIN]);assert(!r.store[JD]);assert.equal(r.result.status,'ignored');
+  }
+ });
+ await check('broad transport matching still rejects unrelated body interfaces and failed login responses',async()=>{
+  for(const sample of [
+   {request:{method:'POST',url:'https://api.m.jd.com/client.action',headers,body:form({functionId:'unrelatedPrivateInterface'})},response:{code:0}},
+   {request:{method:'POST',url:'https://api.m.jd.com/client.action',headers,body:form({functionId:'logConfig'})},response:{code:1000}},
+   {request:{method:'POST',url:'https://evil.example/api',headers,body:form({functionId:'logConfig'})},response:{code:0}}
+  ]){const r=await run(sample);assert(!r.store[LOGIN]);assert(!r.store[JD]);}
+ });
  await check('capture switches work independently',async()=>{
   let r=await run({...jdRequest('scratch'),config:{capture:false,captureActivities:true}});assert(r.store[JD]);assert(!r.store[LOGIN]);
   r=await run({...jdRequest('scratch'),config:{capture:true,captureActivities:false}});assert(!r.store[JD]);assert(r.store[LOGIN]);
@@ -90,7 +126,8 @@ async function run({request,response,config={capture:true,captureActivities:true
  await check('plugin routes requests once, adds financial MITM and retains four-hour sync',async()=>{
   assert(plugin.includes('hostname = api.m.jd.com, ms.jr.jd.com'));assert(plugin.includes('cron 0 */4 * * *'));
   const rules=plugin.split('\n').filter(x=>x.startsWith('response if '));assert.equal(rules.length,2);
-  for(const sample of [jdRequest('daily'),jxRequest('query'),cashRequest('queryWeekSignMain'),doubleRequest()]){
+  for(const sample of [jdRequest('daily'),jxRequest('query'),cashRequest('queryWeekSignMain'),doubleRequest(),
+   {request:{url:'https://api.m.jd.com/client.action'}},{request:{url:'https://api.m.jd.com/api?appid=wh5'}}]){
    const matches=rules.filter(rule=>new RegExp(rule.split(' ~= /')[1].split('/ && ')[0]).test(sample.request.url));assert.equal(matches.length,1);
   }
  });

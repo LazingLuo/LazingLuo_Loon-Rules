@@ -1,11 +1,23 @@
 // One response rule per request. Reuse local stores consumed by the NAS bridge.
 (async function () {
+  const VERSION='2026-10-17.3';
   const LAST='QL_BRIDGE_CAPTURE_LAST_V1', HISTORY='QL_BRIDGE_CAPTURE_HISTORY_V1';
   const JD='JD_CHECKIN_TEST_ACCOUNT_V1', JX='JXZY_CHECKIN_ACCOUNT_V1', JR='JD_JR_CHECKIN_ACCOUNT_V1', LOGIN='QL_BRIDGE_CREDENTIAL_V1';
   const allowed=new Set([JD,JX,JR,LOGIN]);
   let record;
   function read(key){const raw=$persistentStore.read(key);return raw?JSON.parse(raw):null;}
   function enabled(value, fallback=true){return value===undefined?fallback:value===true||value==='true';}
+  function functionId(text){
+    const values=[];
+    if(typeof text!=='string')return {id:null};
+    for(const field of text.split('&')){
+      const at=field.indexOf('=');if(at<0)continue;
+      let key;try{key=decodeURIComponent(field.slice(0,at).replace(/\+/g,' '));}catch(_){continue;}
+      if(key!=='functionId')continue;
+      try{values.push(decodeURIComponent(field.slice(at+1).replace(/\+/g,' ')));}catch(_){return {invalid:true};}
+    }
+    return values.length>1?{invalid:true}:{id:values.length?values[0]:null};
+  }
   try {
     if(typeof $request==='undefined'||typeof $response==='undefined'||$request.method!=='POST'||Number($response.status)!==200)return;
     let config=typeof $argument==='undefined'?{}:$argument;
@@ -13,8 +25,17 @@
     if(!config||typeof config!=='object'||Array.isArray(config))return;
     const login=enabled(config.capture),activities=enabled(config.captureActivities);
     if(!login&&!activities)return;
-    const url=String($request.url||''), match=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^#&]*&)*functionId=([^&#]+)(?:&|$)/.exec(url);
-    const fid=match&&match[1], daily=['startup','logConfig','queryPagePopWindow','babelGetGuideTips'];
+    const url=String($request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
+    let fid=null,location;
+    if(jd){
+      const query=functionId(url.includes('?')?url.slice(url.indexOf('?')+1):''),body=functionId($request.body);
+      if(query.invalid||body.invalid||query.id!==null&&body.id!==null&&query.id!==body.id){
+        record={time:Date.now(),version:VERSION,source:'京东请求',endpoint:'functionId',status:'ignored',message:'接口标识重复、冲突或编码异常，保留原凭据'};return;
+      }
+      fid=body.id===null?query.id:body.id;
+      location=query.id!==null?(body.id!==null?'url_and_body':'url'):'body';
+    }
+    const daily=['startup','logConfig','queryPagePopWindow','babelGetGuideTips'];
     const retail=['findBeanSceneNew','bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction','bff_marketing_interaction'];
     const jx=['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'];
     const cash=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)(?:\?|$)/.test(url);
@@ -23,7 +44,7 @@
     const shared=login&&(daily.includes(fid)||retail.includes(fid));
     if(!activity&&!shared)return;
     const label=cash?'金融现金签到':double?'金融双签':jx.includes(fid)?'京喜自营':retail.includes(fid)?'京东签到活动':'京东登录';
-    record={time:Date.now(),source:label,endpoint:fid||url.split('?')[0].split('/').pop(),status:'ignored',message:'请求未通过活动校验或凭据不完整，保留原记录'};
+    record={time:Date.now(),version:VERSION,source:label,endpoint:fid||url.split('?')[0].split('/').pop(),...(fid?{functionIdSource:location}:{}),status:'ignored',message:'请求未通过活动校验或凭据不完整，保留原记录'};
     const headers={};Object.keys($request.headers||{}).forEach(k=>{headers[k.toLowerCase()]=Array.isArray($request.headers[k])?$request.headers[k].join('; '):$request.headers[k];});
     const cookie=String(headers.cookie||''), pins=cookie.split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_pin='));
     const keys=cookie.split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_key='));
@@ -33,8 +54,12 @@
     if(bound&&bound.pin&&bound.pin!==pin){record.status='account_mismatch';record.message='账号与已绑定凭据不一致，未覆盖或上传';return;}
     const before=Object.fromEntries([...allowed].map(k=>[k,$persistentStore.read(k)||'']));
     const blocked=()=>{throw Error('凭据获取不得发送网络请求');};
+    // Legacy parsers expect the functionId in the URL. Normalize only their
+    // private request copy for body-only calls; never rewrite the live request.
+    const request=Object.assign({},$request,{headers});
+    if(fid&&location==='body')request.url=url+(url.includes('?')?(url.endsWith('?')?'':'&'):'?')+'functionId='+encodeURIComponent(fid);
     const context={
-      $request:Object.assign({},$request,{headers}),$response,
+      $request:request,$response,
       $argument:{capture:true,refreshLogin:true},
       $script:typeof $script==='undefined'?{}:$script,
       $persistentStore:{read:k=>$persistentStore.read(k),write:(v,k)=>{if(!allowed.has(k))throw Error('获取入口不得修改签到结果或提交记录');return $persistentStore.write(v,k);}},
