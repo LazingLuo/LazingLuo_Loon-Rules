@@ -44,12 +44,12 @@ Qinglong/lazing_jd_(plus|scratch|jxzy|finance|report|plant_trial)\.js$
 
 领取或任务提交前保存待确认记录；超时、网络断开、非JSON或5xx等情况保留记录，下次运行也停止任务提交。记录在 `LAZING_JD_DATA_DIR`（默认 `/ql/data/lazing-jd`）下对应账号摘要的 `plant-trial/state.json`。确认App状态前不要清除此记录。每个账号有独立执行锁；正常退出会释放。强制终止残留锁时，确认没有试验任务运行后再清理 `running.lock`，保留 `state.json`。原Faker入口没有使用本试验锁，所以两者不要同时执行。
 
-本版严格对应2026-10-17核查的Faker文件：Git blob `bf4ca209095e54bdffa22ec8774e943022f4632c`，文件SHA256 `5faf972796706c1085ee00ce9df679673c0967d919e3eb379d5e708458fc6959`。若订阅更新改变原文件，试验入口会停止并提示核查，避免错误注入。没有静默回退到原来的403请求。
+本版严格对应2026-10-17核查的Faker文件：Git blob `bf4ca209095e54bdffa22ec8774e943022f4632c`，原文件SHA256 `a978aa759131844225a727844e1e57c5272b9fae15ad3dfbded3ac6f1f8dccca`。适配器版本2026-10-17.2修正了核查副本末尾多一个换行导致正常原版被误拒绝的问题。校验时只兼容开头BOM、LF/CRLF换行和文件末尾空白，规范化SHA256为 `0e0f582b8f1ab05cc666bad46342e6a82cd60e956eabb9a0a1905c4d62b8748d`；不修改磁盘上的Faker文件。若订阅更新改变代码内容，试验入口仍会停止并提示核查及摘要前12位，避免错误注入。没有静默回退到原来的403请求。
 
 ## 离线验证和构建
 
 `node Qinglong/plant-trial-test.cjs` 验证两版SDK生成签名、账号和环境一致性、先查询再提交、浏览开始与完成顺序、403停止、业务拒绝、未确认提交跨运行保留、并发锁和网络目标限制。测试全部使用虚构凭据、模拟任务接口，不执行上游Faker代码，不向京东发送账号请求。
 
-可选设置 `FAKER_PLANT_SOURCE` 指向核查的原 `jd_plantBean.js`，再运行测试，额外检查原文件摘要、唯一注入位置和完整脚本语法；仍不执行原脚本。
+可选设置 `FAKER_PLANT_SOURCE` 指向核查的原 `jd_plantBean.js`，再运行测试，额外检查官方Git blob与原文件摘要、BOM/CRLF/末尾空白兼容、代码变化仍被拒绝、唯一注入位置和完整脚本语法；仍不执行原脚本。
 
 构建签名依赖：`node Tools/build-qinglong-plant-signer.cjs`。从当前 `Qinglong/function/jd-core.js` 中提取已有的SDK、浏览器和环境检查代码，加上 `Tools/plant-signer-wrapper.js`；不包含签到业务入口，不下载或执行外部签名服务。

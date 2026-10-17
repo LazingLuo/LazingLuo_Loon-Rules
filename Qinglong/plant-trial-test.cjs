@@ -44,5 +44,24 @@ const context={cookie,linkId:'offline-link'};
  await check('Unknown upstream versions cannot be patched silently',async()=>{assert.throws(()=>core.patch('unknown source','adapter-path'),/版本/);});
  await check('Native transport blocks credential forwarding outside the exact task API',async()=>{await assert.rejects(core.transport({url:'https://example.com/api',body:'',headers:{Cookie:cookie}}));await assert.rejects(core.transport({url:'http://api.m.jd.com/api',body:'',headers:{Cookie:cookie}}));});
  if(process.env.FAKER_PLANT_SOURCE){await check('Pinned upstream injection is parseable, affects one dispatcher and preserves the complete original file on disk',async()=>{const file=process.env.FAKER_PLANT_SOURCE,source=fs.readFileSync(file,'utf8'),patched=core.patch(source,path.join(__dirname,'function/plant-trial.js'));assert.equal(fs.readFileSync(file,'utf8'),source);assert.equal(patched.split('if(__lazingPlantAdapter.handles').length,2);assert(patched.includes('process.exit(process.exitCode||0)'));assert(!patched.includes('$["outFlag"]=true;return;}return await _kerw_'));new vm.Script('(function(require,module,exports,__filename,__dirname){'+patched+'\n})');});}
+ if(process.env.FAKER_PLANT_SOURCE){
+  const source=fs.readFileSync(process.env.FAKER_PLANT_SOURCE,'utf8');
+  const exact=source.replace(/\n+$/,'')+'\n';
+  await check('Byte-exact official Git blob is accepted, including the previous false-rejection regression',async()=>{
+   const crypto=require('node:crypto'),b=Buffer.from(exact);
+   assert.equal(crypto.createHash('sha1').update(Buffer.concat([Buffer.from('blob '+b.length+'\0'),b])).digest('hex'),'bf4ca209095e54bdffa22ec8774e943022f4632c');
+   assert(core.patch(exact,'adapter-path').includes('if(__lazingPlantAdapter.handles'));
+  });
+  await check('BOM, CRLF, missing final newline and extra file-end whitespace produce the same patched code',async()=>{
+   const expected=core.patch(exact,'adapter-path');
+   for(const variant of [exact.replace(/\n/g,'\r\n'),'\uFEFF'+exact,exact+'\n\n \t\r\n',exact.replace(/\n+$/,'')]){
+    assert.equal(core.patch(variant,'adapter-path'),expected);
+   }
+  });
+  await check('Real source changes are still rejected after whitespace normalization',async()=>{
+   assert.throws(()=>core.patch(exact.replace('种豆得豆任务','种豆得豆任务已更改'),'adapter-path'),/校验摘要/);
+   assert.throws(()=>core.patch(exact+'\n// changed implementation','adapter-path'),/版本/);
+  });
+ }
  console.log('Passed '+count+' offline checks. No upstream code was executed; no account requests were sent.');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>fs.rmSync(parent,{recursive:true,force:true}));

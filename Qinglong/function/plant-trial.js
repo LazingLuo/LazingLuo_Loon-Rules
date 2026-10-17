@@ -4,7 +4,11 @@
 // their existing behavior. This is not a security sandbox for the Faker script.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),https=require('node:https');
 const signer=require('./plant-signer');
-const EXPECTED='5faf972796706c1085ee00ce9df679673c0967d919e3eb379d5e708458fc6959';
+const VERSION='2026-10-17.2';
+// Hash the audited source after normalizing only a leading UTF-8 BOM, line
+// endings and trailing file whitespace. An extra newline in a review copy must
+// not reject the byte-exact GitHub file. All substantive code remains pinned.
+const EXPECTED='0e0f582b8f1ab05cc666bad46342e6a82cd60e956eabb9a0a1905c4d62b8748d';
 const MARKER='async function sgySJb_(vcYj9Vz,...doOZbP){';
 const IDS={apTaskList:null,apTaskDetail:null,apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f'};
 function safe(message){const e=Error(message);e.safe=true;return e;}
@@ -128,14 +132,18 @@ function create(options={}){
  if(!options.noExitHook)process.once('exit',close);
  return {handles:fid=>Object.hasOwn(IDS,fid),request,close};
 }
+function normalizeSource(source){return source.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/[ \t\r\n]+$/,'');}
 function patch(source,adapterPath){
- if(crypto.createHash('sha256').update(source).digest('hex')!==EXPECTED||source.split(MARKER).length!==2||source.split('process.exit(0)').length!==2)throw safe('Faker种豆脚本版本与已核查版本不同，试验入口已停止；请先核对更新');
+ source=normalizeSource(source);
+ const digest=crypto.createHash('sha256').update(source).digest('hex');
+ if(digest!==EXPECTED||source.split(MARKER).length!==2||source.split('process.exit(0)').length!==2)throw safe('Faker种豆脚本版本与已核查版本不同，试验入口已停止；校验摘要 '+digest.slice(0,12)+'，请先核对更新');
  const hook=`\nif(__lazingPlantAdapter.handles(vcYj9Vz)){if($["outFlag"]||$["isban"])return;const response=await __lazingPlantAdapter.request(vcYj9Vz,doOZbP,{linkId:$["linkId"],cookie:s8xCLCX});if(!response){$["taskfail"]=true;return;}return await _kerw_(vcYj9Vz,JSON.stringify(response));}\n`;
  // The original Env.done() always exits 0. Preserve an adapter failure for Qinglong.
  return 'const __lazingPlantAdapter=require('+JSON.stringify(adapterPath)+').create();\n'+source.replace(MARKER,MARKER+hook).replace('process.exit(0)','process.exit(process.exitCode||0)');
 }
 function main(){
  try{
+  console.log('[种豆任务试验] 适配器版本 '+VERSION);
   const requested=process.env.LAZING_FAKER_PLANT_PATH;
   const candidates=requested?[path.resolve(requested)]:['/ql/data/scripts/shufflewzc_faker3_main/jd_plantBean.js',path.resolve(__dirname,'../../../shufflewzc_faker3_main/jd_plantBean.js')];
   const file=candidates.find(p=>fs.existsSync(p));if(!file)throw safe('未找到Faker3种豆脚本；可用LAZING_FAKER_PLANT_PATH填写其完整路径');
@@ -146,4 +154,4 @@ function main(){
   instance._compile(source,file);
  }catch(error){console.error('[种豆任务试验] '+(error.safe?error.message:'初始化失败，请检查活动凭据和依赖文件'));process.exitCode=1;}
 }
-module.exports={create,patch,build,transport,EXPECTED,MARKER,main};
+module.exports={create,patch,build,transport,EXPECTED,MARKER,VERSION,normalizeSource,main};
