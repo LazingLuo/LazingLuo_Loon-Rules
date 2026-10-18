@@ -1,6 +1,6 @@
 // Loon -> Qinglong OpenAPI bridge. No JD requests, signing or automatic task runs.
 (async function () {
-  const VERSION = '2026-10-18.1';
+  const VERSION = '2026-10-18.2';
   const PREFIX = 'QL_BRIDGE_';
   const capture = typeof $request !== 'undefined';
   let config, lock, result = {time: Date.now(), version: VERSION};
@@ -39,12 +39,8 @@
     try { return JSON.parse($persistentStore.read('JD_JR_CHECKIN_ACCOUNT_V1') || 'null'); }
     catch (_) { return null; }
   }
-  function existingPlant() {
-    try { return JSON.parse($persistentStore.read('JD_PLANT_TASK_CONTEXT_V1') || 'null'); }
-    catch (_) { return null; }
-  }
   function latestCredential() {
-    const existing = readExistingJD(), jx = existingJX(), plant = existingPlant(), saved = read('CREDENTIAL_V1', null);
+    const existing = readExistingJD(), jx = existingJX(), saved = read('CREDENTIAL_V1', null);
     const bound = read('ACCOUNT_V1', null);
     const candidates = saved ? [saved] : [];
     if (existing && existing.modes) {
@@ -62,11 +58,7 @@
         capturedAt: Number(jx.loginUpdatedAt || jx.capturedAt || 0), source: 'existing_jxzy'
       }));
     }
-    if (plant && plant.headers) {
-      const pair = cookiePair(header(plant.headers, 'cookie'));
-      if (pair && pair.pin === plant.pin) candidates.push(Object.assign(pair, {capturedAt:Number(plant.updatedAt || plant.capturedAt || 0), source:'existing_plant_tasks'}));
-    }
-    const pin = bound && bound.pin || existing && existing.pin || saved && saved.pin || jx && jx.pin || plant && plant.pin;
+    const pin = bound && bound.pin || existing && existing.pin || saved && saved.pin || jx && jx.pin;
     const valid = candidates.filter(x => x && x.pin === pin && cookiePair(x.cookie));
     valid.sort((a, b) => Number(b.capturedAt || 0) - Number(a.capturedAt || 0));
     if (!valid.length) fail('尚无可同步的京东凭据，请打开凭据获取开关并正常使用京东');
@@ -202,24 +194,6 @@
         if (attempt && attempt.pin === credential.pin) pack.attempts[name] = attempt;
       }
     }
-    const plant = existingPlant();
-    if (plant && plant.templates && Object.keys(plant.templates).length) {
-      const login = cookiePair(header(plant.headers, 'cookie'));
-      if (!login || plant.pin !== credential.pin || login.pin !== credential.pin) fail('青龙种豆任务凭据账号不一致，未同步');
-      const profile = {};
-      for (const key of ['version','pin','linkId','uuid','clientVersion','capturedAt','updatedAt','ready','headers']) if (plant[key] !== undefined) profile[key] = JSON.parse(JSON.stringify(plant[key]));
-      profile.templates = {};
-      for (const fid of ['apTaskList','apTaskDetail','apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward']) {
-        const t = plant.templates[fid]; if (!t) continue;
-        const pair = cookiePair(header(t.headers, 'cookie'));
-        if (!pair || pair.pin !== credential.pin) fail('青龙种豆任务模板账号不一致，未同步');
-        const copy = {};
-        for (const key of ['endpoint','params','headers','capturedAt','unsignedH5st','referenceEnvironmentEncoded','signatureParameterEncoding','signatureAppId','environmentVersion']) if (t[key] !== undefined) copy[key] = JSON.parse(JSON.stringify(t[key]));
-        if (copy.params) {delete copy.params.body;delete copy.params.h5st;delete copy.params.t;}
-        profile.templates[fid] = copy;
-      }
-      pack.activities.plantTasks = profile;
-    }
     if (!Object.keys(pack.activities).length) fail('尚无可同步的独立活动请求记录，请开启对应获取开关、进入活动页面后再同步');
     return pack;
   }
@@ -247,7 +221,7 @@
         await request('put', '/envs', body, token);
       }
     } else await request('post', '/envs', [{name, value: JSON.stringify(pack), remarks: 'Loon 独立活动凭据'}], token);
-    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营', finance:'金融签到＋双签', plantTasks:'种豆任务上下文'};
+    const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营', finance:'金融签到＋双签'};
     result.activities = Object.keys(pack.activities).filter(x => labels[x]).map(x => labels[x]);
     return '活动凭据已同步：' + result.activities.join('、') + (target && Number(target.status) === 1 ? '；活动变量仍处于禁用状态' : '') + '。未触发签到。';
   }
