@@ -1,146 +1,49 @@
-// Loon: change only verified splash fields in JD's start response.
+// Loon: postpone only known display dates in the verified start response.
 (function () {
   let result = {};
   try {
     const url = String($request.url || "");
-    console.log("[京东开屏] start 脚本进入 v20261013.2099；状态类型=" +
-      typeof $response.status + "；状态=" + String($response.status) +
-      "；正文类型=" + typeof $response.body);
     if (!/^https:\/\/api\.m\.jd\.com\/client\.action\?/i.test(url) ||
-        !/[?&]functionId=start(?:&|$)/i.test(url)) {
-      console.log("[京东开屏] 跳过：URL不符合start接口");
+        !/[?&]functionId=start(?:&|$)/i.test(url) ||
+        Number($response.status) !== 200 || typeof $response.body !== "string") {
       return $done({});
     }
-    if (Number($response.status) !== 200 || typeof $response.body !== "string") {
-      console.log("[京东开屏] 跳过：状态非200或正文不是文本");
+    const data = JSON.parse($response.body);
+    if (!data || (data.code !== "0" && data.code !== 0) ||
+        !Array.isArray(data.images) ||
+        !Object.prototype.hasOwnProperty.call(data, "showTimesDaily")) {
       return $done({});
     }
-    // Save the received body before parsing or modifying any configuration.
-    const originalSaved = saveOriginalStart($response.body);
-    const obj = JSON.parse($response.body);
-    if (!obj || (obj.code !== "0" && obj.code !== 0) ||
-        !Array.isArray(obj.images) ||
-        !Object.prototype.hasOwnProperty.call(obj, "showTimesDaily")) {
-      console.log("[京东开屏] 已保存原响应；跳过修改：配置结构或业务状态不符合预期");
-      return $done({});
+    const replacements = {
+      onlineTime: "2099-01-01 00:00:00",
+      referralsTime: "2099-12-31 23:59:59",
+      startTimeStamp: Date.UTC(2098, 11, 31, 16, 0, 0),
+      endTimeStamp: Date.UTC(2099, 11, 31, 15, 59, 59)
+    };
+    let changed = 0;
+    function postpone(value) {
+      if (Array.isArray(value)) { value.forEach(postpone); return; }
+      if (!value || typeof value !== "object") return;
+      for (const key of Object.keys(replacements)) {
+        if (!Object.prototype.hasOwnProperty.call(value, key) ||
+            !["string", "number"].includes(typeof value[key])) continue;
+        const next = typeof value[key] === "string" ? String(replacements[key]) : replacements[key];
+        if (value[key] !== next) { value[key] = next; changed++; }
+      }
     }
-    const materials = collectMaterials(obj.images);
-    const originalImageCount = materials.items;
-    const originalDaily = obj.showTimesDaily;
-    saveConfirmedMaterials(materials);
-    let dateFieldsChanged=0;
-    function postpone(value){
-      if(Array.isArray(value)){value.forEach(postpone);return;}
-      if(!value||typeof value!=="object")return;
-      const replacements={onlineTime:"2099-01-01 00:00:00",referralsTime:"2099-12-31 23:59:59",startTimeStamp:Date.UTC(2098,11,31,16,0,0),endTimeStamp:Date.UTC(2099,11,31,15,59,59)};
-      Object.keys(replacements).forEach(key=>{
-        if(!Object.prototype.hasOwnProperty.call(value,key))return;
-        const replacement=typeof value[key]==="string"?String(replacements[key]):replacements[key];
-        if(value[key]!==replacement){value[key]=replacement;dateFieldsChanged++;}
-      });
+    postpone(data.images);
+    if (changed) {
+      result = {body: JSON.stringify(data)};
+      console.log("[京东开屏] start 已处理，" + changed + "个展示时间字段推迟至2099年");
+      try {
+        $notification.post("京东开屏 start 已处理", "展示时间已推迟至2099年",
+          "已修改 " + changed + " 个时间字段，保留原素材和展示次数。");
+      } catch (_) {
+        console.log("[京东开屏] 通知发送失败，已保留响应修改");
+      }
     }
-    postpone(obj.images);
-    const changed=dateFieldsChanged>0;
-    if(changed)result={body:JSON.stringify(obj)};
-    const detail = `原始任务 ${originalImageCount} 个，图片 ${materials.images.length}，视频 ${materials.videos.length}，每日次数 ${originalDaily}；` +
-      (changed ? "展示日期已推迟到2099年（"+dateFieldsChanged+"个字段）" : "无可修改的展示日期；保留素材和次数") +
-      (originalSaved ? "；修改前原响应已保存" : "；原响应保存失败") +
-      (materials.dates.length ? `；日期 ${materials.dates.join("、")}` : "") +
-      (materials.ids.length ? `\n素材标识：${materials.ids.join(",")}` : "");
-    console.log("[京东开屏] start 已触发：" + detail);
-    try {
-      $notification.post("京东 start 规则已触发", "开屏配置检查完成", detail);
-    } catch (error) {
-      console.log("[京东开屏] 通知发送失败：" + error);
-    }
-  } catch (error) {
-    console.log("[京东开屏] 处理失败，保留原响应；错误类型=" + (error && error.name || "unknown"));
+  } catch (_) {
+    console.log("[京东开屏] 响应不符合预期，保留原响应");
   }
   $done(result);
-
-  function saveOriginalStart(body) {
-    if (typeof $persistentStore === "undefined") return false;
-    try {
-      const limit = 512 * 1024;
-      const record = {
-        version: 1, time: Date.now(), endpoint: "functionId=start",
-        status: $response.status, bodyLength: body.length,
-        responseBody: body.length <= limit ? body : body.slice(0, limit),
-        bodyTruncated: body.length > limit,
-        source: "received_before_this_script_modification"
-      };
-      const latestOK = $persistentStore.write(JSON.stringify(record), "jd_splash_start_original_last_v1");
-      let rows = [];
-      try { rows = JSON.parse($persistentStore.read("jd_splash_start_original_history_v1") || "[]"); } catch (_) {}
-      if (!Array.isArray(rows)) rows = [];
-      rows.unshift(record);
-      rows = rows.slice(0, 5);
-      while (JSON.stringify(rows).length > 1024 * 1024 && rows.length > 1) rows.pop();
-      const historyOK = $persistentStore.write(JSON.stringify(rows), "jd_splash_start_original_history_v1");
-      console.log("[京东开屏] 修改前 start 已保存：" + body.length + " 字符" +
-        (record.bodyTruncated ? "（超限截断）" : ""));
-      return latestOK !== false && historyOK !== false;
-    } catch (error) {
-      console.log("[京东开屏] 原始 start 保存失败：" + error);
-      return false;
-    }
-  }
-
-  function collectMaterials(groups) {
-    const data = {items: 0, images: [], videos: [], urls: [], ids: [], dates: []};
-    groups.forEach(group => {
-      const items = Array.isArray(group) ? group : [group];
-      items.forEach(item => {
-        if (!item || typeof item !== "object") return;
-        data.items++;
-        addUrl(item.url, data.images, data);
-        addUrl(item.videoUrl, data.videos, data);
-        if (item.onlineTime) data.dates.push(String(item.onlineTime).slice(0, 10));
-      });
-    });
-    data.urls = unique(data.urls);
-    data.images = unique(data.images);
-    data.videos = unique(data.videos);
-    data.ids = unique(data.ids);
-    data.dates = unique(data.dates);
-    return data;
-  }
-
-  function addUrl(url, bucket, data) {
-    if (typeof url !== "string" || !url) return;
-    bucket.push(url);
-    data.urls.push(url);
-    const clean = url.split("?")[0].split("#")[0];
-    const fileName = clean.slice(clean.lastIndexOf("/") + 1);
-    const id = fileName.split(".")[0];
-    if (/^[0-9a-f]{12,64}$/i.test(id)) data.ids.push(id);
-  }
-
-  function saveConfirmedMaterials(materials) {
-    if (typeof $persistentStore === "undefined") return;
-    mergeStore("jd_splash_confirmed_ids_v1", materials.ids, 100);
-    mergeStore("jd_splash_confirmed_urls_v1", materials.urls, 100);
-    try {
-      $persistentStore.write(JSON.stringify({
-        time: Date.now(), ids: materials.ids, urls: materials.urls, dates: materials.dates
-      }), "jd_splash_last_start_v1");
-    } catch (error) {
-      console.log("[京东开屏] 保存 start 摘要失败：" + error);
-    }
-  }
-
-  function mergeStore(key, incoming, limit) {
-    let saved = [];
-    try {
-      saved = JSON.parse($persistentStore.read(key) || "[]");
-      if (!Array.isArray(saved)) saved = [];
-    } catch (_) { saved = []; }
-    const merged = unique(incoming.concat(saved)).slice(0, limit);
-    try { $persistentStore.write(JSON.stringify(merged), key); } catch (_) {}
-  }
-
-  function unique(items) {
-    return items.filter((item, index) => items.indexOf(item) === index);
-  }
 })();
-
