@@ -1,9 +1,10 @@
 #!name = 闲鱼开屏净化（测试版）
-#!desc = 清空已确认的两个闲鱼开屏接口的广告列表
+#!desc = 清空已确认的两个闲鱼开屏接口的广告列表；命中时通知，并区分原本为空和已清空广告。
+#!date = 2026-10-18
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/xianyu.png
 
 [Script]
-http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js?v=20261018-notify1,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
 
 [MITM]
 hostname = acs.m.goofish.com
