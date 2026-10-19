@@ -34,6 +34,29 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
 (async () => {
   let checks = 0;
   const test = async (name, fn) => {await fn(); checks++; console.log('PASS ' + name);};
+  await test('plugin registers a quoted four-hour cron and keeps automatic sync opt-in', async () => {
+    const pluginPath = fs.existsSync(__dirname + '/qinglong-bridge.plugin')
+      ? __dirname + '/qinglong-bridge.plugin' : __dirname + '/../Plugins/qinglong-bridge.plugin';
+    const plugin = fs.readFileSync(pluginPath, 'utf8');
+    const cronLines = plugin.split(/\r?\n/).filter(line => /^cron\s/.test(line));
+    assert.equal(cronLines.length, 1);
+    // Literal cron is a String in Loon Script v2. An unquoted expression may
+    // prevent registration, before the JavaScript VM tests can observe it.
+    const match = cronLines[0].match(/^cron\s+"([^"\r\n]+)"\s+then script\(/);
+    assert(match, 'Loon cron expression must be quoted');
+    const [minute, hours, day, month, weekday] = match[1].split(/\s+/);
+    assert.equal(minute, '0');
+    assert.deepEqual([day, month, weekday], ['*', '*', '*']);
+    assert.match(hours, /^\*\/\d+$/);
+    const step = Number(hours.slice(2));
+    const firingHours = Array.from({length: 24}, (_, hour) => hour).filter(hour => hour % step === 0);
+    assert.deepEqual(firingHours, [0, 4, 8, 12, 16, 20]);
+    assert.match(plugin, /^autoSync = switch,false,/m);
+    assert.match(cronLines[0], /enable=\$\{autoSync\}(?:,|$)/);
+    assert.match(cronLines[0], /\{[^}]*\$\{qlUrl\}/);
+    assert(cronLines[0].includes('${autoSync}'));
+    assert(cronLines[0].includes('${syncActivities}'));
+  });
   await test('connection checks both read permissions without writes', async () => {
     const r = await run(); assert.equal(r.result.status, 'success'); assert.equal(r.calls.length, 3); assert(r.calls.every(x => x.method === 'get'));
   });

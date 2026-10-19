@@ -124,7 +124,7 @@ async function run({request,response,config={capture:true,captureActivities:true
   const store={JD_JR_CHECKIN_ATTEMPT_V1:'{"date":"2099-01-01"}',JD_JR_CHECKIN_LAST_RESULT_V1:'{"status":"previous"}'};const before={...store};await run({...cashRequest('queryWeekSignMain'),store});for(const k of Object.keys(before))assert.equal(store[k],before[k]);
  });
  await check('plugin routes requests once, adds financial MITM and retains four-hour sync',async()=>{
-  assert(plugin.includes('hostname = api.m.jd.com, ms.jr.jd.com'));assert(plugin.includes('cron 0 */4 * * *'));
+  assert(plugin.includes('hostname = api.m.jd.com, ms.jr.jd.com'));assert(plugin.includes('cron "0 */4 * * *" then script('));
   const rules=plugin.split('\n').filter(x=>x.startsWith('response if '));assert.equal(rules.length,2);
   for(const sample of [jdRequest('daily'),jxRequest('query'),cashRequest('queryWeekSignMain'),doubleRequest(),
    {request:{url:'https://api.m.jd.com/client.action'}},{request:{url:'https://api.m.jd.com/api?appid=wh5'}}]){
