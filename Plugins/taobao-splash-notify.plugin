@@ -1,0 +1,21 @@
+#!name = 淘宝开屏拦截与命中通知
+#!desc = 从 FFDNS 的淘宝规则中提取2个开屏接口与4条素材规则，命中返回空字典并通知时间、次数和间隔。素材命中单独标注待核实。需已信任MITM证书；其他淘宝去广告规则可能先行拦截。
+#!author = FFDNS[https://github.com/Thelongdarkorg/loon-plugins]；LazingLuo（提取与通知适配）
+#!loon_version = 3.5.1(983)
+#!date = 2026-10-21
+
+[Argument]
+notify = switch,true,tag=命中通知,desc=每条被本插件拦截的请求都通知；关闭后仍拦截并保留统计
+assets = switch,true,tag=开屏素材规则,desc=按社区图片URL特征拦截HEIC与WebP候选；若误伤普通图片可关闭，仍保留2个开屏接口
+
+[Script]
+request if ${url} ~= /^https:\/\/acs\.m\.taobao\.com(?::443)?\/gw\/mtop\.etao\.noah\.query\/.+tao_splash/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", {${notify}, ${assets}}) with tag="淘宝开屏_tao-splash", timeout=10
+request if ${url} ~= /^https:\/\/guide-acs\.m\.taobao\.com(?::443)?\/gw\/mtop\.taobao\.wireless\.home\.splash\.awesome\.get(?:\/[0-9]+(?:\.[0-9]+)*\/?)?(?:\?|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", {${notify}, ${assets}}) with tag="淘宝开屏_home-splash", timeout=10
+request if ${url} ~= /^https:\/\/heic\.alicdn\.com(?::443)?\/imgextra\/i\d\/[A-Za-z0-9_!]+-\d+-tps-\d+-\d+\.png_\d+x\d*q\d+\.jpg_\.heic$/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", {${notify}, ${assets}}) with tag="淘宝开屏_heic-1", timeout=10, enable=${assets}
+request if ${url} ~= /^https:\/\/heic\.alicdn\.com(?::443)?\/imgextra\/i\d\/[A-Za-z0-9_!]+-\d+-tps-\d+-\d+\.jpg_\d+x\d*q\d+\.jpg_\.heic$/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", {${notify}, ${assets}}) with tag="淘宝开屏_heic-2", timeout=10, enable=${assets}
+request if ${url} ~= /^https:\/\/heic\.alicdn\.com(?::443)?\/imgextra\/i\d\/\d*\/?[\w!]+-\d-(?:octopus|tps)-(?:1080|1125)-\d{4}\.(?:jpg|png)_(?:1\d{3}|9\d{2})x(?:\d|1\d{3}|9\d{2})q[59]0/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", {${notify}, ${assets}}) with tag="淘宝开屏_heic-3", timeout=10, enable=${assets}
+request if ${url} ~= /^(?:https:\/\/gw\.alicdn\.com(?::443)?|http:\/\/gw\.alicdn\.com(?::80)?)\/imgextra\/i\d+\/[^\/]+_!!\d+-\d+-tps-(720-1280|1080-1920|1125-1602|1242-2208)\.(jpg|png|jpeg)_[^\/]+\.webp/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", {${notify}, ${assets}}) with tag="淘宝开屏_webp", timeout=10, enable=${assets}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-notify.js?v=20261021-1", "stats") with tag="淘宝开屏命中统计", timeout=10
+
+[Mitm]
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, heic.alicdn.com, gw.alicdn.com
