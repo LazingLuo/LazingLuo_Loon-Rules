@@ -15,19 +15,21 @@
     const hasAds = obj.data.adMap && typeof obj.data.adMap === "object" &&
       Object.keys(obj.data.adMap).length > 0 ||
       Array.isArray(obj.data.dspList) && obj.data.dspList.length > 0;
-    obj.data.adMap = {};
-    if (Object.prototype.hasOwnProperty.call(obj.data, "dspList")) obj.data.dspList = [];
-    result = { body: JSON.stringify(obj) };
-    console.log("[闲鱼开屏] 已处理 " + obj.api);
+    if (hasAds) {
+      obj.data.adMap = {};
+      if (Object.prototype.hasOwnProperty.call(obj.data, "dspList")) obj.data.dspList = [];
+      result = { body: JSON.stringify(obj) };
+    }
+    console.log("[闲鱼开屏] " + (hasAds ? "已清除广告" : "本次没有广告，原样放行") + "；" + obj.api);
     try {
-      $notification.post(hasAds ? "闲鱼开屏已处理" : "闲鱼开屏规则已命中",
+      $notification.post(hasAds ? "闲鱼开屏：已清除广告" : "闲鱼开屏：本次没有广告",
         obj.api === "mtop.taobao.idlecommerce.splash.ads" ? "开屏配置接口" : "开屏异步接口",
-        hasAds ? "已清空本次响应中的广告列表。" : "本次响应未发现非空广告列表。");
+        hasAds ? "已清空本次广告列表。" : "广告列表为空，已原样放行。");
     } catch (_) {
-      console.log("[闲鱼开屏] 通知发送失败，已保留响应修改");
+      console.log("[闲鱼开屏] 通知发送失败，请查看脚本日志。");
     }
   } catch (_) {
-    console.log("[闲鱼开屏] 响应无法处理，保留原样");
+    console.log("[闲鱼开屏] 解析失败，原样放行");
   }
   $done(result);
 })();
