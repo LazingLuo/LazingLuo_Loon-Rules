@@ -34,7 +34,7 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
 (async () => {
   let checks = 0;
   const test = async (name, fn) => {await fn(); checks++; console.log('PASS ' + name);};
-  await test('plugin registers a quoted four-hour cron and keeps automatic sync opt-in', async () => {
+  await test('plugin registers only midnight, 10:00 and 16:00 and keeps automatic sync opt-in', async () => {
     const pluginPath = fs.existsSync(__dirname + '/qinglong-bridge.plugin')
       ? __dirname + '/qinglong-bridge.plugin' : __dirname + '/../Plugins/qinglong-bridge.plugin';
     const plugin = fs.readFileSync(pluginPath, 'utf8');
@@ -47,10 +47,9 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
     const [minute, hours, day, month, weekday] = match[1].split(/\s+/);
     assert.equal(minute, '0');
     assert.deepEqual([day, month, weekday], ['*', '*', '*']);
-    assert.match(hours, /^\*\/\d+$/);
-    const step = Number(hours.slice(2));
-    const firingHours = Array.from({length: 24}, (_, hour) => hour).filter(hour => hour % step === 0);
-    assert.deepEqual(firingHours, [0, 4, 8, 12, 16, 20]);
+    assert.equal(hours, '0,10,16');
+    const firingHours = hours.split(',').map(Number);
+    assert.deepEqual(firingHours, [0, 10, 16]);
     assert.match(plugin, /^autoSync = switch,false,/m);
     assert.match(cronLines[0], /enable=\$\{autoSync\}(?:,|$)/);
     assert.match(cronLines[0], /\{[^}]*\$\{qlUrl\}/);
@@ -155,7 +154,7 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
       if(method==='put'){const b=JSON.parse(o.body);assert.equal(b.id,22);assert.equal(b.remarks,'keep');assert.deepEqual(b.labels,['keep']);assert(JSON.parse(b.value).activities.blindbox);}
     });assert.equal(r.result.status,'success');assert(r.result.message.includes('禁用'));assert(!r.calls.some(x=>x.url.includes('/enable')));
     r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(a)},(method,path,o)=>method==='post'&&o.body.includes('LAZING_JD_ACTIVITY_V1')?{error:'NEW_KEY'}:undefined);
-    assert.equal(r.result.status,'failed');assert(r.result.message.includes('登录凭据已同步'));assert.equal(r.calls.filter(x=>x.method==='post').length,2);
+    assert.equal(r.result.status,'failed');assert(r.result.message.includes('JD_COOKIE：新增'));assert(r.result.message.includes('活动凭据同步失败'));assert.equal(r.calls.filter(x=>x.method==='post').length,2);
   });
   await test('finance export keeps financial login, risk/page context and both attempt records',async()=>{
     const finance={pin:'TEST_PIN',ready:true,capturedAt:10,headers:{Cookie:'pt_key=FINANCE_KEY;pt_pin=TEST_PIN;','Content-Type':'application/x-www-form-urlencoded'},query:{site:'JD_JR_APP'},riskDeviceParam:'PRIVATE_RISK',scopeKey:'scope',riskScope:'scope',doubleSign:{pin:'TEST_PIN',headers:{'x-mlaas-at':'PRIVATE_DOUBLE_TOKEN'}}};
@@ -181,6 +180,55 @@ async function run(arg = {}, initial = {}, handler, httpContext) {
       const r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(account),JD_JR_CHECKIN_ACCOUNT_V1:JSON.stringify(finance)});
       assert.equal(r.result.status,'failed');assert.equal(r.calls.length,0);
     }
+  });
+  await test('cookie notices show only its change and success, including an unchanged scheduled run',async()=>{
+    const initial={JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(account)};
+    const handler=(method,path)=>path==='/envs'?[{id:2,name:'JD_COOKIE',value:'pt_key=NEW_KEY;pt_pin=TEST_PIN;'}]:undefined;
+    let r=await run({autoSync:true},initial,handler);
+    assert.equal(r.result.message,'JD_COOKIE：无变化');assert.equal(r.notices.length,1);
+    assert.deepEqual(r.notices[0],['青龙凭据同步','同步成功','JD_COOKIE：无变化']);
+    r=await run({autoSync:true},r.store,handler);assert.equal(r.notices.length,1);assert.equal(r.result.message,'JD_COOKIE：无变化');
+    assert(!r.calls.some(x=>['post','put'].includes(x.method)));
+    r=await run({action:'同步京东凭据'},initial);assert.equal(r.result.message,'JD_COOKIE：新增');
+    assert(!/有效|未触发|签到|奖励|需由|无需/.test(r.notices[0][2]));
+  });
+  await test('activity comparison ignores observation times and key order but reports changed parameters',async()=>{
+    const a=JSON.parse(JSON.stringify(account));a.modes.scratch.query={params:{functionId:'query',body:'{}'}};
+    const old={version:1,pin:'TEST_PIN',activities:{scratch:{capturedAt:1,loginUpdatedAt:2,query:{capturedAt:4,params:{body:'{}',functionId:'query'}},headers:{Cookie:'pt_key=NEW_KEY;pt_pin=TEST_PIN;'}}},attempts:{}};
+    const r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(a)},(method,path,o)=>{
+      if(method==='get'&&path==='/envs')return o.url.includes('LAZING_JD_ACTIVITY_V1')?[{id:2,name:'LAZING_JD_ACTIVITY_V1',value:JSON.stringify(old)}]:[{id:1,name:'JD_COOKIE',value:'pt_key=NEW_KEY;pt_pin=TEST_PIN;'}];
+    });
+    assert.equal(r.result.status,'success');assert.equal(r.result.message,'JD_COOKIE：无变化\n刮卡凭据：无变化');
+    assert.equal(r.notices[0][1],'同步成功');
+  });
+  await test('finance and double-sign changes appear separately',async()=>{
+    const finance={pin:'TEST_PIN',ready:true,capturedAt:10,headers:{Cookie:'pt_key=FINANCE_KEY;pt_pin=TEST_PIN;'},query:{site:'H5'},riskDeviceParam:'PRIVATE_RISK',doubleSign:{pin:'TEST_PIN',token:'NEW_DOUBLE_TOKEN',capturedAt:10}};
+    for(const changedPart of ['double','cash']){
+      const oldFinance=JSON.parse(JSON.stringify(finance));oldFinance.capturedAt=1;oldFinance.doubleSign.capturedAt=1;
+      if(changedPart==='double')oldFinance.doubleSign.token='OLD_DOUBLE_TOKEN';else oldFinance.riskDeviceParam='OLD_RISK';
+      const old={version:1,pin:'TEST_PIN',activities:{finance:oldFinance},attempts:{}};
+      const r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(account),JD_JR_CHECKIN_ACCOUNT_V1:JSON.stringify(finance)},(method,path,o)=>{
+        if(method==='get'&&path==='/envs')return o.url.includes('LAZING_JD_ACTIVITY_V1')?[{id:2,name:'LAZING_JD_ACTIVITY_V1',value:JSON.stringify(old)}]:[{id:1,name:'JD_COOKIE',value:'pt_key=NEW_KEY;pt_pin=TEST_PIN;'}];
+      });
+      assert.equal(r.result.status,'success');
+      assert(r.result.message.includes('金融凭据：'+(changedPart==='cash'?'已更新':'无变化')));
+      assert(r.result.message.includes('金融双签凭据：'+(changedPart==='double'?'已更新':'无变化')));
+      for(const secret of ['FINANCE_KEY','PRIVATE_RISK','OLD_RISK','NEW_DOUBLE_TOKEN','OLD_DOUBLE_TOKEN'])assert(!JSON.stringify({logs:r.logs,notices:r.notices}).includes(secret));
+    }
+  });
+  await test('preserved remote activities show no change and new attempt records are named',async()=>{
+    const a=JSON.parse(JSON.stringify(account));a.modes.scratch.query={params:{}};
+    const old={version:1,pin:'TEST_PIN',activities:{jxzy:{pin:'TEST_PIN',query:{params:{}}}},attempts:{}};
+    const r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(a),JD_CHECKIN_TEST_ATTEMPT_scratch:JSON.stringify({pin:'TEST_PIN',date:'2026-10-21',time:1})},(method,path,o)=>{
+      if(method==='get'&&path==='/envs'&&o.url.includes('LAZING_JD_ACTIVITY_V1'))return [{id:2,name:'LAZING_JD_ACTIVITY_V1',value:JSON.stringify(old)}];
+    });
+    assert.equal(r.result.status,'success');assert(r.result.message.includes('刮卡凭据：新增'));assert(r.result.message.includes('京喜凭据：无变化'));assert(r.result.message.includes('任务记录：已更新'));
+  });
+  await test('failed activity write never claims activity synchronization succeeded',async()=>{
+    const a=JSON.parse(JSON.stringify(account));a.modes.scratch.query={params:{}};
+    const r=await run({action:'同步活动凭据'},{JD_CHECKIN_TEST_ACCOUNT_V1:JSON.stringify(a)},(method,path,o)=>method==='post'&&o.body.includes('LAZING_JD_ACTIVITY_V1')?{error:'offline'}:undefined);
+    assert.equal(r.notices[0][1],'同步失败');assert(r.notices[0][2].includes('JD_COOKIE：新增'));assert(r.notices[0][2].includes('活动凭据同步失败'));
+    assert(!r.notices[0][2].includes('刮卡凭据：新增'));assert(!/未触发|核对后再|凭据是否有效/.test(r.notices[0][2]));
   });
   console.log(checks+' offline checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

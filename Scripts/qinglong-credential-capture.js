@@ -4,7 +4,7 @@ const {$request,$response,$argument,$persistentStore,$notification,$script,$http
 const $done=()=>{};
 // Loon -> Qinglong OpenAPI bridge. No JD requests, signing or automatic task runs.
 return (async function () {
-  const VERSION = '2026-10-18.2';
+  const VERSION = '2026-10-21.1';
   const PREFIX = 'QL_BRIDGE_';
   const capture = typeof $request !== 'undefined';
   let config, lock, result = {time: Date.now(), version: VERSION};
@@ -140,29 +140,53 @@ return (async function () {
     lock = {time: Date.now(), owner: String(Date.now()) + '-' + String(Math.random())};
     write('LOCK_V1', lock);
   }
+  function comparable(value) {
+    if (Array.isArray(value)) return value.map(comparable);
+    if (!value || typeof value !== 'object') return value;
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      if (['capturedAt', 'updatedAt', 'loginUpdatedAt', 'loginSource'].includes(key)) continue;
+      out[key] = comparable(value[key]);
+    }
+    return out;
+  }
+  function changeStatus(before, after) {
+    if (before === undefined) return after === undefined ? '无变化' : '新增';
+    if (after === undefined) return '已移除';
+    return JSON.stringify(comparable(before)) === JSON.stringify(comparable(after)) ? '无变化' : '已更新';
+  }
+  function syncMessage() {
+    const lines = (result.syncItems || []).map(item => item.label + '：' + item.change + (item.disabled ? '（已禁用）' : ''));
+    if (result.activityDisabled) lines.push('活动变量：已禁用');
+    return lines.join('\n');
+  }
+  function shortError(message) {
+    // Keep the diagnostic cause; omit the extra procedural/warning clauses.
+    return String(message || '同步失败').split(/[；;]/)[0].slice(0, 120);
+  }
   async function sync(token) {
     const credential = latestCredential();
     const envs = rows(await request('get', '/envs?searchValue=JD_COOKIE', undefined, token));
     const matches = envs.filter(x => x.name === 'JD_COOKIE' && cookiePair(x.value) && cookiePair(x.value).pin === credential.pin);
     if (matches.length > 1) fail('青龙中有同账号的多条 JD_COOKIE，请先在面板整理；未修改');
-    let message;
+    let change;
     if (matches.length) {
       const target = matches[0];
-      if (String(target.value) === credential.cookie) message = '青龙已保存相同的京东登录凭据，无需更新';
+      if (String(target.value) === credential.cookie) change = '无变化';
       else {
         const body = {id: idOf(target), name: 'JD_COOKIE', value: credential.cookie, remarks: target.remarks || ''};
         if (target.labels !== undefined) body.labels = target.labels;
         await request('put', '/envs', body, token);
-        message = '已更新青龙中同账号的京东登录凭据';
+        change = '已更新';
       }
-      if (Number(target.status) === 1) message += '；该变量处于禁用状态，需你在青龙面板确认后启用';
     } else {
       await request('post', '/envs', [{name: 'JD_COOKIE', value: credential.cookie, remarks: 'Loon 同步'}], token);
-      message = '已在青龙新建京东登录凭据 JD_COOKIE';
+      change = '新增';
     }
+    result.syncItems = [{name: 'JD_COOKIE', label: 'JD_COOKIE', change, disabled: !!(matches[0] && Number(matches[0].status) === 1)}];
     write('ACCOUNT_V1', {pin: credential.pin});
     result.credentialCapturedAt = credential.capturedAt;
-    return message + '。凭据是否有效仍需由具体任务确认；本次未触发签到。';
+    return syncMessage();
   }
   async function tasks(token) { return rows(await request('get', '/crons', undefined, token)); }
   function activityPack() {
@@ -212,10 +236,9 @@ return (async function () {
       if (value.pin === pack.pin) matches.push(item);
     }
     if (matches.length > 1) fail('青龙中有同账号的多条活动凭据，请先在面板整理；未修改');
-    const target = matches[0];
+    const target = matches[0], old = target ? JSON.parse(target.value) : {activities: {}, attempts: {}};
     if (target) {
       // Keep older activities when one capture switch was temporarily off. NAS attempt records are separate.
-      const old = JSON.parse(target.value);
       pack.activities = Object.assign({}, old.activities || {}, pack.activities);
       pack.attempts = Object.assign({}, old.attempts || {}, pack.attempts);
       const value = JSON.stringify(pack);
@@ -227,7 +250,21 @@ return (async function () {
     } else await request('post', '/envs', [{name, value: JSON.stringify(pack), remarks: 'Loon 独立活动凭据'}], token);
     const labels = {scratch:'每日刮卡', blindbox:'PLUS盲盒', jxzy:'京喜自营', finance:'金融签到＋双签'};
     result.activities = Object.keys(pack.activities).filter(x => labels[x]).map(x => labels[x]);
-    return '活动凭据已同步：' + result.activities.join('、') + (target && Number(target.status) === 1 ? '；活动变量仍处于禁用状态' : '') + '。未触发签到。';
+    const previous = old.activities || {}, items = [];
+    for (const [key, label] of [['scratch','刮卡凭据'], ['blindbox','PLUS盲盒凭据'], ['jxzy','京喜凭据']]) {
+      if (previous[key] !== undefined || pack.activities[key] !== undefined) items.push({name:'LAZING_JD_ACTIVITY_V1', key, label, change:changeStatus(previous[key], pack.activities[key])});
+    }
+    const beforeFinance = previous.finance, afterFinance = pack.activities.finance;
+    if (beforeFinance !== undefined || afterFinance !== undefined) {
+      const cash = profile => {if (profile === undefined) return undefined; const value = Object.assign({}, profile); delete value.doubleSign; return value;};
+      items.push({name:'LAZING_JD_ACTIVITY_V1', key:'finance', label:'金融凭据', change:changeStatus(cash(beforeFinance), cash(afterFinance))});
+      const beforeDouble = beforeFinance && beforeFinance.doubleSign, afterDouble = afterFinance && afterFinance.doubleSign;
+      if (beforeDouble !== undefined || afterDouble !== undefined) items.push({name:'LAZING_JD_ACTIVITY_V1', key:'finance.doubleSign', label:'金融双签凭据', change:changeStatus(beforeDouble, afterDouble)});
+    }
+    if (JSON.stringify(comparable(old.attempts || {})) !== JSON.stringify(comparable(pack.attempts || {}))) items.push({name:'LAZING_JD_ACTIVITY_V1', key:'attempts', label:'任务记录', change:'已更新'});
+    result.syncItems = (result.syncItems || []).concat(items);
+    result.activityDisabled = !!(target && Number(target.status) === 1);
+    return syncMessage();
   }
   try {
     if (capture) { captureCredential(); return; }
@@ -259,13 +296,13 @@ return (async function () {
       await request('get', '/envs?searchValue=JD_COOKIE', undefined, token);
       const list = await tasks(token);
       result.taskCount = list.length;
-      result.message = '青龙连接及环境变量、定时任务读取权限正常，当前查到 ' + list.length + ' 个任务。未执行任务。';
+      result.message = '连接正常，共 ' + list.length + ' 个任务。';
     } else if (action === '同步京东凭据' || action === '同步活动凭据') {
       result.message = await sync(token);
       if (pack) {
         // Cookie and activity writes cannot be transactional in OpenAPI; report a partial update explicitly.
-        try { result.message += '\n' + await syncActivities(token, pack); }
-        catch (e) { fail('青龙登录凭据已同步，但活动凭据同步失败：' + (e.message || '请查看面板') + '；未触发任务，请核对后再同步'); }
+        try { result.message = await syncActivities(token, pack); }
+        catch (e) { fail('青龙活动凭据同步失败：' + shortError(e.message || '请查看面板')); }
       }
     }
     else if (action === '列出任务') {
@@ -294,6 +331,9 @@ return (async function () {
     // Only our own fixed diagnostic messages are allowed in logs; never log API payloads/errors.
     result.message = error && typeof error.message === 'string' && /^(青龙|入口|尚无|HTTP|无法连接|另一次|请|指定)/.test(error.message)
       ? error.message : '青龙接入处理失败，请检查参数和面板状态；未自动重试';
+    if (['同步京东凭据', '同步活动凭据'].includes(result.action)) {
+      result.message = (result.syncItems && result.syncItems.length ? syncMessage() + '\n' : '') + shortError(result.message);
+    }
   } finally {
     if (lock) {
       try { const current = read('LOCK_V1', null); if (current && current.owner === lock.owner) write('LOCK_V1', null); } catch (_) {}
@@ -305,7 +345,10 @@ return (async function () {
       console.log('[青龙接入] ' + JSON.stringify(result));
       const automatic = config && Object.prototype.hasOwnProperty.call(config, 'autoSync');
       const changed = !previous || previous.status !== result.status || previous.message !== result.message;
-      if ((!automatic || changed) && typeof $notification !== 'undefined') $notification.post('青龙接入', result.status === 'success' ? '操作完成' : '操作失败', result.message);
+      const syncing = ['同步京东凭据', '同步活动凭据'].includes(result.action);
+      if ((!automatic || changed || syncing && result.status === 'success') && typeof $notification !== 'undefined') {
+        $notification.post(syncing ? '青龙凭据同步' : '青龙接入', syncing ? (result.status === 'success' ? '同步成功' : '同步失败') : (result.status === 'success' ? '操作完成' : '操作失败'), result.message);
+      }
     } else if (capture && result.status === 'failed') console.log('[青龙接入] 凭据保存失败，请查看本地记录');
     $done({});
   }

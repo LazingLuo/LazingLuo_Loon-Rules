@@ -1,7 +1,7 @@
 #!name = 青龙任务接入
 #!desc = 统一获取京东、京喜、金融签到及双签凭据并同步到自己的青龙，支持连接检查、列出任务和触发指定任务。自动同步默认关闭，捕获和同步均不自动触发签到。
 #!loon_version = 3.5.1(983)
-#!date = 2026-10-19
+#!date = 2026-10-21
 
 [Argument]
 qlUrl = input,"",tag=青龙面板地址,desc=填写你自己的NAS地址，例如 http://192.168.1.100:5700
@@ -11,12 +11,12 @@ action = select,"检查连接","同步京东凭据","同步活动凭据","列出
 taskIds = input,"",tag=指定任务ID,desc=先列出任务，再填写一个需要执行的数字ID
 capture = switch,true,tag=日常获取京东凭据,desc=从指定成功请求保存登录凭据；可与仅处理start的新版京东开屏插件同时启用；不发送签到请求
 captureActivities = switch,true,tag=获取独立活动凭据,desc=进入京东普通签到、刮卡、PLUS盲盒、京喜、金融现金签到及双签页面时保存或刷新；可禁用原签到插件，仅保存到手机
-autoSync = switch,false,tag=自动同步凭据,desc=每4小时整点尝试同步到青龙（0、4、8、12、16、20点）；需手机能访问NAS，捕获和同步均不自动触发任务
+autoSync = switch,false,tag=自动同步凭据,desc=每天0点、10点、16点同步到青龙
 syncActivities = switch,false,tag=同时同步独立活动凭据,desc=同步登录凭据时同时上传刮卡、PLUS盲盒、京喜、金融签到及双签的活动凭据到自己的NAS；独立青龙任务需要，Faker不使用
 
 [Script]
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261018-2", {${qlUrl}, ${clientId}, ${clientSecret}, ${action}, ${taskIds}, ${syncActivities}}) with tag="青龙手动操作", timeout=90
-cron "0 */4 * * *" then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261018-2", {${qlUrl}, ${clientId}, ${clientSecret}, ${autoSync}, ${syncActivities}}) with tag="京东凭据同步到青龙", timeout=90, enable=${autoSync}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261021-1", {${qlUrl}, ${clientId}, ${clientSecret}, ${action}, ${taskIds}, ${syncActivities}}) with tag="青龙手动操作", timeout=90
+cron "0 0,10,16 * * *" then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-bridge.js?v=20261021-1", {${qlUrl}, ${clientId}, ${clientSecret}, ${autoSync}, ${syncActivities}}) with tag="京东凭据同步到青龙", timeout=90, enable=${autoSync}
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?![^#]*[?&]functionId=start(?:&|$))(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-credential-capture.js?v=20261018-2", {${capture}, ${captureActivities}}) with tag="青龙京东与京喜凭据获取", requires_body=true, timeout=20
 response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/qinglong-credential-capture.js?v=20261018-2", {${capture}, ${captureActivities}}) with tag="青龙金融与双签凭据获取", requires_body=true, timeout=20, enable=${captureActivities}
 
