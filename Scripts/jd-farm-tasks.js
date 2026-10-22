@@ -1,4 +1,4 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-22.2
+// 东东农场与幸运转盘，Loon手动版 2026-10-22.3
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -283,8 +283,54 @@ if (diagnostics) {
     if(diagnostics&&status&&typeof status.code==='number')diagnostics.sdkSignCode=status.code;
   }});
 }
+// Use the audited official SDK's own request_algo and cache handling.
+// An initial dry sign initializes its fingerprint; that local signature is never sent.
+const farmOnlineSessions=new Map();
+async function farmOnlineSign(app,profile,env,input){
+  if(typeof host.requestAlgo!=='function')throw Error('农场服务端签名入口缺失');
+  const key=farmSha256(JSON.stringify([app,profile.pin,profile.headers,env]));
+  let session=farmOnlineSessions.get(key);
+  if(!session){
+    session={serverToken:null};
+    const browser=farmInstallBrowser(profile);
+    browser.XMLHttpRequest=class {
+      constructor(){this.readyState=0;this.status=0;this.headers={};this.aborted=false;}
+      open(method,url){if(method!=='POST'||url!=='https://cactus.jd.com/request_algo')throw Error('农场签名服务地址不符');this.url=url;this.readyState=1;}
+      setRequestHeader(k,v){if(!['accept','content-type'].includes(String(k).toLowerCase()))throw Error('农场签名服务请求头不符');this.headers[k]=v;}
+      getResponseHeader(k){return String(k).toLowerCase()==='content-type'?'application/json':null;}
+      getAllResponseHeaders(){return 'content-type: application/json\r\n';}
+      abort(){this.aborted=true;}
+      send(data){
+        const b=JSON.parse(data);if(b.appId!==app||typeof b.fp!=='string'||b.fp.length!==16)throw Error('农场签名指纹尚未初始化');
+        // The official algorithm endpoint receives its SDK environment, never Cookie.
+        const ref=String(profile.headers.Referer||'https://pro.m.jd.com/').split('?')[0];
+        const headers={Accept:'application/json','Content-Type':'application/json','User-Agent':profile.headers['User-Agent'],Referer:ref};
+        host.requestAlgo({url:this.url,headers,body:data}).then(r=>{
+          if(this.aborted)return;
+          this.status=Number(r.status)||0;this.responseText=String(r.body||'');
+          host.progress('签名服务返回 HTTP '+this.status+'（'+app+'）');
+          if(this.status===200){try{const j=JSON.parse(this.responseText),result=j.data?.result;if(j.status===200&&result?.fp===b.fp&&typeof result.tk==='string'&&typeof result.algo==='string')session.serverToken=result.tk;}catch(_){}}
+          this.readyState=4;this.onreadystatechange?.();
+        },()=>{if(!this.aborted){this.status=0;this.responseText='';this.readyState=4;this.onreadystatechange?.();}});
+      }
+    };
+    session.signer=farmMakeSigner(app,browser,undefined,env);
+    // Disable the SDK's scheduled duplicate bootstrap; initialization is awaited here.
+    session.signer._$rgo=()=>Promise.resolve();
+    session.signer.signSync(input);
+    farmOnlineSessions.set(key,session);
+  }
+  if(!session.serverToken){
+    host.progress('初始化服务端签名参数');
+    try{await session.signer._$ram();}catch(_){throw Error('农场服务端签名初始化失败，任务尚未提交');}
+  }
+  if(!session.serverToken)throw Error('农场服务端未返回有效签名参数，任务尚未提交');
+  const sig=session.signer.signSync(input).h5st;
+  if(typeof sig!=='string'||sig.split(';')[3]!==session.serverToken)throw Error('农场服务端签名已失效，请重新手动运行');
+  return sig;
+}
 
-return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,
+return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,signOnline:farmOnlineSign,
 sign:(app,profile,env,input)=>farmMakeSigner(app,farmInstallBrowser(profile),undefined,env).signSync(input).h5st};
 }
 function createFarmTaskClient(host,crypto,account,sharedLogin) {
@@ -320,7 +366,7 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     if(T.APPS[fn]){
       if(!p['x-api-eid-token'])throw Error('农场设备凭据缺失，请重新打开活动');
       const input={};for(const k of ['appid','body','functionId','t','client','clientVersion']){if(!p[k])throw Error('农场签名参数缺失');input[k]=k==='body'?crypto.hash(p.body):p[k];}
-      p.h5st=crypto.sign(T.APPS[fn],{pin:account.pin,headers},environment,input);
+      p.h5st=T.MUTATE.has(fn)?await crypto.signOnline(T.APPS[fn],{pin:account.pin,headers},environment,input):crypto.sign(T.APPS[fn],{pin:account.pin,headers},environment,input);
       const parts=String(p.h5st||'').split(';');if(parts.length!==10||parts[2]!==T.APPS[fn]||parts[5]!=='5.3'||parts[9]!==signing.encoding)throw Error('农场签名检查失败');
       const env=crypto.decodeEnvironment(parts[7]);if(env.fp!==parts[1]||JSON.stringify(env.pp)!==JSON.stringify(environment.pp)||env.v!==environment.v)throw Error('农场签名环境检查失败');
     }
@@ -522,6 +568,10 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
       const host={read:localRead,write:localWrite,now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),guard,progress,setTimeout,
         clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
         pause:async ms=>{guard();await new Promise(r=>setTimeout(r,ms));guard();},
+        requestAlgo:o=>new Promise((resolve,reject)=>{try{
+          guard();if(o.url!=='https://cactus.jd.com/request_algo'||Object.keys(o.headers).some(k=>k.toLowerCase()==='cookie'))throw Error();
+          $httpClient.post({...o,timeout:12000,'auto-redirect':false,'auto-cookie':false,insecure:false},(err,r,b)=>err?reject(Error('农场签名服务连接失败')):resolve({status:r?.status,body:b}));
+        }catch(_){reject(Error('农场签名服务请求未发送'));}}),
         sleep:async ms=>{if(Date.now()+ms+30000>=deadline)throw Error('农场本轮时间不足，可再次手动执行');const end=Date.now()+ms;while(Date.now()<end){progress('浏览计时，剩余 '+Math.ceil((end-Date.now())/1000)+' 秒');await new Promise(r=>setTimeout(r,Math.min(5000,end-Date.now())));guard();}},
         request:o=>new Promise((resolve,reject)=>{try{guard();if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?functionId=\w+$/.test(o.url))throw Error();
           $httpClient.post({...o,timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false},(err,r,b)=>err?reject(Error('农场网络请求失败')):resolve({status:r?.status,body:b}));

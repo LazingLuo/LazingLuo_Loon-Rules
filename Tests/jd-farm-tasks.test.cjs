@@ -28,13 +28,19 @@ function account(v){const store=new Map(),host={read:(k,f)=>store.has(k)?clone(s
 }
 function task(id,type='BROWSE_CHANNEL',more={}){return {id:-9999,taskShowTitle:'浏览 '+id,taskType:type,pipeExt:{assignmentId:'assignment-'+id,taskType:type},taskDoTimes:0,taskLimitTimes:1,taskFinished:false,canDrawAwardNum:0,timeLimitSwitch:2,timeLimitPeriod:6,taskItemList:[{itemId:'https://pro.m.jd.com/mall/active/offline/index.html',itemType:'1',pipeExt:{itemId:'offline-item-'+id},taskInsert:false}],...more};}
 async function simulate(options={}){
- const store=options.store||new Map(),calls=[],waits=[],pauses=[],notes=[],profile=options.profile===undefined?account(options.sdk).profile:options.profile;
+ const store=options.store||new Map(),calls=[],algoCalls=[],waits=[],pauses=[],notes=[],profile=options.profile===undefined?account(options.sdk).profile:options.profile;
  let current=clone(options.tasks||[task('a'),task('b','CUMULATIVE_TIMES',{taskLimitTimes:20,taskItemList:null}),task('c','ORDER_MARK',{taskItemList:null})]),extra=clone(options.extra||[]),clock=100000,water=900,chances=options.chances??2,timer=null,afterAward=false;
  const host={read:(k,f)=>store.has(k)?clone(store.get(k)):f,write:(k,v)=>{if(options.failWrite?.(k))throw Error('农场本地记录保存失败');store.set(k,clone(v));},now:()=>clock,day:()=>options.crossDay&&waits.length?'2026-10-23':'2026-10-22',guard:()=>{if(options.changed&&waits.length)throw Error('农场凭据已更新，请重新运行');},setTimeout:(...a)=>setTimeout(...a),clearTimeout,progress:s=>notes.push(s),pause:async ms=>{clock+=ms;pauses.push(ms);},sleep:async ms=>{clock+=ms;waits.push(ms);},
+  requestAlgo:async o=>{
+   assert.equal(o.url,'https://cactus.jd.com/request_algo');assert(!Object.keys(o.headers).some(k=>k.toLowerCase()==='cookie'));assert(!JSON.stringify(o).includes('FAKE_PRIVATE_COOKIE'));assert(!JSON.stringify(o).includes('FAKE_PRIVATE_EID'));
+   const b=JSON.parse(o.body);assert.equal(b.fp.length,16);assert(T.APPS&&Object.values(T.APPS).includes(b.appId));algoCalls.push(b.appId);
+   if(options.failAlgo)return {status:403,body:'PRIVATE_ALGORITHM_ERROR'};
+   return {status:200,body:JSON.stringify({status:200,data:{ts:Date.now(),result:{fp:b.fp,tk:'tk03'+'a'.repeat(88),algo:'function test(tk,fp,ts,ai,algo){return algo.HmacSHA256(tk+fp+ts+ai,"offline");}'}}})};
+  },
   request:async o=>{
    const p=T.form(o.body),b=JSON.parse(p.body),fn=p.functionId;calls.push({o,p,b,time:clock});
    assert(T.ALLOWED.has(fn));assert(!fn.includes('water'));assert(!('pay'in b));
-   if(T.APPS[fn]){const parts=p.h5st.split(';');assert.equal(parts.length,10);assert.equal(parts[2],T.APPS[fn]);assert.equal(parts[5],'5.3');}
+   if(T.APPS[fn]){const parts=p.h5st.split(';');assert.equal(parts.length,10);assert.equal(parts[2],T.APPS[fn]);assert.equal(parts[5],'5.3');if(options.realSDK&&T.MUTATE.has(fn))assert.equal(parts[3],'tk03'+'a'.repeat(88));}
    if(options.onRequest){const response=options.onRequest({fn,b,p,current,extra,calls,store});if(response)return response;}
    let d,code=0;
    if(fn==='apTaskList')d=options.missingAfterAward&&afterAward?[]:current;
@@ -52,16 +58,18 @@ async function simulate(options={}){
    }
    return {status:200,body:JSON.stringify({code,success:true,data:clone(d)})};
   }};
- const crypto=options.realSDK?createFarmCrypto(host):{hash:s=>require('crypto').createHash('sha256').update(s).digest('hex'),decodeEnvironment:farmDecodeEnvironment,sign:app=>fakeSig(app,options.sdk)};
+ const crypto=options.realSDK?createFarmCrypto(host):{hash:s=>require('crypto').createHash('sha256').update(s).digest('hex'),decodeEnvironment:farmDecodeEnvironment,sign:app=>fakeSig(app,options.sdk),signOnline:async app=>fakeSig(app,options.sdk)};
  const client=createFarmTaskClient(host,crypto,profile,options.login);
  const result=await client.run(options.scope||'farm',options.mode||'all');
  const text=JSON.stringify(result)+JSON.stringify(notes)+farmReportText(result);
  for(const s of ['FAKE_PRIVATE_COOKIE','FAKE_PRIVATE_EID','FAKE_PRIVATE_UUID','OFFLINE_AREA','assignment-'])assert(!text.includes(s),'private data in result');
- return {result,calls,store,notes,waits,pauses,current,extra};
+ return {result,calls,algoCalls,store,notes,waits,pauses,current,extra};
 }
 (async()=>{
  let n=0,r;
  for(const sdk of ['h5_file_v5.3.5','h5_file_v5.3.6']){r=await simulate({realSDK:true,sdk});assert.equal(r.result.stopped,false);assert.equal(r.result.waterConfirmed,10);assert.equal(r.result.rows[1].result,'手动浇水，保留水滴');assert.equal(r.result.waterAfter,910);n++;}
+ r=await simulate({realSDK:true,failAlgo:true});assert(r.result.stopped);assert(r.result.message.includes('服务端签名初始化失败'));assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));assert(r.algoCalls.length===1);n++;
+ r=await simulate({realSDK:true,tasks:[task('a'),task('b')]});assert(!r.result.stopped);assert.equal(r.algoCalls.filter(a=>a==='acb1e').length,1);assert.equal(r.algoCalls.filter(a=>a==='ebecc').length,1);assert.equal(r.algoCalls.filter(a=>a==='f0f3f').length,1);n++;
  r=await simulate({mode:'query',tasks:[task('a'),task('b')],extra:[task('b'),task('c','NEW_TYPE')]});assert.equal(r.result.initial.length,3);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
  r=await simulate({tasks:[task('a'),task('b')]});assert.equal(r.result.waterConfirmed,20);assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskDrawAward').length,2);n++;
  r=await simulate({tasks:[task('a')],extra:[task('b')]});assert.equal(r.result.waterConfirmed,20);n++;
@@ -112,6 +120,29 @@ async function simulate(options={}){
    $httpClient:{post:(o,cb)=>{const p=T.form(o.body);calls.push(p.functionId);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);const d=p.functionId==='apTaskList'?[]:p.functionId==='apTaskListBatch'?{modules:[]}:p.functionId==='farm_home'?{bizCode:0,result:{bottleWater:800}}:{lotteryChances:0,payLotteryFlag:false};cb(null,{status:200},JSON.stringify({code:0,success:true,data:d}));}}};
   vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);
   const result=JSON.parse(store.get(T.PREFIX+'last'));assert.equal(result.stopped,false);assert.equal(store.get(T.PREFIX+'lock'),'');assert(calls.length>=3);assert(notes.length);assert(!JSON.stringify(result).includes('PRIVATE'));n++;
+ }
+ // Full Loon request_algo adapter followed by a real-SDK task and reward.
+ {
+  const store=new Map([[T.ACCOUNT,JSON.stringify(account().profile)],['QL_BRIDGE_CREDENTIAL_V1','']]),timers=[],algoCalls=[];let finish;
+  const done=new Promise(r=>finish=r),t=task('live-adapter','BROWSE_CHANNEL',{timeLimitSwitch:0,timeLimitPeriod:0});
+  const context={console:{log:()=>{}},$argument:'farm-all',setTimeout:(f,ms)=>{const id=setTimeout(f,ms);timers.push(id);return id;},clearTimeout,
+   $persistentStore:{read:k=>store.get(k)||'',write:(v,k)=>{assert(k.startsWith(T.PREFIX));store.set(k,v);return true;}},$notification:{post:()=>{}},$done:()=>finish(),
+   $httpClient:{post:(o,cb)=>{
+    assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);
+    if(o.url==='https://cactus.jd.com/request_algo'){
+     assert(!Object.keys(o.headers).some(k=>k.toLowerCase()==='cookie'));const b=JSON.parse(o.body);algoCalls.push(b.appId);
+     cb(null,{status:200},JSON.stringify({status:200,data:{ts:Date.now(),result:{fp:b.fp,tk:'tk03'+'a'.repeat(88),algo:'function test(tk,fp,ts,ai,algo){return algo.HmacSHA256(tk+fp+ts+ai,"offline");}'}}}));return;
+    }
+    const p=T.form(o.body);let data;
+    if(p.functionId==='apTaskList')data=[t];
+    else if(p.functionId==='apTaskListBatch')data={modules:[]};
+    else if(p.functionId==='farm_home')data={bizCode:0,result:{bottleWater:900}};
+    else if(p.functionId==='apsDoTask'){assert.equal(p.h5st.split(';')[3],'tk03'+'a'.repeat(88));t.taskDoTimes=1;t.taskFinished=true;t.canDrawAwardNum=1;data={finished:true};}
+    else if(p.functionId==='apTaskDrawAward'){assert.equal(p.h5st.split(';')[3],'tk03'+'a'.repeat(88));t.canDrawAwardNum=0;data=[{awardName:'WATER',awardGivenNumber:'10'}];}
+    else throw Error('unexpected integration request');
+    cb(null,{status:200},JSON.stringify({code:0,success:true,data}));
+   }}};
+  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);const r=JSON.parse(store.get(T.PREFIX+'last'));assert(!r.stopped,r.message);assert.equal(r.waterConfirmed,10);assert.deepEqual(algoCalls,['54ed7','f0f3f']);n++;
  }
  console.log(n+' offline checks passed: current lists/modules, duplicate -9999 identities, timed tasks, repeat rounds, claims, free draws, no watering/payment, capture and both official SDKs. No live requests.');
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});
