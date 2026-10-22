@@ -1,4 +1,4 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-22.4
+// 东东农场与幸运转盘，Loon手动版 2026-10-22.5
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -288,7 +288,11 @@ if (diagnostics) {
 const farmOnlineSessions=new Map();
 async function farmOnlineSign(app,profile,env,input){
   if(typeof host.requestAlgo!=='function')throw Error('农场服务端签名入口缺失');
-  const key=farmSha256(JSON.stringify([app,profile.pin,profile.headers,env]));
+  // sdtoken is a rotating API-session cookie, not the SDK algorithm identity.
+  // Its refresh must not trigger another algorithm bootstrap for the same app.
+  const cacheHeaders={...profile.headers};
+  if(cacheHeaders.Cookie)cacheHeaders.Cookie=cacheHeaders.Cookie.split(';').map(s=>s.trim()).filter(s=>s&&!s.startsWith('sdtoken=')).join('; ');
+  const key=farmSha256(JSON.stringify([app,profile.pin,cacheHeaders,env]));
   let session=farmOnlineSessions.get(key);
   if(!session){
     session={serverToken:null};
@@ -377,7 +381,16 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
   const T=farmTools(),day=host.day(),journalKey='actions.'+crypto.hash(account?.pin||'').slice(0,24);
   const saved=host.read(journalKey,{day,actions:{}}),journal=saved.day===day?saved:{day,actions:{}};
   const report={day,rows:[],initial:[],final:[],waterReceived:0,waterConfirmed:0,draws:[],stopped:false};
-  let requestCount=0,lastResponseAt=null;
+  let requestCount=0,lastResponseAt=null,sessionRisk=null;
+  // JD's observed response header is "set;1800;<sdtoken>". Keep it only for
+  // this run, across request templates; never overwrite captured credentials.
+  function updateSession(response){
+    const k=Object.keys(response.headers||{}).find(k=>k.toLowerCase()==='x-rp-sdtoken');
+    const match=k&&typeof response.headers[k]==='string'&&response.headers[k].match(/^set;(\d{1,5});([A-Za-z0-9_-]{16,2048})$/);
+    if(!match||Number(match[1])<1||Number(match[1])>86400)return;
+    sessionRisk={token:match[2],until:host.now()+Number(match[1])*1000};
+    report.sessionRefreshes=(report.sessionRefreshes||0)+1;
+  }
   const stages={apTaskList:'查询任务',apTaskListBatch:'查询补充任务',farm_home:'查询农场',wheelsHome:'查询转盘',apTaskDetail:'查询浏览项目',apStartTaskTime:'开始计时',apDoLimitTimeTask:'提交计时结果',apsDoTask:'提交任务',apTaskDrawAward:'领取奖励',wheelsLottery:'抽奖'};
   function guard(){host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');if(++requestCount>350)throw Error('农场本轮请求已达上限');}
   function group(scope){const g=account?.scopes?.[scope];if(!g?.templates?.apTaskList||!g.signing)throw Error('农场'+(scope==='farm'?'主任务':'转盘')+'凭据不完整，请开启获取后进入对应任务列表');return g;}
@@ -390,6 +403,10 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     if(!T.refOK(headers.Referer,scope)||!headers['User-Agent']||T.cookie(headers.Cookie,'pt_pin')!==account.pin||!T.cookie(headers.Cookie,'pt_key'))throw Error('农场页面或账号凭据不符');
     if(sharedLogin?.pin&&sharedLogin.pin!==account.pin)throw Error('农场共享Cookie账号不一致');
     if(sharedLogin&&Number(sharedLogin.capturedAt)>Number(t.at)&&T.cookie(sharedLogin.cookie,'pt_pin')===account.pin&&T.cookie(sharedLogin.cookie,'pt_key'))headers.Cookie=headers.Cookie.replace(/(^|;\s*)pt_key=[^;]+/,(_m,lead)=>lead+'pt_key='+T.cookie(sharedLogin.cookie,'pt_key'));
+    if(sessionRisk){
+      if(sessionRisk.until<=host.now())throw Error('农场会话已过期，请重新手动运行');
+      headers.Cookie=headers.Cookie.split(';').map(s=>s.trim()).filter(s=>s&&!s.startsWith('sdtoken=')).concat('sdtoken='+sessionRisk.token).join('; ');
+    }
     const signing=exact?.signing||g.signing,environment=crypto.decodeEnvironment(signing.environment);
     if(![account.pin,decodeURIComponent(account.pin)].includes(environment.pp.p1))throw Error('农场签名环境账号不符');
     return {t,headers,signing,environment};
@@ -412,7 +429,7 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     }
     host.guard();
     const detail={functionId:fn,path:t.endpoint.slice('https://api.m.jd.com'.length),stage:stages[fn]||fn,status:null,
-      template:group(scope).templates[fn]?'exact':'list',signed:!!T.APPS[fn],timestampAgeMs:Math.max(0,host.now()-Number(p.t))};report.lastRequest=detail;
+      template:group(scope).templates[fn]?'exact':'list',signed:!!T.APPS[fn],currentSession:!!sessionRisk,timestampAgeMs:Math.max(0,host.now()-Number(p.t))};report.lastRequest=detail;
     const diagnose=parsed=>{detail.response=farmResponseDiagnostic(r,parsed);host.progress('响应诊断：'+farmDiagnosticText(detail));};
     host.progress(detail.stage+'（'+fn+'）');
     if(T.MUTATE.has(fn))mark(key);
@@ -422,6 +439,9 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     host.progress(detail.stage+'返回 '+http+'（'+fn+'）');
     if(Number(r.status)!==200){diagnose();throw Error('农场'+detail.stage+'失败：'+http+'（'+fn+'），已停止');}
     let j;try{j=JSON.parse(r.body);}catch(_){diagnose();throw Error('农场接口响应无法解析，已停止');}
+    // An HTTP-200 platform reply can refresh the session even when its business
+    // result says there is no pending timer. HTTP failures never refresh it.
+    updateSession(r);
     if(!T.accepted(j)){
       diagnose(j);
       const code=/^-?\d{1,8}$/.test(String(j?.code))?String(j.code):'未知';
@@ -571,6 +591,7 @@ function farmReportText(r){
   if(r.lastRequest?.response){
     lines.push('响应诊断：'+farmDiagnosticText(r.lastRequest));
     lines.push('请求信息：'+r.lastRequest.functionId+'；'+(r.lastRequest.template==='exact'?'专用模板':'列表模板')+'；签名前时间至发送 '+r.lastRequest.timestampAgeMs+' 毫秒');
+    lines.push('会话信息：本轮刷新 '+(r.sessionRefreshes||0)+' 次；'+(r.lastRequest.currentSession?'本请求使用本轮会话':'本请求使用保存的会话'));
   }
   if(r.mode==='query'){
     lines.push('共 '+r.initial.length+' 项任务');

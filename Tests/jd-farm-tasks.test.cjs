@@ -56,7 +56,7 @@ async function simulate(options={}){
     if(fn==='apsDoTask'){assert(t);if(!options.noProgress){t.taskDoTimes++;t.taskFinished=t.taskDoTimes>=t.taskLimitTimes;if(options.scope!=='wheel')t.canDrawAwardNum=1;}d={finished:true,alreadyGranted:options.scope==='wheel'};}
     if(fn==='apTaskDrawAward'){assert(t);assert(t.canDrawAwardNum>0);if(!options.unconfirmedClaim)t.canDrawAwardNum=0;water+=10;afterAward=true;d=[{awardName:'WATER',awardGivenNumber:'10'}];}
    }
-   return {status:200,body:JSON.stringify({code,success:true,data:clone(d)})};
+   return {status:200,headers:options.responseHeaders?.({fn,calls})||{},body:JSON.stringify({code,success:true,data:clone(d)})};
   }};
  const crypto=options.realSDK?createFarmCrypto(host):{hash:s=>require('crypto').createHash('sha256').update(s).digest('hex'),decodeEnvironment:farmDecodeEnvironment,sign:app=>fakeSig(app,options.sdk),signOnline:async app=>fakeSig(app,options.sdk)};
  const client=createFarmTaskClient(host,crypto,profile,options.login);
@@ -70,6 +70,24 @@ async function simulate(options={}){
  for(const sdk of ['h5_file_v5.3.5','h5_file_v5.3.6']){r=await simulate({realSDK:true,sdk});assert.equal(r.result.stopped,false);assert.equal(r.result.waterConfirmed,10);assert.equal(r.result.rows[1].result,'手动浇水，保留水滴');assert.equal(r.result.waterAfter,910);n++;}
  r=await simulate({realSDK:true,failAlgo:true});assert(r.result.stopped);assert(r.result.message.includes('服务端签名初始化失败'));assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));assert(r.algoCalls.length===1);n++;
  r=await simulate({realSDK:true,tasks:[task('a'),task('b')]});assert(!r.result.stopped);assert.equal(r.algoCalls.filter(a=>a==='acb1e').length,1);assert.equal(r.algoCalls.filter(a=>a==='ebecc').length,1);assert.equal(r.algoCalls.filter(a=>a==='f0f3f').length,1);n++;
+ // 409/410: forward the latest server sdtoken across query/action templates.
+ {
+  const p=account().profile,original=JSON.stringify(p),req=captureRequest('farm','apStartTaskTime',{}),params=T.form(req.body);
+  p.scopes.farm.templates.apStartTaskTime={endpoint:'https://api.m.jd.com/api',params,headers:{...req.headers,Cookie:req.headers.Cookie+' sdtoken=PRIVATE_STALE_SESSION;'},body:{},signing:p.scopes.farm.signing,at:100};
+  const snapshot=JSON.stringify(p);
+  r=await simulate({profile:p,realSDK:true,tasks:[task('a'),task('b')],responseHeaders:({calls})=>({'X-Rp-Sdtoken':'set;1800;PRIVATE_CURRENT_SESSION_'+calls.length})});
+  assert(!r.result.stopped,r.result.message);assert.equal(r.result.waterConfirmed,20);
+  for(let i=1;i<r.calls.length;i++)assert.equal(T.cookie(r.calls[i].o.headers.Cookie,'sdtoken'),'PRIVATE_CURRENT_SESSION_'+i);
+  for(const c of r.calls){assert.equal(T.cookie(c.o.headers.Cookie,'pt_key'),'FAKE_PRIVATE_COOKIE');assert.equal(T.cookie(c.o.headers.Cookie,'pt_pin'),'offline');}
+  assert.equal(JSON.stringify(p),snapshot);assert.equal(r.result.sessionRefreshes,r.calls.length);assert(r.result.lastRequest.currentSession);
+  assert(!JSON.stringify(r.result).includes('PRIVATE_CURRENT_SESSION'));assert(!r.notes.join('').includes('PRIVATE_CURRENT_SESSION'));assert(!JSON.stringify([...r.store]).includes('PRIVATE_CURRENT_SESSION'));
+  assert.equal(r.algoCalls.filter(a=>a==='acb1e').length,1);assert.equal(r.algoCalls.filter(a=>a==='ebecc').length,1);assert.equal(r.algoCalls.filter(a=>a==='f0f3f').length,1);n++;
+ }
+ for(const value of ['set;0;PRIVATE_REJECTED_SESSION','set;99999;PRIVATE_REJECTED_SESSION','set;1800;bad;cookie=inject','set;1800;short','set;1800;PRIVATE_REJECTED_SESSION\r\nX:1']){
+  r=await simulate({mode:'query',responseHeaders:()=>({'x-rp-sdtoken':value})});assert(!r.result.stopped);assert(!r.result.sessionRefreshes);assert(!r.calls.some(c=>T.cookie(c.o.headers.Cookie,'sdtoken')));
+ }n++;
+ r=await simulate({tasks:[task('a')],responseHeaders:()=>({'x-rp-sdtoken':'set;1;PRIVATE_SHORT_SESSION'})});assert(r.result.stopped);assert(r.result.message.includes('会话已过期'));assert(!r.calls.some(c=>c.p.functionId==='apDoLimitTimeTask'||c.p.functionId==='apTaskDrawAward'));n++;
+ r=await simulate({responseHeaders:()=>({'x-rp-sdtoken':'set;1800;PRIVATE_CURRENT_SESSION'}),onRequest:({fn})=>fn==='apStartTaskTime'?{status:403,headers:{'x-rp-sdtoken':'set;1800;PRIVATE_REJECTED_SESSION'},body:''}:null});assert(r.result.stopped);assert(r.result.lastRequest.currentSession);assert.equal(r.result.sessionRefreshes,r.calls.length-1);assert(!farmReportText(r.result).includes('PRIVATE_CURRENT_SESSION'));assert(farmReportText(r.result).includes('本请求使用本轮会话'));n++;
  r=await simulate({mode:'query',tasks:[task('a'),task('b')],extra:[task('b'),task('c','NEW_TYPE')]});assert.equal(r.result.initial.length,3);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
  r=await simulate({tasks:[task('a'),task('b')]});assert.equal(r.result.waterConfirmed,20);assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskDrawAward').length,2);n++;
  r=await simulate({tasks:[task('a')],extra:[task('b')]});assert.equal(r.result.waterConfirmed,20);n++;
