@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),asse
 const root=__dirname,release=fs.existsSync(path.join(root,'jd-farm-tasks.js'));
 const mainPath=path.join(root,release?'jd-farm-tasks.js':'../Scripts/jd-farm-tasks.js');
 const capturePath=path.join(root,release?'jd-farm-tasks-capture.js':'../Scripts/jd-farm-tasks-capture.js');
-const {farmTools,createFarmTaskClient,createFarmCrypto,farmReportText}=require(mainPath);
+const {farmTools,createFarmTaskClient,createFarmCrypto,farmReportText,farmResponseDiagnostic,farmDiagnosticText}=require(mainPath);
 const {farmCapture,farmDecodeEnvironment}=require(capturePath),T=farmTools(),clone=o=>JSON.parse(JSON.stringify(o));
 const encode=o=>{const n='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/',m='rqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_9876543210zyxwvuts';return [...Buffer.from(JSON.stringify(o)+'x').toString('base64').replace(/=+$/,'')].map(c=>m[n.indexOf(c)]).reverse().join('');};
 const env=(v='h5_file_v5.3.6')=>({v,fp:'offline-reference',pp:{p1:'offline'},extend:{bu6:33,bu13:'F3'},canvas:'a'.repeat(32),webglFp:'b'.repeat(32),sua:'iPhone',pf:'iPhone',ccn:4});
@@ -94,6 +94,20 @@ async function simulate(options={}){
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:502,body:''}:null});assert(r.result.stopped);const retry=await simulate({store:r.store,tasks:[task('a')]});assert(!retry.calls.some(c=>c.p.functionId==='apStartTaskTime'));n++;
  assert(r.result.message.includes('HTTP 502'));assert(r.result.message.includes('apStartTaskTime'));assert.equal(r.result.lastRequest.status,502);assert.equal(r.result.lastRequest.stage,'开始计时');n++;
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:403,body:'PRIVATE_ERROR_BODY_TOKEN'}:null});assert(r.result.message.includes('HTTP 403'));assert(!JSON.stringify(r.result).includes('PRIVATE_ERROR_BODY_TOKEN'));assert(!r.calls.some(c=>c.p.functionId==='apDoLimitTimeTask'));n++;
+ // Diagnostic output retains fixed clues/codes, not raw headers or server messages.
+ r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:403,headers:{'Content-Type':'application/json; charset=utf-8','Set-Cookie':'SECRET_RESPONSE_COOKIE','Server':'PRIVATE_SERVER_VALUE'},body:JSON.stringify({code:403,subCode:'1001',errMsg:'h5st signature invalid SECRET_RESPONSE_COOKIE',data:{pt_key:'SECRET_NESTED_TOKEN'},traceId:'SECRET_TRACE'})}:null});
+ assert.deepEqual(r.result.lastRequest.response.codes,{code:'403',subCode:'1001'});assert.deepEqual(r.result.lastRequest.response.clues,['签名']);assert.equal(r.result.lastRequest.response.kind,'json');assert.equal(r.result.lastRequest.response.mime,'application/json');assert.equal(r.result.lastRequest.template,'list');
+ for(const secret of ['SECRET_RESPONSE_COOKIE','SECRET_NESTED_TOKEN','SECRET_TRACE','PRIVATE_SERVER_VALUE'])assert(!JSON.stringify(r.result).includes(secret)&&!r.notes.join('').includes(secret));assert(farmReportText(r.result).includes('code=403'));assert(!r.calls.some(c=>c.p.functionId==='apDoLimitTimeTask'));n++;
+ r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:403,headers:{'content-type':'text/html','retry-after':'30'},body:'<!DOCTYPE html><html><title>Access Denied PRIVATE_TOKEN</title><p>pt_key=SECRET_COOKIE</p></html>'}:null});
+ assert.equal(r.result.lastRequest.response.kind,'html');assert.deepEqual(r.result.lastRequest.response.clues,['访问限制']);assert.equal(r.result.lastRequest.response.retryAfterSeconds,30);assert(!farmReportText(r.result).includes('SECRET_COOKIE'));n++;
+ r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:403,headers:{'content-type':'text/plain'},body:''}:null});assert.equal(r.result.lastRequest.response.kind,'empty');assert(farmReportText(r.result).includes('空响应'));n++;
+ {
+  const d=farmResponseDiagnostic({headers:{'content-type':'SECRET_MIME','retry-after':'SECRET_RETRY'},body:JSON.stringify({code:'SECRET_CODE',errorCode:[],errCode:{},subCode:'SIGNATURE_TOKEN',message:'private unrecognized text',data:{code:999}})});
+  assert.deepEqual(d,{kind:'json',length:JSON.stringify({code:'SECRET_CODE',errorCode:[],errCode:{},subCode:'SIGNATURE_TOKEN',message:'private unrecognized text',data:{code:999}}).length});assert(!farmDiagnosticText({response:d}).includes('SECRET'));n++;
+ }
+ r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:200,body:'<html><body>Bad Gateway SECRET_BODY</body></html>'}:null});assert(r.result.stopped);assert.equal(r.result.lastRequest.response.kind,'html');assert.deepEqual(r.result.lastRequest.response.clues,['网关错误']);assert(!farmReportText(r.result).includes('SECRET_BODY'));n++;
+ r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:200,body:'{"code":1002,"success":false,"errMsg":"login required SECRET_BODY"}'}:null});assert.equal(r.result.lastRequest.response.codes.code,'1002');assert.deepEqual(r.result.lastRequest.response.clues,['登录']);assert(!farmReportText(r.result).includes('SECRET_BODY'));n++;
+ const diagRetry=await simulate({store:r.store,tasks:[task('a')]});assert(!diagRetry.calls.some(c=>c.p.functionId==='apStartTaskTime'));n++;
  r=await simulate({tasks:[task('a')]});assert(r.pauses.length>0);for(let i=1;i<r.calls.length;i++)assert(r.calls[i].time-r.calls[i-1].time>=900);n++;
  r=await simulate({tasks:[task('a','ORDER_MARK'),task('b','CUMULATIVE_TIMES')]});assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskList').length,2);assert.equal(r.result.rows.length,2);n++;
  r=await simulate({failWrite:k=>k.startsWith('actions.')});assert(r.result.stopped);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
@@ -122,6 +136,15 @@ async function simulate(options={}){
   const result=JSON.parse(store.get(T.PREFIX+'last'));assert.equal(result.stopped,false);assert.equal(store.get(T.PREFIX+'lock'),'');assert(calls.length>=3);assert(notes.length);assert(!JSON.stringify(result).includes('PRIVATE'));n++;
  }
  // Full Loon request_algo adapter followed by a real-SDK task and reward.
+ // The actual Loon adapter must also pass headers to the response sanitizer.
+ {
+  const store=new Map([[T.ACCOUNT,JSON.stringify(account().profile)]]),notes=[];let finish;
+  const done=new Promise(r=>finish=r),context={console:{log:s=>notes.push(s)},$argument:'farm-query',setTimeout,clearTimeout,
+   $persistentStore:{read:k=>store.get(k)||'',write:(v,k)=>{store.set(k,v);return true;}},$notification:{post:(...s)=>notes.push(s.join(' '))},$done:()=>finish(),
+   $httpClient:{post:(o,cb)=>cb(null,{status:403,headers:{'CONTENT-TYPE':'text/html; charset=utf-8','set-cookie':'PRIVATE_SET_COOKIE'}},'<html><body>Access Denied PRIVATE_HTML_VALUE</body></html>')}};
+  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;
+  const r=JSON.parse(store.get(T.PREFIX+'last'));assert(r.stopped);assert.equal(r.lastRequest.response.mime,'text/html');assert.equal(r.lastRequest.response.kind,'html');assert(notes.join('').includes('响应诊断'));assert(!notes.join('').includes('PRIVATE_'));assert(!store.get(T.PREFIX+'last').includes('PRIVATE_'));n++;
+ }
  {
   const store=new Map([[T.ACCOUNT,JSON.stringify(account().profile)],['QL_BRIDGE_CREDENTIAL_V1','']]),timers=[],algoCalls=[];let finish;
   const done=new Promise(r=>finish=r),t=task('live-adapter','BROWSE_CHANNEL',{timeLimitSwitch:0,timeLimitPeriod:0});

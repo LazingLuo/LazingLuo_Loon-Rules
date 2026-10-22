@@ -1,4 +1,4 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-22.3
+// 东东农场与幸运转盘，Loon手动版 2026-10-22.4
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -333,6 +333,46 @@ async function farmOnlineSign(app,profile,env,input){
 return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,signOnline:farmOnlineSign,
 sign:(app,profile,env,input)=>farmMakeSigner(app,farmInstallBrowser(profile),undefined,env).signSync(input).h5st};
 }
+// Retain only fixed labels and bounded numeric error codes, never response text.
+function farmResponseDiagnostic(response,parsed) {
+  const body=typeof response.body==='string'?response.body:'',sample=body.slice(0,65536);
+  const get=name=>{const k=Object.keys(response.headers||{}).find(k=>k.toLowerCase()===name);return k?String(response.headers[k]):'';};
+  const mime=get('content-type').split(';')[0].trim().toLowerCase();
+  const out={kind:body.trim()?'text':'empty',length:body.length};
+  if(['application/json','text/json','text/html','text/plain','application/octet-stream'].includes(mime))out.mime=mime;
+  let json=parsed;
+  if(json===undefined&&body.length<=262144){try{json=JSON.parse(body);}catch(_){}}
+  if(json!==undefined){out.kind='json';out.codes={};
+    if(json&&typeof json==='object'&&!Array.isArray(json))for(const key of ['code','errorCode','errCode','subCode','status']){
+      const value=json[key];if((typeof value==='number'||typeof value==='string')&&/^-?\d{1,8}$/.test(String(value)))out.codes[key]=String(value);
+    }
+    if(!Object.keys(out.codes).length)delete out.codes;
+  }else if(/^\s*(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(sample))out.kind='html';
+  // Keywords are clues in a response, not a diagnosis of the rejection's cause.
+  const clues=[];
+  for(const [label,pattern] of [
+    ['签名',/\bh5st\b|\bsignature\b|签名/i],
+    ['登录',/\bcookie\b|\blogin\b|\bunauthenticated\b|登录/i],
+    ['设备凭据',/\beid\b|x-api-eid-token|wg-sdk-token|设备凭据|设备校验/i],
+    ['访问限制',/access\s+denied|\bforbidden\b|\bwaf\b|风控|访问限制|拒绝访问/i],
+    ['验证码',/\bcaptcha\b|验证码/i],
+    ['请求频率',/rate\s+limit|too\s+many\s+requests|请求频率|频繁/i],
+    ['网关错误',/bad\s+gateway|gateway\s+timeout|网关错误|网关超时/i]
+  ])if(pattern.test(sample))clues.push(label);
+  if(clues.length)out.clues=clues;
+  if(/^\d{1,5}$/.test(get('retry-after')))out.retryAfterSeconds=Number(get('retry-after'));
+  return out;
+}
+function farmDiagnosticText(detail) {
+  const d=detail?.response;if(!d)return '';
+  const names={json:'JSON响应',html:'HTML页面',empty:'空响应',text:'文本响应'};
+  const parts=[names[d.kind]||'未知响应','长度 '+d.length];
+  if(d.mime)parts.push(d.mime);
+  for(const [key,value] of Object.entries(d.codes||{}))parts.push(key+'='+value);
+  if(d.clues?.length)parts.push('内容线索：'+d.clues.join('、'));
+  if(d.retryAfterSeconds!==undefined)parts.push('建议等待 '+d.retryAfterSeconds+' 秒');
+  return parts.join('；');
+}
 function createFarmTaskClient(host,crypto,account,sharedLogin) {
   const T=farmTools(),day=host.day(),journalKey='actions.'+crypto.hash(account?.pin||'').slice(0,24);
   const saved=host.read(journalKey,{day,actions:{}}),journal=saved.day===day?saved:{day,actions:{}};
@@ -371,16 +411,19 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
       const env=crypto.decodeEnvironment(parts[7]);if(env.fp!==parts[1]||JSON.stringify(env.pp)!==JSON.stringify(environment.pp)||env.v!==environment.v)throw Error('农场签名环境检查失败');
     }
     host.guard();
-    const detail={functionId:fn,path:t.endpoint.slice('https://api.m.jd.com'.length),stage:stages[fn]||fn,status:null};report.lastRequest=detail;
+    const detail={functionId:fn,path:t.endpoint.slice('https://api.m.jd.com'.length),stage:stages[fn]||fn,status:null,
+      template:group(scope).templates[fn]?'exact':'list',signed:!!T.APPS[fn],timestampAgeMs:Math.max(0,host.now()-Number(p.t))};report.lastRequest=detail;
+    const diagnose=parsed=>{detail.response=farmResponseDiagnostic(r,parsed);host.progress('响应诊断：'+farmDiagnosticText(detail));};
     host.progress(detail.stage+'（'+fn+'）');
     if(T.MUTATE.has(fn))mark(key);
     let r;try{r=await host.request({url:t.endpoint+'?functionId='+fn,headers:{...headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Farm-Run':'1'},body:T.encode(p)});}catch(_){detail.networkError=true;throw Error('农场'+detail.stage+'网络结果未确认（'+fn+'），已停止');}
     lastResponseAt=host.now();detail.status=Number.isInteger(Number(r.status))&&Number(r.status)>=100&&Number(r.status)<=599?Number(r.status):0;
     const http=detail.status?'HTTP '+detail.status:'HTTP状态未知';
     host.progress(detail.stage+'返回 '+http+'（'+fn+'）');
-    if(Number(r.status)!==200)throw Error('农场'+detail.stage+'失败：'+http+'（'+fn+'），已停止');
-    let j;try{j=JSON.parse(r.body);}catch(_){throw Error('农场接口响应无法解析，已停止');}
+    if(Number(r.status)!==200){diagnose();throw Error('农场'+detail.stage+'失败：'+http+'（'+fn+'），已停止');}
+    let j;try{j=JSON.parse(r.body);}catch(_){diagnose();throw Error('农场接口响应无法解析，已停止');}
     if(!T.accepted(j)){
+      diagnose(j);
       const code=/^-?\d{1,8}$/.test(String(j?.code))?String(j.code):'未知';
       if(T.MUTATE.has(fn))settle(key,'rejected');
       if(allowCodes.includes(Number(j.code)))return {code:Number(j.code),data:null};
@@ -525,6 +568,10 @@ function farmReportText(r){
   if(!r)return '暂无记录';
   const lines=[r.scope==='wheel'?'幸运转盘':'东东农场'];
   if(r.stopped)lines.push('已停止：'+r.message);
+  if(r.lastRequest?.response){
+    lines.push('响应诊断：'+farmDiagnosticText(r.lastRequest));
+    lines.push('请求信息：'+r.lastRequest.functionId+'；'+(r.lastRequest.template==='exact'?'专用模板':'列表模板')+'；签名前时间至发送 '+r.lastRequest.timestampAgeMs+' 毫秒');
+  }
   if(r.mode==='query'){
     lines.push('共 '+r.initial.length+' 项任务');
     for(const t of r.initial)lines.push(t.title+' '+t.current+'/'+t.total+'：'+t.state);
@@ -574,7 +621,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
         }catch(_){reject(Error('农场签名服务请求未发送'));}}),
         sleep:async ms=>{if(Date.now()+ms+30000>=deadline)throw Error('农场本轮时间不足，可再次手动执行');const end=Date.now()+ms;while(Date.now()<end){progress('浏览计时，剩余 '+Math.ceil((end-Date.now())/1000)+' 秒');await new Promise(r=>setTimeout(r,Math.min(5000,end-Date.now())));guard();}},
         request:o=>new Promise((resolve,reject)=>{try{guard();if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?functionId=\w+$/.test(o.url))throw Error();
-          $httpClient.post({...o,timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false},(err,r,b)=>err?reject(Error('农场网络请求失败')):resolve({status:r?.status,body:b}));
+          $httpClient.post({...o,timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false},(err,r,b)=>err?reject(Error('农场网络请求失败')):resolve({status:r?.status,headers:r?.headers||{},body:b}));
         }catch(_){reject(Error('农场请求未发送'));}})};
       localWrite('lock',{runId,until:deadline+30000});owned=true;
       const client=createFarmTaskClient(host,createFarmCrypto(host),account,shared),[scope,action]=mode.split('-');
@@ -591,4 +638,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   })();
 }
 
-if(typeof module!=="undefined")module.exports={farmTools,createFarmTaskClient,createFarmCrypto,farmReportText};
+if(typeof module!=="undefined")module.exports={farmTools,createFarmTaskClient,createFarmCrypto,farmReportText,farmResponseDiagnostic,farmDiagnosticText};
