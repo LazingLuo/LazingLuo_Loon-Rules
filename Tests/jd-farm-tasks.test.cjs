@@ -28,11 +28,11 @@ function account(v){const store=new Map(),host={read:(k,f)=>store.has(k)?clone(s
 }
 function task(id,type='BROWSE_CHANNEL',more={}){return {id:-9999,taskShowTitle:'浏览 '+id,taskType:type,pipeExt:{assignmentId:'assignment-'+id,taskType:type},taskDoTimes:0,taskLimitTimes:1,taskFinished:false,canDrawAwardNum:0,timeLimitSwitch:2,timeLimitPeriod:6,taskItemList:[{itemId:'https://pro.m.jd.com/mall/active/offline/index.html',itemType:'1',pipeExt:{itemId:'offline-item-'+id},taskInsert:false}],...more};}
 async function simulate(options={}){
- const store=options.store||new Map(),calls=[],waits=[],notes=[],profile=options.profile===undefined?account(options.sdk).profile:options.profile;
+ const store=options.store||new Map(),calls=[],waits=[],pauses=[],notes=[],profile=options.profile===undefined?account(options.sdk).profile:options.profile;
  let current=clone(options.tasks||[task('a'),task('b','CUMULATIVE_TIMES',{taskLimitTimes:20,taskItemList:null}),task('c','ORDER_MARK',{taskItemList:null})]),extra=clone(options.extra||[]),clock=100000,water=900,chances=options.chances??2,timer=null,afterAward=false;
- const host={read:(k,f)=>store.has(k)?clone(store.get(k)):f,write:(k,v)=>{if(options.failWrite?.(k))throw Error('农场本地记录保存失败');store.set(k,clone(v));},now:()=>clock,day:()=>options.crossDay&&waits.length?'2026-10-23':'2026-10-22',guard:()=>{if(options.changed&&waits.length)throw Error('农场凭据已更新，请重新运行');},setTimeout:(...a)=>setTimeout(...a),clearTimeout,progress:s=>notes.push(s),sleep:async ms=>{clock+=ms;waits.push(ms);},
+ const host={read:(k,f)=>store.has(k)?clone(store.get(k)):f,write:(k,v)=>{if(options.failWrite?.(k))throw Error('农场本地记录保存失败');store.set(k,clone(v));},now:()=>clock,day:()=>options.crossDay&&waits.length?'2026-10-23':'2026-10-22',guard:()=>{if(options.changed&&waits.length)throw Error('农场凭据已更新，请重新运行');},setTimeout:(...a)=>setTimeout(...a),clearTimeout,progress:s=>notes.push(s),pause:async ms=>{clock+=ms;pauses.push(ms);},sleep:async ms=>{clock+=ms;waits.push(ms);},
   request:async o=>{
-   const p=T.form(o.body),b=JSON.parse(p.body),fn=p.functionId;calls.push({o,p,b});
+   const p=T.form(o.body),b=JSON.parse(p.body),fn=p.functionId;calls.push({o,p,b,time:clock});
    assert(T.ALLOWED.has(fn));assert(!fn.includes('water'));assert(!('pay'in b));
    if(T.APPS[fn]){const parts=p.h5st.split(';');assert.equal(parts.length,10);assert.equal(parts[2],T.APPS[fn]);assert.equal(parts[5],'5.3');}
    if(options.onRequest){const response=options.onRequest({fn,b,p,current,extra,calls,store});if(response)return response;}
@@ -57,7 +57,7 @@ async function simulate(options={}){
  const result=await client.run(options.scope||'farm',options.mode||'all');
  const text=JSON.stringify(result)+JSON.stringify(notes)+farmReportText(result);
  for(const s of ['FAKE_PRIVATE_COOKIE','FAKE_PRIVATE_EID','FAKE_PRIVATE_UUID','OFFLINE_AREA','assignment-'])assert(!text.includes(s),'private data in result');
- return {result,calls,store,notes,waits,current,extra};
+ return {result,calls,store,notes,waits,pauses,current,extra};
 }
 (async()=>{
  let n=0,r;
@@ -84,6 +84,10 @@ async function simulate(options={}){
  r=await simulate({scope:'wheel',mode:'query'});assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
  r=await simulate({scope:'wheel',mode:'draw',onRequest:({fn})=>fn==='wheelsLottery'?{status:200,body:'{"code":0,"success":true,"data":{}}'}:null});assert(r.result.stopped);const again=await simulate({scope:'wheel',mode:'draw',store:r.store});assert(again.result.stopped);assert(!again.calls.some(c=>c.p.functionId==='wheelsLottery'));n++;
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:502,body:''}:null});assert(r.result.stopped);const retry=await simulate({store:r.store,tasks:[task('a')]});assert(!retry.calls.some(c=>c.p.functionId==='apStartTaskTime'));n++;
+ assert(r.result.message.includes('HTTP 502'));assert(r.result.message.includes('apStartTaskTime'));assert.equal(r.result.lastRequest.status,502);assert.equal(r.result.lastRequest.stage,'开始计时');n++;
+ r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:403,body:'PRIVATE_ERROR_BODY_TOKEN'}:null});assert(r.result.message.includes('HTTP 403'));assert(!JSON.stringify(r.result).includes('PRIVATE_ERROR_BODY_TOKEN'));assert(!r.calls.some(c=>c.p.functionId==='apDoLimitTimeTask'));n++;
+ r=await simulate({tasks:[task('a')]});assert(r.pauses.length>0);for(let i=1;i<r.calls.length;i++)assert(r.calls[i].time-r.calls[i-1].time>=900);n++;
+ r=await simulate({tasks:[task('a','ORDER_MARK'),task('b','CUMULATIVE_TIMES')]});assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskList').length,2);assert.equal(r.result.rows.length,2);n++;
  r=await simulate({failWrite:k=>k.startsWith('actions.')});assert(r.result.stopped);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apDoLimitTimeTask'?{status:200,body:'{"code":2031,"success":false,"errMsg":"PRIVATE_TOKEN"}'}:null});assert(!r.result.stopped);assert.equal(r.result.waterConfirmed,0);assert(!JSON.stringify(r.result).includes('PRIVATE_TOKEN'));n++;
  const cap=account();assert(cap.profile.scopes.farm.templates.apTaskListBatch);assert(cap.profile.scopes.wheel.templates.apTaskList);n++;

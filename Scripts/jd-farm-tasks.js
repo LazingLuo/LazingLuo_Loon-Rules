@@ -1,4 +1,4 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-22.1
+// 东东农场与幸运转盘，Loon手动版 2026-10-22.2
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -291,7 +291,8 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
   const T=farmTools(),day=host.day(),journalKey='actions.'+crypto.hash(account?.pin||'').slice(0,24);
   const saved=host.read(journalKey,{day,actions:{}}),journal=saved.day===day?saved:{day,actions:{}};
   const report={day,rows:[],initial:[],final:[],waterReceived:0,waterConfirmed:0,draws:[],stopped:false};
-  let requestCount=0;
+  let requestCount=0,lastResponseAt=null;
+  const stages={apTaskList:'查询任务',apTaskListBatch:'查询补充任务',farm_home:'查询农场',wheelsHome:'查询转盘',apTaskDetail:'查询浏览项目',apStartTaskTime:'开始计时',apDoLimitTimeTask:'提交计时结果',apsDoTask:'提交任务',apTaskDrawAward:'领取奖励',wheelsLottery:'抽奖'};
   function guard(){host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');if(++requestCount>350)throw Error('农场本轮请求已达上限');}
   function group(scope){const g=account?.scopes?.[scope];if(!g?.templates?.apTaskList||!g.signing)throw Error('农场'+(scope==='farm'?'主任务':'转盘')+'凭据不完整，请开启获取后进入对应任务列表');return g;}
   function mark(key){if(journal.actions[key])throw Error('农场本项已有提交记录，请到App核对');journal.actions[key]={state:'pending',time:host.now()};host.write(journalKey,journal);}
@@ -310,6 +311,9 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
   async function api(scope,fn,body,key,allowCodes=[]) {
     guard();if(!T.ALLOWED.has(fn)||scope==='farm'&&fn.startsWith('wheels')||scope==='wheel'&&['farm_home','apTaskListBatch','apTaskDrawAward'].includes(fn))throw Error('农场操作范围不符');
     if(T.MUTATE.has(fn)&&!key)throw Error('农场操作缺少提交记录');
+    // Pace successive requests, including the list refreshes before a mutation.
+    // This is preventive; an HTTP rejection alone does not prove rate limiting.
+    if(lastResponseAt!==null){const rest=900-(host.now()-lastResponseAt);if(rest>0){await host.pause(rest);host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');}}
     const {t,headers,signing,environment}=profile(scope,fn),p={...t.params};
     p.functionId=fn;p.body=JSON.stringify(body);p.t=String(host.now());delete p.h5st;
     p.appid=fn==='farm_home'?'signed_wh5':fn==='apStartTaskTime'?'activity_platform_se':'activities_platform';
@@ -320,15 +324,21 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
       const parts=String(p.h5st||'').split(';');if(parts.length!==10||parts[2]!==T.APPS[fn]||parts[5]!=='5.3'||parts[9]!==signing.encoding)throw Error('农场签名检查失败');
       const env=crypto.decodeEnvironment(parts[7]);if(env.fp!==parts[1]||JSON.stringify(env.pp)!==JSON.stringify(environment.pp)||env.v!==environment.v)throw Error('农场签名环境检查失败');
     }
-    host.guard();if(T.MUTATE.has(fn))mark(key);
-    let r;try{r=await host.request({url:t.endpoint+'?functionId='+fn,headers:{...headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Farm-Run':'1'},body:T.encode(p)});}catch(_){throw Error('农场网络请求未确认，已停止，请到App核对');}
-    if(Number(r.status)!==200)throw Error('农场接口HTTP异常，已停止');
+    host.guard();
+    const detail={functionId:fn,path:t.endpoint.slice('https://api.m.jd.com'.length),stage:stages[fn]||fn,status:null};report.lastRequest=detail;
+    host.progress(detail.stage+'（'+fn+'）');
+    if(T.MUTATE.has(fn))mark(key);
+    let r;try{r=await host.request({url:t.endpoint+'?functionId='+fn,headers:{...headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Farm-Run':'1'},body:T.encode(p)});}catch(_){detail.networkError=true;throw Error('农场'+detail.stage+'网络结果未确认（'+fn+'），已停止');}
+    lastResponseAt=host.now();detail.status=Number.isInteger(Number(r.status))&&Number(r.status)>=100&&Number(r.status)<=599?Number(r.status):0;
+    const http=detail.status?'HTTP '+detail.status:'HTTP状态未知';
+    host.progress(detail.stage+'返回 '+http+'（'+fn+'）');
+    if(Number(r.status)!==200)throw Error('农场'+detail.stage+'失败：'+http+'（'+fn+'），已停止');
     let j;try{j=JSON.parse(r.body);}catch(_){throw Error('农场接口响应无法解析，已停止');}
     if(!T.accepted(j)){
       const code=/^-?\d{1,8}$/.test(String(j?.code))?String(j.code):'未知';
       if(T.MUTATE.has(fn))settle(key,'rejected');
       if(allowCodes.includes(Number(j.code)))return {code:Number(j.code),data:null};
-      throw Error('农场接口拒绝，错误码 '+code);
+      throw Error('农场'+detail.stage+'被拒绝：错误码 '+code+'（'+fn+'）');
     }
     if(T.MUTATE.has(fn))settle(key,'accepted');return j;
   }
@@ -437,7 +447,13 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
       const before=await home(scope);if(scope==='farm')report.waterBefore=Number(before.bottleWater);else report.chancesBefore=before.lotteryChances;
       if(mode!=='query'&&mode!=='draw'){
         for(let index=0;index<initial.length;index++){
-          const id=T.identity(initial[index]);let t=(await query(scope)).find(x=>T.identity(x)===id);
+          const initialTask=initial[index];
+          // Manual-only and already finished rows do not need two extra reads.
+          if(!T.ready(initialTask)&&(T.finished(initialTask)||!T.supported(initialTask)||mode==='claim')){
+            const result=T.finished(initialTask)?'已完成':mode==='claim'?'尚未完成':T.reason(initialTask);
+            report.rows.push({title:T.title(initialTask),result});host.progress('第 '+(index+1)+'/'+initial.length+' 项：'+T.title(initialTask)+'，'+result);continue;
+          }
+          const id=T.identity(initialTask);let t=(await query(scope)).find(x=>T.identity(x)===id);
           if(!t)continue;
           const row={title:T.title(t),result:'准备处理'};report.rows.push(row);host.progress('第 '+(index+1)+'/'+initial.length+' 项：'+row.title);
           if(T.ready(t)&&scope==='farm'){await claim(scope,t,row);continue;}
@@ -505,6 +521,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
       const progress=text=>{guard();localWrite('progress',{runId,time:Date.now(),text});console.log('[东东农场] '+text);};
       const host={read:localRead,write:localWrite,now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),guard,progress,setTimeout,
         clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
+        pause:async ms=>{guard();await new Promise(r=>setTimeout(r,ms));guard();},
         sleep:async ms=>{if(Date.now()+ms+30000>=deadline)throw Error('农场本轮时间不足，可再次手动执行');const end=Date.now()+ms;while(Date.now()<end){progress('浏览计时，剩余 '+Math.ceil((end-Date.now())/1000)+' 秒');await new Promise(r=>setTimeout(r,Math.min(5000,end-Date.now())));guard();}},
         request:o=>new Promise((resolve,reject)=>{try{guard();if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?functionId=\w+$/.test(o.url))throw Error();
           $httpClient.post({...o,timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false},(err,r,b)=>err?reject(Error('农场网络请求失败')):resolve({status:r?.status,body:b}));
