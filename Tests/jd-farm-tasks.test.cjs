@@ -29,7 +29,7 @@ function account(v){const store=new Map(),host={read:(k,f)=>store.has(k)?clone(s
 function task(id,type='BROWSE_CHANNEL',more={}){return {id:-9999,taskShowTitle:'浏览 '+id,taskType:type,pipeExt:{assignmentId:'assignment-'+id,taskType:type},taskDoTimes:0,taskLimitTimes:1,taskFinished:false,canDrawAwardNum:0,timeLimitSwitch:2,timeLimitPeriod:6,taskItemList:[{itemId:'https://pro.m.jd.com/mall/active/offline/index.html',itemType:'1',pipeExt:{itemId:'offline-item-'+id},taskInsert:false}],...more};}
 async function simulate(options={}){
  const store=options.store||new Map(),calls=[],algoCalls=[],waits=[],pauses=[],notes=[],profile=options.profile===undefined?account(options.sdk).profile:options.profile;
- let current=clone(options.tasks||[task('a'),task('b','CUMULATIVE_TIMES',{taskLimitTimes:20,taskItemList:null}),task('c','ORDER_MARK',{taskItemList:null})]),extra=clone(options.extra||[]),clock=100000,water=900,chances=options.chances??2,timer=null,afterAward=false;
+ let current=clone(options.tasks||[task('a'),task('b','CUMULATIVE_TIMES',{taskLimitTimes:20,taskItemList:null}),task('c','ORDER_MARK',{taskItemList:null})]),extra=clone(options.extra||[]),clock=100000,water=900,chances=options.chances??2,timer=null,afterAward=false,signClaimed=options.sign?.state===3;
  const host={read:(k,f)=>store.has(k)?clone(store.get(k)):f,write:(k,v)=>{if(options.failWrite?.(k))throw Error('农场本地记录保存失败');store.set(k,clone(v));},now:()=>clock,day:()=>options.crossDay&&waits.length?'2026-10-23':'2026-10-22',guard:()=>{if(options.changed&&waits.length)throw Error('农场凭据已更新，请重新运行');},setTimeout:(...a)=>setTimeout(...a),clearTimeout,progress:s=>notes.push(s),pause:async ms=>{clock+=ms;pauses.push(ms);},sleep:async ms=>{clock+=ms;waits.push(ms);},
   requestAlgo:async o=>{
    assert.equal(o.url,'https://cactus.jd.com/request_algo');assert(!Object.keys(o.headers).some(k=>k.toLowerCase()==='cookie'));assert(!JSON.stringify(o).includes('FAKE_PRIVATE_COOKIE'));assert(!JSON.stringify(o).includes('FAKE_PRIVATE_EID'));
@@ -45,7 +45,16 @@ async function simulate(options={}){
    let d,code=0;
    if(fn==='apTaskList')d=options.missingAfterAward&&afterAward?[]:current;
    else if(fn==='apTaskListBatch')d={modules:[{code:0,elementId:'offline-module',tasks:extra}]};
-   else if(fn==='farm_home')d={bizCode:0,result:{bottleWater:water,treeFullStage:4}};
+   else if(fn==='farm_home')d={bizCode:0,result:{bottleWater:water,treeFullStage:4,...options.sign?{onlineGiftPackageLinkId:'offline-sign-entrance'}:{}}};
+   else if(fn==='weGameHome'){
+    const state=signClaimed&&!options.sign?.unconfirmed?3:options.sign?.state??2;
+    d={signMainVo:{buttonStatus:state,signDays:5,todaySign:1},signInVoList:[{signInDate:options.sign?.date||'20261022',currentDay:5,status:state===3?3:2,awardName:options.sign?.reward||'10京豆'}]};
+   }
+   else if(fn==='weGameLottery'){
+    const name=options.sign?.reward||'10京豆',amount=Number(name.match(/^\d+/)?.[0]||10);signClaimed=true;
+    d={awardResultVO:{sendResult:true,amount:String(amount),prizeDesc:name},signInfoVo:{status:1,currentSignDay:5}};
+    if(name.endsWith('水滴'))water+=amount;
+   }
    else if(fn==='wheelsHome')d={lotteryChances:chances,payLotteryFlag:!!options.paid};
    else if(fn==='apTaskDetail')d={taskItemList:[{itemId:'https://item.jd.com/100000.html',itemType:'3'}]};
    else if(fn==='wheelsLottery'){chances--;d={lotteryChances:chances,prizeName:'5g水滴'};}
@@ -67,6 +76,20 @@ async function simulate(options={}){
 }
 (async()=>{
  let n=0,r;
+ r=await simulate({tasks:[],sign:{},realSDK:true});assert(!r.result.stopped,r.result.message);assert.equal(r.result.signIn.confirmed,10);assert.equal(r.result.signIn.unit,'京豆');assert.equal(r.result.waterConfirmed,0);assert(r.algoCalls.includes('730a6'));assert(farmReportText(r.result).includes('签到：已领取 10 京豆'));
+ {const a=r.calls.find(c=>c.p.functionId==='weGameLottery'),q=r.calls.find(c=>c.p.functionId==='weGameHome');assert.deepEqual(a.b,{version:30,channelParam:'1',linkId:'offline-sign-entrance'});assert.equal(a.p.appid,'wegame-hub');assert.equal(new URL(a.o.url).pathname,'/client.action');assert.deepEqual(q.b,{version:30,channelParam:'1',linkId:'offline-sign-entrance',openPush:false,supportPushFlag:1});}n++;
+ r=await simulate({tasks:[],sign:{reward:'1000水滴'},realSDK:true});assert(!r.result.stopped);assert.equal(r.result.signIn.confirmed,1000);assert.equal(r.result.waterReceived,1000);assert.equal(r.result.waterConfirmed,1000);assert.equal(r.result.waterAfter,1900);n++;
+ r=await simulate({tasks:[],sign:{state:3}});assert(!r.result.stopped);assert.equal(r.result.signIn.result,'今日已领取');assert(!r.calls.some(c=>c.p.functionId==='weGameLottery'));n++;
+ r=await simulate({tasks:[],sign:{state:1}});assert(!r.result.stopped);assert(r.result.signIn.result.includes('App'));assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
+ r=await simulate({tasks:[],sign:{date:'20261021'}});assert(r.result.stopped);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
+ r=await simulate({tasks:[],sign:{reward:'10元优惠券'}});assert(!r.result.stopped);assert(r.result.signIn.result.includes('App'));assert(!r.calls.some(c=>c.p.functionId==='weGameLottery'));n++;
+ r=await simulate({tasks:[],sign:{unconfirmed:true}});assert(r.result.stopped);assert.equal(r.result.signIn.received,10);assert(!r.result.signIn.confirmed);const repeatedSign=await simulate({tasks:[],sign:{},store:r.store});assert(!repeatedSign.calls.some(c=>c.p.functionId==='weGameLottery'));n++;
+ r=await simulate({tasks:[],sign:{},onRequest:({fn})=>fn==='weGameLottery'?{status:403,body:''}:null});assert(r.result.stopped);assert.equal(r.result.waterConfirmed,0);const signRetry=await simulate({tasks:[],sign:{},store:r.store});assert(!signRetry.calls.some(c=>c.p.functionId==='weGameLottery'));n++;
+ for(const mode of ['query','claim']){r=await simulate({tasks:[],sign:{},mode});assert(!r.calls.some(c=>c.p.functionId.startsWith('weGame')));}n++;
+ r=await simulate({sign:{},tasks:[task('browse')]});assert(!r.result.stopped);assert(r.calls.findIndex(c=>c.p.functionId==='weGameLottery')>r.calls.findIndex(c=>c.p.functionId==='apTaskDrawAward'));assert.equal(r.result.waterConfirmed,10);assert.equal(r.result.signIn.confirmed,10);n++;
+ r=await simulate({tasks:[],sign:{reward:'1000水滴',unconfirmed:true}});assert(r.result.stopped);assert.equal(r.result.waterReceived,1000);assert.equal(r.result.waterConfirmed,0);n++;
+ r=await simulate({tasks:[],sign:{},failWrite:k=>k.startsWith('actions.')});assert(r.result.stopped);assert(!r.calls.some(c=>c.p.functionId==='weGameLottery'));n++;
+ r=await simulate({tasks:[],sign:{},realSDK:true});assert.equal(r.algoCalls.filter(a=>a==='101aa').length,1);assert.equal(r.algoCalls.filter(a=>a==='730a6').length,1);assert(r.calls.filter(c=>c.p.functionId.startsWith('weGame')).every(c=>c.p.h5st.split(';')[3].startsWith('tk03')));n++;
  for(const sdk of ['h5_file_v5.3.5','h5_file_v5.3.6']){r=await simulate({realSDK:true,sdk});assert.equal(r.result.stopped,false);assert.equal(r.result.waterConfirmed,10);assert.equal(r.result.rows[1].result,'手动浇水，保留水滴');assert.equal(r.result.waterAfter,910);n++;}
  r=await simulate({realSDK:true,failAlgo:true});assert(r.result.stopped);assert(r.result.message.includes('服务端签名初始化失败'));assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));assert(r.algoCalls.length===1);n++;
  r=await simulate({realSDK:true,tasks:[task('a'),task('b')]});assert(!r.result.stopped);assert.equal(r.algoCalls.filter(a=>a==='acb1e').length,1);assert.equal(r.algoCalls.filter(a=>a==='ebecc').length,1);assert.equal(r.algoCalls.filter(a=>a==='f0f3f').length,1);n++;
@@ -186,5 +209,5 @@ async function simulate(options={}){
    }}};
   vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);const r=JSON.parse(store.get(T.PREFIX+'last'));assert(!r.stopped,r.message);assert.equal(r.waterConfirmed,10);assert.deepEqual(algoCalls,['54ed7','f0f3f']);n++;
  }
- console.log(n+' offline checks passed: current lists/modules, duplicate -9999 identities, timed tasks, repeat rounds, claims, free draws, no watering/payment, capture and both official SDKs. No live requests.');
+ console.log(n+' offline checks passed: current lists/modules, duplicate -9999 identities, timed tasks, repeat rounds, claims, daily sign rewards, free draws, no watering/payment, capture and both official SDKs. No live requests.');
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});

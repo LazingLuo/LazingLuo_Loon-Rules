@@ -1,11 +1,11 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-22.6
+// 东东农场与幸运转盘，Loon手动版 2026-10-23.1
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
   const ACCOUNT='JD_FARM_TASKS_ACCOUNT_V1',PREFIX='JD_FARM_TASKS_V1.';
-  const APPS={farm_home:'c57f6',apTaskListBatch:'2e349',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f',wheelsHome:'c06b7',wheelsLottery:'bd6c8'};
+  const APPS={farm_home:'c57f6',apTaskListBatch:'2e349',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f',wheelsHome:'c06b7',wheelsLottery:'bd6c8',weGameHome:'101aa',weGameLottery:'730a6'};
   const ALLOWED=new Set([...Object.keys(APPS),'apTaskList','apTaskDetail']);
-  const MUTATE=new Set(['apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward','wheelsLottery']);
+  const MUTATE=new Set(['apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward','wheelsLottery','weGameLottery']);
   const clone=o=>JSON.parse(JSON.stringify(o));
   const cookie=(s,k)=>{const rows=String(s||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith(k+'='));return rows.length===1?rows[0].slice(k.length+1):'';};
   const header=(h,k)=>{const a=Object.keys(h||{}).filter(x=>x.toLowerCase()===k.toLowerCase());return a.map(x=>Array.isArray(h[x])?h[x].join('; '):h[x]).join(k.toLowerCase()==='cookie'?'; ':', ');};
@@ -381,7 +381,7 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
   const T=farmTools(),day=host.day(),journalKey='actions.'+crypto.hash(account?.pin||'').slice(0,24);
   const saved=host.read(journalKey,{day,actions:{}}),journal=saved.day===day?saved:{day,actions:{}};
   const report={day,rows:[],initial:[],final:[],waterReceived:0,waterConfirmed:0,draws:[],stopped:false};
-  let requestCount=0,lastResponseAt=null,sessionRisk=null;
+  let requestCount=0,lastResponseAt=null,sessionRisk=null,signLink=null;
   // JD's observed response header is "set;1800;<sdtoken>". Keep it only for
   // this run, across request templates; never overwrite captured credentials.
   function updateSession(response){
@@ -391,13 +391,14 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     sessionRisk={token:match[2],until:host.now()+Number(match[1])*1000};
     report.sessionRefreshes=(report.sessionRefreshes||0)+1;
   }
-  const stages={apTaskList:'查询任务',apTaskListBatch:'查询补充任务',farm_home:'查询农场',wheelsHome:'查询转盘',apTaskDetail:'查询浏览项目',apStartTaskTime:'开始计时',apDoLimitTimeTask:'提交计时结果',apsDoTask:'提交任务',apTaskDrawAward:'领取奖励',wheelsLottery:'抽奖'};
+  const stages={apTaskList:'查询任务',apTaskListBatch:'查询补充任务',farm_home:'查询农场',wheelsHome:'查询转盘',apTaskDetail:'查询浏览项目',apStartTaskTime:'开始计时',apDoLimitTimeTask:'提交计时结果',apsDoTask:'提交任务',apTaskDrawAward:'领取奖励',wheelsLottery:'抽奖',weGameHome:'查询签到',weGameLottery:'领取签到奖励'};
   function guard(){host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');if(++requestCount>350)throw Error('农场本轮请求已达上限');}
   function group(scope){const g=account?.scopes?.[scope];if(!g?.templates?.apTaskList||!g.signing)throw Error('农场'+(scope==='farm'?'主任务':'转盘')+'凭据不完整，请开启获取后进入对应任务列表');return g;}
   function mark(key){if(journal.actions[key])throw Error('农场本项已有提交记录，请到App核对');journal.actions[key]={state:'pending',time:host.now()};host.write(journalKey,journal);}
   function settle(key,state){if(key){journal.actions[key].state=state;host.write(journalKey,journal);}}
   function profile(scope,fn){
-    const g=group(scope),exact=g.templates[fn],base=g.templates.apTaskList,t=exact||base;
+    const g=group(scope),exact=g.templates[fn],base=g.templates.apTaskList,t=fn.startsWith('weGame')?g.templates.farm_home:exact||base;
+    if(!t)throw Error('农场签到缺少首页凭据，请重新获取');
     if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)$/.test(t.endpoint))throw Error('农场凭据接口不符');
     const headers={...t.headers};
     if(!T.refOK(headers.Referer,scope)||!headers['User-Agent']||T.cookie(headers.Cookie,'pt_pin')!==account.pin||!T.cookie(headers.Cookie,'pt_key'))throw Error('农场页面或账号凭据不符');
@@ -407,29 +408,30 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
       if(sessionRisk.until<=host.now())throw Error('农场会话已过期，请重新手动运行');
       headers.Cookie=headers.Cookie.split(';').map(s=>s.trim()).filter(s=>s&&!s.startsWith('sdtoken=')).concat('sdtoken='+sessionRisk.token).join('; ');
     }
-    const signing=exact?.signing||g.signing,environment=crypto.decodeEnvironment(signing.environment);
+    const signing=(fn.startsWith('weGame')?t.signing:exact?.signing)||g.signing,environment=crypto.decodeEnvironment(signing.environment);
     if(![account.pin,decodeURIComponent(account.pin)].includes(environment.pp.p1))throw Error('农场签名环境账号不符');
     return {t,headers,signing,environment};
   }
   async function api(scope,fn,body,key,allowCodes=[]) {
-    guard();if(!T.ALLOWED.has(fn)||scope==='farm'&&fn.startsWith('wheels')||scope==='wheel'&&['farm_home','apTaskListBatch','apTaskDrawAward'].includes(fn))throw Error('农场操作范围不符');
+    guard();if(!T.ALLOWED.has(fn)||scope==='farm'&&fn.startsWith('wheels')||scope==='wheel'&&(['farm_home','apTaskListBatch','apTaskDrawAward'].includes(fn)||fn.startsWith('weGame')))throw Error('农场操作范围不符');
+    if(fn.startsWith('weGame')&&(!signLink||body.linkId!==signLink))throw Error('农场签到入口不符');
     if(T.MUTATE.has(fn)&&!key)throw Error('农场操作缺少提交记录');
     // Pace successive requests, including the list refreshes before a mutation.
     // This is preventive; an HTTP rejection alone does not prove rate limiting.
     if(lastResponseAt!==null){const rest=900-(host.now()-lastResponseAt);if(rest>0){await host.pause(rest);host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');}}
     const {t,headers,signing,environment}=profile(scope,fn),p={...t.params};
     p.functionId=fn;p.body=JSON.stringify(body);p.t=String(host.now());delete p.h5st;
-    p.appid=fn==='farm_home'?'signed_wh5':fn==='apStartTaskTime'?'activity_platform_se':'activities_platform';
+    p.appid=fn.startsWith('weGame')?'wegame-hub':fn==='farm_home'?'signed_wh5':fn==='apStartTaskTime'?'activity_platform_se':'activities_platform';
     if(T.APPS[fn]){
       if(!p['x-api-eid-token'])throw Error('农场设备凭据缺失，请重新打开活动');
       const input={};for(const k of ['appid','body','functionId','t','client','clientVersion']){if(!p[k])throw Error('农场签名参数缺失');input[k]=k==='body'?crypto.hash(p.body):p[k];}
-      p.h5st=T.MUTATE.has(fn)?await crypto.signOnline(T.APPS[fn],{pin:account.pin,headers},environment,input):crypto.sign(T.APPS[fn],{pin:account.pin,headers},environment,input);
+      p.h5st=T.MUTATE.has(fn)||fn==='weGameHome'?await crypto.signOnline(T.APPS[fn],{pin:account.pin,headers},environment,input):crypto.sign(T.APPS[fn],{pin:account.pin,headers},environment,input);
       const parts=String(p.h5st||'').split(';');if(parts.length!==10||parts[2]!==T.APPS[fn]||parts[5]!=='5.3'||parts[9]!==signing.encoding)throw Error('农场签名检查失败');
       const env=crypto.decodeEnvironment(parts[7]);if(env.fp!==parts[1]||JSON.stringify(env.pp)!==JSON.stringify(environment.pp)||env.v!==environment.v)throw Error('农场签名环境检查失败');
     }
     host.guard();
     const detail={functionId:fn,path:t.endpoint.slice('https://api.m.jd.com'.length),stage:stages[fn]||fn,status:null,
-      template:group(scope).templates[fn]?'exact':'list',signed:!!T.APPS[fn],currentSession:!!sessionRisk,timestampAgeMs:Math.max(0,host.now()-Number(p.t))};report.lastRequest=detail;
+      template:fn.startsWith('weGame')?'home':group(scope).templates[fn]?'exact':'list',signed:!!T.APPS[fn],currentSession:!!sessionRisk,timestampAgeMs:Math.max(0,host.now()-Number(p.t))};report.lastRequest=detail;
     const diagnose=parsed=>{detail.response=farmResponseDiagnostic(r,parsed);host.progress('响应诊断：'+farmDiagnosticText(detail));};
     host.progress(detail.stage+'（'+fn+'）');
     if(T.MUTATE.has(fn))mark(key);
@@ -469,7 +471,38 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     }
     const body=group(scope).templates.farm_home?.body;if(!body)throw Error('农场首页凭据缺失，请重新打开农场');
     const h=(await api(scope,'farm_home',T.clone(body))).data?.result;
-    if(!h||!Number.isFinite(Number(h.bottleWater)))throw Error('农场水滴状态不明确');return h;
+    if(!h||!Number.isFinite(Number(h.bottleWater)))throw Error('农场水滴状态不明确');
+    signLink=typeof h.onlineGiftPackageLinkId==='string'&&/^[A-Za-z0-9_-]{6,80}$/.test(h.onlineGiftPackageLinkId)?h.onlineGiftPackageLinkId:null;
+    return h;
+  }
+  async function signIn(){
+    const row=report.signIn={result:'当前未提供签到入口'};if(!signLink)return;
+    const template=group('farm').templates.farm_home?.body;
+    if(!template||!Number.isInteger(Number(template.version))||typeof template.channelParam!=='string')throw Error('农场签到首页参数不完整');
+    const base={version:template.version,channelParam:template.channelParam,linkId:signLink};
+    const querySign=async()=>{
+      const d=(await api('farm','weGameHome',{...base,openPush:false,supportPushFlag:1})).data;
+      if(!d?.signMainVo||!Array.isArray(d.signInVoList))throw Error('农场签到状态不完整');return d;
+    };
+    const current=d=>d.signInVoList.filter(x=>x&&x.signInDate===day.replace(/-/g,'')&&x.currentDay===d.signMainVo.signDays);
+    const before=await querySign(),m=before.signMainVo,items=current(before);
+    if(m.buttonStatus===3){row.result=items.length===1&&items[0].status===3?'今日已领取':'当前无需领取';return;}
+    if(m.buttonStatus!==2){row.result='需先在App完成签到条件';return;}
+    if(m.todaySign!==1||items.length!==1||items[0].status!==2)throw Error('农场签到日期或领取状态不一致');
+    const rewardName=String(items[0].awardName||''),expected=rewardName.match(/^([1-9]\d{0,5})(水滴|京豆)$/);
+    if(!expected||Number(expected[1])>100000){row.result='签到奖励类型需App领取';return;}
+    const key='signin:'+crypto.hash(signLink).slice(0,24);
+    if(journal.actions[key]){row.result='本次签到奖励已有提交记录，留待App核对';return;}
+    row.result='签到奖励待确认';
+    const result=(await api('farm','weGameLottery',base,key)).data,award=result?.awardResultVO;
+    if(!award||award.sendResult!==true||Number(award.amount)!==Number(expected[1])||![award.prizeDesc,award.codeDesc,award.prizeConfigName].includes(rewardName)||result.signInfoVo?.status!==1||result.signInfoVo.currentSignDay!==m.signDays)throw Error('农场签到奖励返回未确认，请到App核对');
+    row.received=Number(expected[1]);row.unit=expected[2];
+    if(row.unit==='水滴')report.waterReceived+=row.received;
+    const after=await querySign(),verified=current(after);
+    if(after.signMainVo.buttonStatus!==3||after.signMainVo.signDays!==m.signDays||verified.length!==1||verified[0].status!==3)throw Error('农场签到领奖复查未确认，请到App核对');
+    settle(key,'verified');row.confirmed=row.received;row.result='已领取 '+row.confirmed+(row.unit==='水滴'?'g 水滴':' 京豆');
+    if(row.unit==='水滴')report.waterConfirmed+=row.confirmed;
+    host.progress('签到：'+row.result);
   }
   const taskKey=(t)=>crypto.hash(T.identity(t)).slice(0,32);
   function taskBody(scope,t,item){
@@ -577,6 +610,7 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
         }
       }
       if(scope==='wheel'&&['all','draw'].includes(mode))await draw();
+      if(scope==='farm'&&mode==='all')await signIn();
       report.final=(await query(scope)).map(T.view);
       const end=await home(scope);if(scope==='farm')report.waterAfter=Number(end.bottleWater);else report.chancesAfter=end.lotteryChances;
     }catch(e){report.stopped=true;const s=String(e.message||'');report.message=/^农场/.test(s)?s.slice(0,160):'农场处理未完成，请刷新活动凭据后再试';}
@@ -590,7 +624,7 @@ function farmReportText(r){
   if(r.stopped)lines.push('已停止：'+r.message);
   if(r.lastRequest?.response){
     lines.push('响应诊断：'+farmDiagnosticText(r.lastRequest));
-    lines.push('请求信息：'+r.lastRequest.functionId+'；'+(r.lastRequest.template==='exact'?'专用模板':'列表模板')+'；签名前时间至发送 '+r.lastRequest.timestampAgeMs+' 毫秒');
+    lines.push('请求信息：'+r.lastRequest.functionId+'；'+(r.lastRequest.template==='home'?'首页模板':r.lastRequest.template==='exact'?'专用模板':'列表模板')+'；签名前时间至发送 '+r.lastRequest.timestampAgeMs+' 毫秒');
     lines.push('会话信息：本轮刷新 '+(r.sessionRefreshes||0)+' 次；'+(r.lastRequest.currentSession?'本请求使用本轮会话':'本请求使用保存的会话'));
   }
   if(r.mode==='query'){
@@ -599,6 +633,7 @@ function farmReportText(r){
   }else{
     if(r.scope==='farm')lines.push('领取返回 '+r.waterReceived+'g，复查确认 '+r.waterConfirmed+'g');
     for(const row of r.rows||[])lines.push(row.title+'：'+row.result);
+    if(r.signIn)lines.push('签到：'+r.signIn.result);
     if(r.draws?.length)lines.push('抽奖 '+r.draws.length+' 次：'+r.draws.join('、'));
   }
   if(r.waterAfter!==undefined)lines.push('水滴剩余 '+r.waterAfter+'g；浇水由你手动完成');
@@ -650,7 +685,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
       report=await client.run(scope,action);localWrite('last',report);
       const text=farmReportText(report);console.log('[东东农场] '+text);
       const summary=action==='query'?'共 '+report.initial.length+' 项，完整列表见日志':scope==='farm'?'确认领取 '+report.waterConfirmed+'g 水滴':'抽奖 '+report.draws.length+' 次'+(report.draws.length?'：'+report.draws.join('、'):'');
-      notify(report.stopped?'执行停止':action==='query'?'任务列表':'执行完成',report.stopped?report.message:summary);
+      notify(report.stopped?'执行停止':action==='query'?'任务列表':'执行完成',report.stopped?report.message:summary+(report.signIn?'；签到：'+report.signIn.result:''));
     }catch(e){
       const s=String(e.message||''),message=/^农场/.test(s)?s.slice(0,160):'农场执行未完成，请刷新凭据后再试';
       console.log('[东东农场] '+message);notify('未继续',message);

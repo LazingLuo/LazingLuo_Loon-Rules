@@ -2,9 +2,9 @@
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
   const ACCOUNT='JD_FARM_TASKS_ACCOUNT_V1',PREFIX='JD_FARM_TASKS_V1.';
-  const APPS={farm_home:'c57f6',apTaskListBatch:'2e349',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f',wheelsHome:'c06b7',wheelsLottery:'bd6c8'};
+  const APPS={farm_home:'c57f6',apTaskListBatch:'2e349',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc',apsDoTask:'54ed7',apTaskDrawAward:'f0f3f',wheelsHome:'c06b7',wheelsLottery:'bd6c8',weGameHome:'101aa',weGameLottery:'730a6'};
   const ALLOWED=new Set([...Object.keys(APPS),'apTaskList','apTaskDetail']);
-  const MUTATE=new Set(['apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward','wheelsLottery']);
+  const MUTATE=new Set(['apStartTaskTime','apDoLimitTimeTask','apsDoTask','apTaskDrawAward','wheelsLottery','weGameLottery']);
   const clone=o=>JSON.parse(JSON.stringify(o));
   const cookie=(s,k)=>{const rows=String(s||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith(k+'='));return rows.length===1?rows[0].slice(k.length+1):'';};
   const header=(h,k)=>{const a=Object.keys(h||{}).filter(x=>x.toLowerCase()===k.toLowerCase());return a.map(x=>Array.isArray(h[x])?h[x].join('; '):h[x]).join(k.toLowerCase()==='cookie'?'; ':', ');};
@@ -55,7 +55,7 @@ function farmCapture(host,request,response,decodeEnvironment) {
   if(request?.method!=='POST'||Number(response?.status)!==200||T.header(request.headers,'X-Lazing-Farm-Run')==='1')return null;
   const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action))(?:\?([^#]*))?$/);if(!m)return null;
   const q=T.form(m[2]),p=T.form(request.body);for(const k of Object.keys(p)){if(k in q&&p[k]!==q[k])throw Error('农场请求参数冲突');q[k]=p[k];}
-  const fn=q.functionId;if(!T.ALLOWED.has(fn))return null;
+  const fn=q.functionId;if(!T.ALLOWED.has(fn)||fn==='weGameHome'||fn==='weGameLottery')return null;
   const b=JSON.parse(q.body||'{}'),scope=T.scopeOf(fn,b);if(!scope)return null;
   if(scope==='wheel'&&['farm_home','apTaskListBatch'].includes(fn)||scope==='farm'&&fn.startsWith('wheels'))return null;
   const j=JSON.parse(response.body||'{}');if(!T.accepted(j))return null;
