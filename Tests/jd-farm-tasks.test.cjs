@@ -149,7 +149,7 @@ async function simulate(options={}){
   const store=new Map([[T.ACCOUNT,JSON.stringify(account().profile)],['QL_BRIDGE_CREDENTIAL_V1','']]),calls=[],timers=[],notes=[];let finish;
   const done=new Promise(r=>finish=r),context={console:{log:()=>{}},$argument:mode,setTimeout:(f,ms)=>{const t=setTimeout(f,ms);timers.push(t);return t;},clearTimeout,
    $persistentStore:{read:k=>store.get(k)||'',write:(v,k)=>{assert(k.startsWith(T.PREFIX));store.set(k,v);return true;}},$notification:{post:(...a)=>notes.push(a)},$done:()=>finish(),
-   $httpClient:{post:(o,cb)=>{const p=T.form(o.body);calls.push(p.functionId);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);const d=p.functionId==='apTaskList'?[]:p.functionId==='apTaskListBatch'?{modules:[]}:p.functionId==='farm_home'?{bizCode:0,result:{bottleWater:800}}:{lotteryChances:0,payLotteryFlag:false};cb(null,{status:200},JSON.stringify({code:0,success:true,data:d}));}}};
+   $httpClient:{post:(o,cb)=>{const p=T.form(o.body);calls.push(p.functionId);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);assert.equal(o.alpn,'h2');const d=p.functionId==='apTaskList'?[]:p.functionId==='apTaskListBatch'?{modules:[]}:p.functionId==='farm_home'?{bizCode:0,result:{bottleWater:800}}:{lotteryChances:0,payLotteryFlag:false};cb(null,{status:200},JSON.stringify({code:0,success:true,data:d}));}}};
   vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);
   const result=JSON.parse(store.get(T.PREFIX+'last'));assert.equal(result.stopped,false);assert.equal(store.get(T.PREFIX+'lock'),'');assert(calls.length>=3);assert(notes.length);assert(!JSON.stringify(result).includes('PRIVATE'));n++;
  }
@@ -171,10 +171,11 @@ async function simulate(options={}){
    $httpClient:{post:(o,cb)=>{
     assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);
     if(o.url==='https://cactus.jd.com/request_algo'){
+     assert.equal(o.alpn,undefined); // Keep algorithm-service transport unchanged.
      assert(!Object.keys(o.headers).some(k=>k.toLowerCase()==='cookie'));const b=JSON.parse(o.body);algoCalls.push(b.appId);
      cb(null,{status:200},JSON.stringify({status:200,data:{ts:Date.now(),result:{fp:b.fp,tk:'tk03'+'a'.repeat(88),algo:'function test(tk,fp,ts,ai,algo){return algo.HmacSHA256(tk+fp+ts+ai,"offline");}'}}}));return;
     }
-    const p=T.form(o.body);let data;
+    assert.equal(o.alpn,'h2');const p=T.form(o.body);let data;
     if(p.functionId==='apTaskList')data=[t];
     else if(p.functionId==='apTaskListBatch')data={modules:[]};
     else if(p.functionId==='farm_home')data={bizCode:0,result:{bottleWater:900}};

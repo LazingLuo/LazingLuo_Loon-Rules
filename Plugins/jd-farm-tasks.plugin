@@ -8,13 +8,13 @@ capture = switch,true,tag=获取农场与转盘凭据,desc=安装后打开农场
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks-capture.js?v=20261022-1", {${capture}}) with tag="农场与转盘凭据获取", requires_body=true, timeout=15, enable=${capture}
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "farm-query") with tag="农场完整任务查询", timeout=90
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "farm-all") with tag="农场任务执行并领取", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "farm-claim") with tag="农场只领取已完成奖励", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "wheel-query") with tag="转盘完整任务查询", timeout=90
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "wheel-all") with tag="转盘任务执行并抽奖", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "wheel-draw") with tag="转盘只用免费机会抽奖", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-5", "status") with tag="农场与转盘最近结果和进度", timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "farm-query") with tag="农场完整任务查询", timeout=90
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "farm-all") with tag="农场任务执行并领取", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "farm-claim") with tag="农场只领取已完成奖励", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "wheel-query") with tag="转盘完整任务查询", timeout=90
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "wheel-all") with tag="转盘任务执行并抽奖", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "wheel-draw") with tag="转盘只用免费机会抽奖", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-tasks.js?v=20261022-6", "status") with tag="农场与转盘最近结果和进度", timeout=10
 
 [Mitm]
 hostname = api.m.jd.com

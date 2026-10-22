@@ -1,4 +1,4 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-22.5
+// 东东农场与幸运转盘，Loon手动版 2026-10-22.6
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -642,7 +642,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
         }catch(_){reject(Error('农场签名服务请求未发送'));}}),
         sleep:async ms=>{if(Date.now()+ms+30000>=deadline)throw Error('农场本轮时间不足，可再次手动执行');const end=Date.now()+ms;while(Date.now()<end){progress('浏览计时，剩余 '+Math.ceil((end-Date.now())/1000)+' 秒');await new Promise(r=>setTimeout(r,Math.min(5000,end-Date.now())));guard();}},
         request:o=>new Promise((resolve,reject)=>{try{guard();if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?functionId=\w+$/.test(o.url))throw Error();
-          $httpClient.post({...o,timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false},(err,r,b)=>err?reject(Error('农场网络请求失败')):resolve({status:r?.status,headers:r?.headers||{},body:b}));
+          $httpClient.post({...o,timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false,alpn:'h2'},(err,r,b)=>err?reject(Error('农场网络请求失败')):resolve({status:r?.status,headers:r?.headers||{},body:b}));
         }catch(_){reject(Error('农场请求未发送'));}})};
       localWrite('lock',{runId,until:deadline+30000});owned=true;
       const client=createFarmTaskClient(host,createFarmCrypto(host),account,shared),[scope,action]=mode.split('-');
