@@ -131,6 +131,19 @@ async function simulate(options={}){
  r=await simulate({scope:'wheel',mode:'draw',onRequest:({fn})=>fn==='wheelsHome'?{status:200,body:'{"code":0,"success":true,"data":{"lotteryChances":1}}'}:null});assert(r.result.stopped);assert(!r.calls.some(c=>c.p.functionId==='wheelsLottery'));n++;
  r=await simulate({scope:'wheel',mode:'draw',chances:0});assert.equal(r.result.draws.length,0);assert(!r.calls.some(c=>c.p.functionId==='wheelsLottery'));n++;
  r=await simulate({scope:'wheel',mode:'query'});assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
+ r=await simulate({scope:'wheel',mode:'draw',tasks:[],chances:2});assert(!r.result.stopped);assert.equal(r.result.drawsConfirmed,2);assert.equal(r.result.chancesAfter,0);assert.equal(r.calls.filter(c=>c.p.functionId==='wheelsHome').length,3);assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskList').length,1);assert.equal(r.calls.at(-1).p.functionId,'wheelsHome');n++;
+ {
+  let verifiedFinal=false;
+  r=await simulate({scope:'wheel',mode:'all',tasks:[],chances:2,onRequest:({fn,calls})=>{
+   if(fn==='wheelsHome'&&calls.filter(c=>c.p.functionId==='wheelsLottery').length===2){if(verifiedFinal)return {status:403,body:''};verifiedFinal=true;}
+   return null;
+  }});
+  assert(verifiedFinal);assert(!r.result.stopped,r.result.message);assert.equal(r.result.drawsConfirmed,2);assert.equal(r.result.chancesAfter,0);assert.equal(r.calls.filter(c=>c.p.functionId==='wheelsHome').length,4);assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskList').length,1);assert(farmReportText(r.result).includes('复查确认 2 次'));n++;
+ }
+ r=await simulate({scope:'wheel',mode:'draw',tasks:[],chances:2,onRequest:({fn,calls})=>fn==='wheelsHome'&&calls.filter(c=>c.p.functionId==='wheelsLottery').length===2?{status:403,body:''}:null});assert(r.result.stopped);assert.equal(r.result.draws.length,2);assert.equal(r.result.drawsConfirmed,1);const uncertainRetry=await simulate({scope:'wheel',mode:'draw',store:r.store});assert(uncertainRetry.result.stopped);assert(!uncertainRetry.calls.some(c=>c.p.functionId==='wheelsLottery'));n++;
+ r=await simulate({scope:'wheel',mode:'draw',tasks:[],chances:0});assert(!r.result.stopped);assert.equal(r.result.chancesAfter,0);assert.equal(r.calls.filter(c=>c.p.functionId==='wheelsHome').length,1);assert.equal(r.calls.length,2);n++;
+ r=await simulate({scope:'wheel',mode:'draw',tasks:[],chances:50});assert(!r.result.stopped,r.result.message);assert.equal(r.result.drawsConfirmed,50);assert.equal(r.result.chancesAfter,0);assert.equal(r.calls.filter(c=>c.p.functionId==='wheelsHome').length,51);n++;
+ r=await simulate({scope:'wheel',tasks:[task('verified','BROWSE_CHANNEL',{id:123,timeLimitSwitch:0,timeLimitPeriod:0,pipeExt:{assignmentId:'wheel-verified'},taskItemList:null})]});assert(!r.result.stopped);assert.equal(r.result.final[0].current,1);assert.equal(r.result.drawsConfirmed,2);n++;
  r=await simulate({scope:'wheel',mode:'draw',onRequest:({fn})=>fn==='wheelsLottery'?{status:200,body:'{"code":0,"success":true,"data":{}}'}:null});assert(r.result.stopped);const again=await simulate({scope:'wheel',mode:'draw',store:r.store});assert(again.result.stopped);assert(!again.calls.some(c=>c.p.functionId==='wheelsLottery'));n++;
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:502,body:''}:null});assert(r.result.stopped);const retry=await simulate({store:r.store,tasks:[task('a')]});assert(!retry.calls.some(c=>c.p.functionId==='apStartTaskTime'));n++;
  assert(r.result.message.includes('HTTP 502'));assert(r.result.message.includes('apStartTaskTime'));assert.equal(r.result.lastRequest.status,502);assert.equal(r.result.lastRequest.stage,'开始计时');n++;
@@ -174,7 +187,7 @@ async function simulate(options={}){
    $persistentStore:{read:k=>store.get(k)||'',write:(v,k)=>{assert(k.startsWith(T.PREFIX));store.set(k,v);return true;}},$notification:{post:(...a)=>notes.push(a)},$done:()=>finish(),
    $httpClient:{post:(o,cb)=>{const p=T.form(o.body);calls.push(p.functionId);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);assert.equal(o.alpn,'h2');const d=p.functionId==='apTaskList'?[]:p.functionId==='apTaskListBatch'?{modules:[]}:p.functionId==='farm_home'?{bizCode:0,result:{bottleWater:800}}:{lotteryChances:0,payLotteryFlag:false};cb(null,{status:200},JSON.stringify({code:0,success:true,data:d}));}}};
   vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);
-  const result=JSON.parse(store.get(T.PREFIX+'last'));assert.equal(result.stopped,false);assert.equal(store.get(T.PREFIX+'lock'),'');assert(calls.length>=3);assert(notes.length);assert(!JSON.stringify(result).includes('PRIVATE'));n++;
+  const result=JSON.parse(store.get(T.PREFIX+'last'));assert.equal(result.stopped,false);assert.equal(store.get(T.PREFIX+'lock'),'');assert(calls.length>=(mode==='wheel-draw'?2:3));assert(notes.length);assert(!JSON.stringify(result).includes('PRIVATE'));n++;
  }
  // Full Loon request_algo adapter followed by a real-SDK task and reward.
  // The actual Loon adapter must also pass headers to the response sanitizer.

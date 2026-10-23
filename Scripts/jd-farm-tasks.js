@@ -1,4 +1,4 @@
-// 东东农场与幸运转盘，Loon手动版 2026-10-23.1
+// 东东农场与幸运转盘，Loon手动版 2026-10-23.2
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -380,7 +380,8 @@ function farmDiagnosticText(detail) {
 function createFarmTaskClient(host,crypto,account,sharedLogin) {
   const T=farmTools(),day=host.day(),journalKey='actions.'+crypto.hash(account?.pin||'').slice(0,24);
   const saved=host.read(journalKey,{day,actions:{}}),journal=saved.day===day?saved:{day,actions:{}};
-  const report={day,rows:[],initial:[],final:[],waterReceived:0,waterConfirmed:0,draws:[],stopped:false};
+  const report={day,rows:[],initial:[],final:[],waterReceived:0,waterConfirmed:0,draws:[],drawsConfirmed:0,stopped:false};
+  const latestTasks={};
   let requestCount=0,lastResponseAt=null,sessionRisk=null,signLink=null;
   // JD's observed response header is "set;1800;<sdtoken>". Keep it only for
   // this run, across request templates; never overwrite captured credentials.
@@ -462,7 +463,7 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
       if(!Array.isArray(batch?.modules))throw Error('农场补充任务模块结构变化');
       const extra=[];for(const m of batch.modules){if(Number(m.code)!==0||!Array.isArray(m.tasks))throw Error('农场补充任务模块未完整返回');extra.push(...T.list(m.tasks));}tasks=T.merge(base,extra);
     }
-    return T.merge([],tasks);
+    latestTasks[scope]=T.merge([],tasks);return latestTasks[scope];
   }
   async function home(scope){
     if(scope==='wheel'){
@@ -564,11 +565,12 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     if(T.ready(after))await claim(scope,after,row);
     return after;
   }
-  async function draw(){
+  async function draw(initialHome){
     const pending=Object.entries(journal.actions).some(([k,v])=>k.startsWith('draw:')&&!['verified','rejected'].includes(v.state));
     if(pending)throw Error('农场上次抽奖结果待确认，请到App核对');
+    let h=initialHome||await home('wheel');
     for(let n=0;n<50;n++){
-      const h=await home('wheel');if(h.lotteryChances===0)return;
+      if(h.lotteryChances===0)return h;
       if(h.payLotteryFlag!==false)throw Error('农场转盘免费状态不明确，请在App查看');
       const seq=Object.keys(journal.actions).filter(k=>k.startsWith('draw:')).length,key='draw:'+seq;
       host.progress('抽奖，剩余 '+h.lotteryChances+' 次');
@@ -577,7 +579,8 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
       if(typeof r?.prizeName!=='string'||!Number.isInteger(r.lotteryChances)||r.lotteryChances!==h.lotteryChances-1)throw Error('农场抽奖次数或奖励未确认，请到App核对');
       const prize=r.prizeName.replace(/[\r\n]/g,' ').slice(0,80);report.draws.push(prize);host.progress('抽中 '+prize);
       const after=await home('wheel');if(after.lotteryChances!==r.lotteryChances)throw Error('农场抽奖复查次数不一致，请到App核对');
-      settle(key,'verified');
+      settle(key,'verified');report.drawsConfirmed++;report.chancesAfter=after.lotteryChances;h=after;
+      if(h.lotteryChances===0)return h;
     }
     throw Error('农场本轮抽奖达到50次，请重新手动执行');
   }
@@ -609,10 +612,17 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
           }
         }
       }
-      if(scope==='wheel'&&['all','draw'].includes(mode))await draw();
+      let wheelEnd=null;
+      if(scope==='wheel'&&['all','draw'].includes(mode)){
+        // Draw-only already has a fresh home response. Task mode must refresh
+        // once after tasks, because completing them can add free chances.
+        wheelEnd=await draw(mode==='draw'?before:undefined);report.chancesAfter=wheelEnd.lotteryChances;
+      }
       if(scope==='farm'&&mode==='all')await signIn();
-      report.final=(await query(scope)).map(T.view);
-      const end=await home(scope);if(scope==='farm')report.waterAfter=Number(end.bottleWater);else report.chancesAfter=end.lotteryChances;
+      // Each draw is immediately rechecked above. Its final verified home and
+      // latest queried task list are sufficient; do not add failing tail reads.
+      report.final=(wheelEnd?latestTasks[scope]:await query(scope)).map(T.view);
+      if(!wheelEnd){const end=await home(scope);if(scope==='farm')report.waterAfter=Number(end.bottleWater);else report.chancesAfter=end.lotteryChances;}
     }catch(e){report.stopped=true;const s=String(e.message||'');report.message=/^农场/.test(s)?s.slice(0,160):'农场处理未完成，请刷新活动凭据后再试';}
     report.finishedAt=host.now();return report;
   }
@@ -634,7 +644,7 @@ function farmReportText(r){
     if(r.scope==='farm')lines.push('领取返回 '+r.waterReceived+'g，复查确认 '+r.waterConfirmed+'g');
     for(const row of r.rows||[])lines.push(row.title+'：'+row.result);
     if(r.signIn)lines.push('签到：'+r.signIn.result);
-    if(r.draws?.length)lines.push('抽奖 '+r.draws.length+' 次：'+r.draws.join('、'));
+    if(r.draws?.length)lines.push('抽奖 '+r.draws.length+' 次'+(r.drawsConfirmed!==undefined?'，复查确认 '+r.drawsConfirmed+' 次':'')+'：'+r.draws.join('、'));
   }
   if(r.waterAfter!==undefined)lines.push('水滴剩余 '+r.waterAfter+'g；浇水由你手动完成');
   if(r.chancesAfter!==undefined)lines.push('剩余抽奖机会 '+r.chancesAfter+' 次');
