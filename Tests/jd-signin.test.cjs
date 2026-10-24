@@ -64,6 +64,33 @@ function seedLegacy(h){
  }
  await test('health malformed status cannot initiate action',async()=>{const h=host();h.reply=()=>response({code:0,result:{id:'task',encodeId:'fresh'}});await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.length,1);});
  await test('health unconfirmed verification does not claim success',async()=>{const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='jdh_bm_getKitTask'?{code:0,result:{status:1,id:'task',encodeId:'fresh'}}:{code:0});assert.equal((await extra(h).run('hs')).status,'pending');});
+ for(const task of ['hs','ys']){
+  await test(task+' reports nested bean reward and preserves it on requery',async()=>{
+   const h=host();let signed=false;h.reply=(t,o)=>{if(api.jsParams(o).functionId==='jdh_bm_getKitTask')return response({code:0,result:{status:signed?4:1,id:'task',encodeId:'fresh'}});signed=true;return response({code:0,result:{code:0,result:{prizeInfovo:[{money:'1'},{money:2}]}}});};
+   const r=await extra(h).run(task);assert.equal(r.status,'signed_confirmed');assert.equal(r.beanQuantity,3);assert(api.jsLine({task,...r}).includes('3 京豆'));
+   const again=await extra(h).run(task);assert.equal(again.status,'already_done');assert.equal(again.beanQuantity,3);assert.equal(h.calls.filter(o=>api.jsParams(o).functionId==='jdh_msoa_doTaskGw').length,1);
+  });
+ }
+ await test('health reward remains known when status verification fails',async()=>{
+  const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='jdh_bm_getKitTask'?{code:0,result:{status:1,id:'t',encodeId:'e'}}:{code:0,result:{result:{prizeInfovo:[{money:'1'}]}}});
+  const r=await extra(h).run('hs');assert.equal(r.status,'pending');assert.equal(r.beanQuantity,1);assert(api.jsLine({task:'hs',...r}).includes('接口返回 1 京豆'));const again=await extra(h).run('hs');assert.equal(again.status,'pending');assert.equal(again.beanQuantity,1);
+ });
+ await test('health absent or malformed money never invents a bean count',async()=>{
+  for(const money of [undefined,null,'',true,{},'1.5',-1]){
+   const h=host();let n=0;h.reply=()=>response(++n===1?{code:0,result:{status:1,id:'t',encodeId:'e'}}:n===2?{code:0,result:{result:{prizeInfovo:[{money}]}}}:{code:0,result:{status:4}});
+   const r=await extra(h).run('ys');assert.equal(r.status,'signed_confirmed');assert.equal(r.beanQuantity,undefined);assert(api.jsLine({task:'ys',...r}).includes('接口未返回京豆数量'));
+  }
+ });
+ await test('health explicit zero is displayed as zero',async()=>{
+  const h=host();let n=0;h.reply=()=>response(++n===1?{code:0,result:{status:1,id:'t',encodeId:'e'}}:n===2?{code:0,result:{result:{prizeInfovo:[{money:0}]}}}:{code:0,result:{status:4}});
+  const r=await extra(h).run('hs');assert.equal(r.beanQuantity,0);assert(api.jsLine({task:'hs',...r}).includes('0 京豆'));
+ });
+ await test('health rejected inner reward is not counted',async()=>{
+  const h=host();let n=0;h.reply=()=>response(++n===1?{code:0,result:{status:1,id:'t',encodeId:'e'}}:n===2?{code:0,result:{code:9,result:{prizeInfovo:[{money:99}]}}}:{code:0,result:{status:4}});assert.equal((await extra(h).run('hs')).beanQuantity,undefined);
+ });
+ await test('health old successful journal without reward stays unknown',async()=>{
+  const h=host();h.reply=()=>response({code:0,result:{status:4}});await extra(h).run('hs');const r=await extra(h).run('hs');assert.equal(r.beanQuantity,undefined);assert.equal(h.calls.length,2);
+ });
  await test('game already checked in',async()=>{const h=host();h.reply=()=>response({success:true,data:{signMainVo:{currentStatus:3}}});assert.equal((await extra(h).run('game')).status,'already_done');assert.equal(h.calls.length,1);});
  await test('game uses fresh mark and confirms completion',async()=>{const h=host();let done=false;h.reply=(t,o)=>{const p=api.jsParams(o);if(p.functionId==='weGameLottery'){assert.equal(JSON.parse(p.body).markStr,'NEW_MARK');done=true;return response({success:true,data:{awardResultVO:{amount:5}}});}return response({success:true,data:{signMainVo:{currentStatus:done?3:1,markStr:'NEW_MARK'}}});};const r=await extra(h).run('game');assert.equal(r.status,'signed_confirmed');assert.equal(r.beanQuantity,5);});
  await test('game precondition does not run browse or gameplay',async()=>{const h=host();h.reply=()=>response({success:true,data:{signMainVo:{currentStatus:0}}});assert.equal((await extra(h).run('game')).status,'manual_required');assert.equal(h.calls.length,1);});
@@ -75,6 +102,24 @@ function seedLegacy(h){
  await test('delivery unknown home structure blocks writes',async()=>{const h=host();h.reply=()=>response({code:0,data:{bizCode:0}});const r=await extra(h).run('delivery');assert.equal(r.status,'partial');assert(h.calls.every(x=>api.jsParams(x).functionId==='bean_deliverySign_home'));});
  await test('delivery failed sign never triggers continue reward',async()=>{const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='bean_deliverySign_home'?{code:0,data:{bizCode:0,result:{}}}:{code:0,data:{bizCode:10,result:{value:2}}});await extra(h).run('delivery');assert(h.calls.every(x=>api.jsParams(x).functionId!=='bean_deliverySign_continue_award'));await extra(h).run('delivery');assert.equal(h.calls.filter(x=>api.jsParams(x).functionId==='bean_deliverySign_sign').length,2);});
  await test('delivery returned beans are not labeled verified',async()=>{const h=host();h.reply=()=>response({code:0,data:{bizCode:0,result:{value:1}}});const r=await extra(h).run('delivery');assert(!api.jsLine({task:'delivery',...r}).includes('签到成功'));assert(r.parts.every(x=>x.detail.includes('尚无状态复查')));});
+ await test('delivery missing top-level code accepts explicit successful business reward',async()=>{
+  const h=host();h.reply=()=>response({data:{bizCode:0,result:{value:1}}});const r=await extra(h).run('delivery');assert.equal(r.status,'accepted');assert(r.parts.every(p=>p.beanQuantity===2));assert.equal(h.calls.length,6);await extra(h).run('delivery');assert.equal(h.calls.filter(o=>api.jsParams(o).functionId==='bean_deliverySign_sign').length,2);
+ });
+ await test('delivery explicit transport rejection still blocks mutations',async()=>{
+  const h=host();h.reply=()=>response({code:13,data:{bizCode:0,result:{value:1}}});const r=await extra(h).run('delivery');assert.equal(r.status,'partial');assert(r.parts.every(p=>p.detail==='首页查询：接口码 13'));assert.equal(h.calls.length,2);
+ });
+ await test('delivery business failure reports precise stage without response text',async()=>{
+  const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='bean_deliverySign_home'?{data:{bizCode:0,result:{}}}:{data:{bizCode:9,bizMsg:'FAKE_SECRET',result:{value:9}}});const r=await extra(h).run('delivery');assert(r.parts.every(p=>p.detail==='签到：业务码 9'));assert(!JSON.stringify(r).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_SECRET'));
+ });
+ await test('delivery unknown reward field reports field names, not values',async()=>{
+  const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='bean_deliverySign_home'?{data:{bizCode:0,result:{}}}:{data:{bizCode:0,result:{amount:'FAKE_SECRET'}}});const r=await extra(h).run('delivery');assert(r.parts.every(p=>p.detail==='签到：奖励数量字段变化'));assert.deepEqual(r.parts[0].diagnostic.rewardFields,['amount']);assert(!JSON.stringify(r).includes('FAKE_SECRET'));
+ });
+ await test('delivery partial reward survives later continuous-award failure',async()=>{
+  const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='bean_deliverySign_continue_award'?{data:{bizCode:17}}:{data:{bizCode:0,result:{value:1}}});const r=await extra(h).run('delivery');assert(r.parts.every(p=>p.beanQuantity===1));assert(r.detail.includes('已返回 1 京豆，连续奖励：业务码 17'));
+ });
+ await test('delivery old pending record is preserved across display fix',async()=>{
+  const h=host();h.reply=(t,o)=>response(api.jsParams(o).functionId==='bean_deliverySign_home'?{code:0,data:{bizCode:0,result:{}}}:{code:0,data:{bizCode:9}});await extra(h).run('delivery');h.reply=()=>response({data:{bizCode:0,result:{value:1}}});await extra(h).run('delivery');assert.equal(h.calls.filter(o=>api.jsParams(o).functionId==='bean_deliverySign_sign').length,2);assert.equal(h.calls.filter(o=>api.jsParams(o).functionId==='bean_deliverySign_continue_award').length,0);
+ });
  await test('mutation journal failure blocks health action',async()=>{const h=host();h.write=(k,v)=>{if(k===K.attempts)throw Error('保存失败');h.map.set(k,JSON.stringify(v));};h.reply=()=>response({code:0,result:{status:1,id:'t',encodeId:'e'}});await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.length,1);});
  await test('date change after signing blocks mutation',async()=>{const h=host();h.reply=()=>response({success:true,data:{signMainVo:{currentStatus:1,markStr:'m'}}});let n=0;const c={...fakeCrypto,signOnline:async app=>{if(++n===2)h.changeDay('2099-01-01');return sig(app);}};await assert.rejects(()=>api.createExtraSignins(h,c).run('game'));assert.equal(h.calls.length,1);});
  await test('new day has independent journal',async()=>{const h=host();h.reply=(t,o)=>api.jsParams(o).functionId==='jdh_bm_getKitTask'?response({code:0,result:{status:1,id:'t',encodeId:'e'}}):Promise.reject(Error('network'));await assert.rejects(()=>extra(h).run('hs'));h.changeDay('2099-01-01');await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.filter(x=>api.jsParams(x).functionId==='jdh_msoa_doTaskGw').length,2);});
@@ -95,6 +140,9 @@ function seedLegacy(h){
  await test('capture daily login updates own and compatibility stores',async()=>{const h=host(),r=request('startup',{});r.headers.Cookie='pt_pin=offline;pt_key=NEW;';const before=JSON.stringify(r),out=await capture(h,r,{code:0});assert(out.updated.includes(K.login));assert(h.read('QL_BRIDGE_CREDENTIAL_V1').cookie.includes('NEW'));assert.equal(JSON.stringify(r),before);});
  await test('capture rejects failed daily response',async()=>{const h=host(),old=h.rawRead(K.login);assert.equal(await capture(h,request('startup',{}),{code:13}),null);assert.equal(h.rawRead(K.login),old);});
  await test('capture game environment records no mark or live signature',async()=>{const h=host(),r=request('weGameHome',{envType:1,linkId:api.JS_GAME,babelChannel:'ttt106'},{appid:'wegame-hub',clientVersion:'15.0.0','x-api-eid-token':'NEW_DEVICE',h5st:sig('101aa')});await capture(h,r,{success:true,data:{signMainVo:{currentStatus:3,markStr:'PRIVATE_MARK'}}});const stored=h.rawRead(K.extra);assert(stored.includes('NEW_DEVICE'));assert(!stored.includes('PRIVATE_MARK'));assert(!stored.includes('tk03_fixture'));});
+ await test('capture accepts delivery business success without top-level code',async()=>{
+  const h=host(),r=request('bean_deliverySign_sign',{activityId:'2775'},{appid:'signed_wh5_ihub',client:'apple',clientVersion:'15.0.0','x-api-eid-token':'DELIVERY_DEVICE',h5st:sig('987dd')});await capture(h,r,{data:{bizCode:0,result:{value:1}}});assert(h.read(K.extra).delivery.params['x-api-eid-token']==='DELIVERY_DEVICE');
+ });
  await test('capture invalid environment account is rejected',async()=>{const h=host(),r=request('weGameHome',{envType:1,linkId:api.JS_GAME},{appid:'wegame-hub','x-api-eid-token':'x',h5st:sig('101aa',encodeEnv({...env(),pp:{p1:'other'}}))});await assert.rejects(()=>capture(h,r,{success:true}));});
  await test('body-only native capture is normalized privately',async()=>{const h=host(),r=request('startup',{});r.url='https://api.m.jd.com/client.action';const old=r.url;assert((await capture(h,r,{code:0})).updated);assert.equal(r.url,old);});
  await test('scratch business success code is accepted by capture',async()=>{

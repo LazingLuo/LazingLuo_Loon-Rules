@@ -44,10 +44,16 @@
 
 执行日志只显示项目、等待秒数及结果；本地保存最近 20 次汇总。结果中“缺少凭据”表示需要补齐页面资料，“待确认”表示请求可能已提交，应在活动页看实际状态。
 
+## 2026-10-25.1 更新
+
+- hs、ys 从签到返回的 `result.result.prizeInfovo[].money` 累计京豆，并保存到当天提交记录；同一天再次查询完成状态时仍可显示已记录数量。状态复查失败时区分“接口返回 N 京豆”和“签到完成”。
+- 天天领豆按明确的 `data.bizCode` 检查业务结果，兼容成功响应缺少顶层 `code` 的情况；数量仍只取实际奖励字段。失败时显示首页查询、签到或连续奖励的具体阶段，以及安全的返回码和奖励字段名。
+- 升级沿用原来的当天提交记录。旧版已经提交、但没有保存数量的结果无法追溯；当天不会为补数字再次领取。下一次首次签到会保存并显示数量。
+
 ## 来源与验证
 
 新增任务依据 [hs](https://github.com/shufflewzc/faker3/blob/main/jd_hssign.js)、[ys](https://github.com/shufflewzc/faker3/blob/main/jd_yssign.js)、[天天领豆](https://github.com/shufflewzc/faker3/blob/main/jd_deliverySign_sign.js)、[互动游戏签到](https://github.com/shufflewzc/faker3/blob/main/jd_weGameLottery.js) 的接口契约重新实现，不执行这些混淆脚本，不连接其签名服务。签名使用现有内嵌京东 SDK，并仅向京东算法初始化接口发送所需环境。金融使用现有内嵌 AAR SDK。
 
-此版本在合成账号与模拟响应下离线验证，尚未在手机上验证新增四项的真实签到结果。安装后第一轮以实际返回为准。
+本地使用合成账号与模拟响应检查，不向真实账号发送测试请求。手机运行后的实际到账以京豆明细为准。
 
 离线检查：将 `Tests/jd-signin.test.cjs` 与生成脚本放在同一目录，运行 `node jd-signin.test.cjs`；也支持仓库 `Scripts/`、`Plugins/`、`Tests/` 布局。

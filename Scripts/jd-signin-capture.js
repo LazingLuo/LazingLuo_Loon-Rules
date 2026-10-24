@@ -1,6 +1,6 @@
 // Passive consolidated capture; original response unchanged.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-24.1';
+const JS_VERSION='2026-10-25.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
@@ -760,7 +760,7 @@ async function jsCapture(host,request,response,parsers,decode){
  const delivery=['bean_deliverySign_home','bean_deliverySign_sign','bean_deliverySign_continue_award'].includes(f)&&['2775','5358'].includes(String(body.activityId));
  const health=Object.keys(JS_HEALTH).find(t=>(f==='jdh_bm_getKitTask'?body.m_patch_appKey:body.appKey)===JS_HEALTH[t].appKey&&JS_ALLOWED[t].includes(f));
  const daily=['startup','logConfig','queryPagePopWindow','babelGetGuideTips'].includes(f);
- const accepted=data?.success!==false&&(data?.code===0||data?.code==='0'||data?.code===200||data?.code==='200'||data?.success===true||retail&&String(data?.code)==='1711000'&&data?.msg==='成功'&&!!data?.rs);
+ const accepted=data?.success!==false&&(data?.code===0||data?.code==='0'||data?.code===200||data?.code==='200'||data?.success===true||retail&&String(data?.code)==='1711000'&&data?.msg==='成功'&&!!data?.rs||delivery&&data?.code===undefined&&String(data?.data?.bizCode)==='0');
  if(!finance&&!accepted)return null;
  const changed=[],allowed=new Set(['JD_CHECKIN_TEST_ACCOUNT_V1','JXZY_CHECKIN_ACCOUNT_V1','JD_JR_CHECKIN_ACCOUNT_V1','JD_PLANT_CHECKIN_ACCOUNT_V1','JD_FARM_TASKS_ACCOUNT_V1']);
  const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token','x-referer-page','request-from']){const v=jsHeader(request.headers,k);if(v)headers[k]=v;}

@@ -1,6 +1,6 @@
-// 京东合并签到 2026-10-24.1; fixed check-in scope, local credentials.
+// 京东合并签到 2026-10-25.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-24.1';
+const JS_VERSION='2026-10-25.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
@@ -1838,20 +1838,33 @@ function createExtraSignins(host,crypto){
   return {url:'https://api.m.jd.com/api?functionId='+f,headers:{...profile.headers,Origin:origin,'Content-Type':'application/x-www-form-urlencoded','x-rp-client':'h5_1.0.0'},body:jsEncode(p)};
  }
  function zero(v){return v===0||v==='0';}
+ function beanNumber(v){
+  if(typeof v!=='number'&&typeof v!=='string'||typeof v==='string'&&!/^\d+$/.test(v))return null;
+  const n=Number(v);return Number.isInteger(n)&&n>=0&&n<=100000?n:null;
+ }
+ function healthReward(j){
+  // Faker reads prizeInfovo[].money from this exact nested check-in response.
+  // A missing list/invalid row is unknown, never an assumed zero or one bean.
+  const nested=j?.result;if(nested?.code!==undefined&&!zero(nested.code))return {};
+  const rows=nested?.result?.prizeInfovo;if(!Array.isArray(rows)||!rows.length)return {};
+  let n=0;for(const row of rows){const value=beanNumber(row?.money);if(value===null)return {};n+=value;}
+  return n<=100000?{beanQuantity:n}:{};
+ }
  function kit(data){
   const r=data.result;if(!zero(data.code)||!r||!Number.isInteger(Number(r.status))||![0,1,2,3,4].includes(Number(r.status)))throw Error('签到状态读取失败');
   return r;
  }
  async function health(task){
   const appKey=JS_HEALTH[task].appKey,query=()=>unsigned(task,'jdh_bm_getKitTask',{m_patch_appKey:appKey,groupCode:'openkits',channel:'jdhapp'},'jdh-middle');
-  const before=kit(await query());if(Number(before.status)===4){mark(task,'confirmed');return {status:'already_done'};}
-  if(prior(task))return {status:'pending',detail:'今天已提交，去页面确认'};
+  const before=kit(await query());if(Number(before.status)===4){const old=prior(task),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:{};mark(task,'confirmed',known);return {status:'already_done',...known};}
+  const previous=prior(task);if(previous)return {status:'pending',detail:'今天已提交，去页面确认',...(beanNumber(previous.beanQuantity)!==null?{beanQuantity:Number(previous.beanQuantity)}:{})};
   if(!before.encodeId||!before.id)throw Error('缺少签到任务标识');
   const body={encodeId:before.encodeId,taskId:before.id,appKey,channel:'jdhapp',infoId:new Date().toISOString()};
   mark(task,'pending');const response=await unsigned(task,'jdh_msoa_doTaskGw',body,'JDHAPP');
   if(!zero(response.code))return {status:'rejected',detail:'签到请求未通过'};
-  try{if(Number(kit(await query()).status)===4){mark(task,'confirmed');return {status:'signed_confirmed'};}}catch(_){}
-  return {status:'pending',detail:'已提交，签到状态待确认'};
+  const quantity=healthReward(response);mark(task,'accepted',quantity);
+  try{if(Number(kit(await query()).status)===4){mark(task,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}}catch(_){}
+  return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
  }
  function gameState(j){
   const r=j.data?.signMainVo;if(j.success!==true||!r||![0,1,3].includes(Number(r.currentStatus)))throw Error('互动签到状态读取失败');return r;
@@ -1869,16 +1882,32 @@ function createExtraSignins(host,crypto){
   try{if(Number(gameState(await query()).currentStatus)===3){mark(task,'confirmed');return {status:'signed_confirmed',beanQuantity:quantity};}}catch(_){}
   return {status:'pending',detail:'领取返回成功，签到状态待确认',beanQuantity:quantity};
  }
- function deliveryData(j){if(!zero(j.code)||!j.data||!zero(j.data.bizCode))throw Error('天天领豆请求未通过');return j.data.result;}
- function reward(r){if(!r||r.value===null||r.value===undefined||!Number.isInteger(Number(r.value))||Number(r.value)<0||Number(r.value)>100000)throw Error('京豆奖励字段变化');return Number(r.value);}
+ function safeCode(v){return typeof v==='number'&&Number.isFinite(v)||typeof v==='string'&&/^[A-Za-z0-9_-]{1,24}$/.test(v)?String(v):undefined;}
+ function deliveryTrace(j,phase){
+  const trace={phase};for(const [k,v] of [['apiCode',j?.code],['businessCode',j?.data?.bizCode]]){const c=safeCode(v);if(c!==undefined)trace[k]=c;}
+  const value=j?.data?.result;
+  if(value&&typeof value==='object'&&!Array.isArray(value))trace.rewardFields=['value','amount','award','awards','awardList','beanNum','beanCount','beanQuantity','success'].filter(k=>Object.prototype.hasOwnProperty.call(value,k));
+  return trace;
+ }
+ function deliveryData(j){
+  // This API's business result is data.bizCode. Some successful responses omit
+  // the top-level code; requiring code===0 incorrectly hid credited rewards.
+  if(j.success===false||j.code!==undefined&&!zero(j.code)&&j.code!==200&&j.code!=='200'||!j.data||!zero(j.data.bizCode))throw Error('天天领豆请求未通过');return j.data.result;
+ }
+ function reward(r){const n=beanNumber(r?.value);if(n===null)throw Error('京豆奖励字段变化');return n;}
  async function delivery(){
   const task='delivery',m=material(task),parts=[];
   for(const activityId of ['2775','5358']){
-   let amount=0,accepted=false;
+   let amount=0,accepted=false,phase='首页查询',trace={phase};
+   const labels={bean_deliverySign_home:'首页查询',bean_deliverySign_sign:'签到',bean_deliverySign_continue_award:'连续奖励'};
+   async function call(f){
+    phase=labels[f];trace={phase};const j=await http(task,await signed(task,f,{activityId},f==='bean_deliverySign_home'?'c1e85':'987dd',m));
+    trace=deliveryTrace(j,phase);return deliveryData(j);
+   }
    try{
     // Upstream defines the home call but not its status schema. Read it, validate
     // business acceptance, and do not invent a "todaySigned" field or confirmation.
-    const home=deliveryData(await http(task,await signed(task,'bean_deliverySign_home',{activityId},'c1e85',m)));
+    const home=await call('bean_deliverySign_home');
     if(!home||typeof home!=='object'||Array.isArray(home))throw Error('签到首页结构变化');
     for(const [f,suffix] of [['bean_deliverySign_sign','sign'],['bean_deliverySign_continue_award','continue']]){
      const id=task+':'+activityId+':'+suffix,old=prior(id);
@@ -1886,14 +1915,20 @@ function createExtraSignins(host,crypto){
       if(old.state==='accepted'){amount+=old.amount;accepted=true;continue;}
       parts.push({activityId,status:'pending',detail:'今天已有提交记录',beanQuantity:amount});break;
      }
-     const options=await signed(task,f,{activityId},'987dd',m);mark(id,'pending');
-     const n=reward(deliveryData(await http(task,options)));mark(id,'accepted',{amount:n});amount+=n;accepted=true;
+     // Build the signature before journaling, but persist before sending the action.
+     phase=labels[f];trace={phase};const options=await signed(task,f,{activityId},'987dd',m);mark(id,'pending');
+     const j=await http(task,options);trace=deliveryTrace(j,phase);
+     const n=reward(deliveryData(j));mark(id,'accepted',{amount:n});amount+=n;accepted=true;
      if(suffix==='continue')parts.push({activityId,status:'accepted',beanQuantity:amount,detail:'接口返回奖励，尚无状态复查'});
     }
     if(parts[parts.length-1]?.activityId!==activityId)parts.push({activityId,status:accepted?'accepted':'pending',beanQuantity:amount,detail:'今日提交记录已保留'});
-   }catch(e){parts.push({activityId,status:accepted?'partial':'stopped',beanQuantity:amount,detail:jsError(e)});}
+   }catch(e){
+    const detail=phase+'：'+(/京豆奖励字段变化/.test(String(e.message))?'奖励数量字段变化':trace.businessCode!==undefined&&trace.businessCode!=='0'?'业务码 '+trace.businessCode:trace.apiCode!==undefined&&!['0','200'].includes(trace.apiCode)?'接口码 '+trace.apiCode:jsError(e));
+    parts.push({activityId,status:accepted?'partial':'stopped',beanQuantity:amount,detail,diagnostic:trace});
+    host.log?.('天天领豆 '+activityId+'：'+detail+'；'+JSON.stringify(trace));
+   }
   }
-  return {status:parts.every(p=>p.status==='accepted')?'accepted':'partial',parts,detail:parts.map(p=>p.activityId+'：'+(p.status==='accepted'?'接口返回 '+p.beanQuantity+' 京豆':p.detail)).join('；')};
+  return {status:parts.every(p=>p.status==='accepted')?'accepted':'partial',parts,detail:parts.map(p=>p.activityId+'：'+(p.status==='accepted'?'接口返回 '+p.beanQuantity+' 京豆':(p.beanQuantity>0?'已返回 '+p.beanQuantity+' 京豆，':'')+p.detail)).join('；')};
  }
  return {run:task=>task==='game'?game():task==='delivery'?delivery():health(task)};
 }
@@ -1926,6 +1961,11 @@ function jsLine(r){
  const name=JS_TASKS.find(x=>x[0]===r.task)?.[1]||'双签礼包';
  let detail=r.detail||(['signed_confirmed','reward_received','box_confirmed'].includes(r.status)?'签到成功':r.status==='already_done'?'今天已完成':r.status==='no_chance'?'暂无机会':'执行未完成');
  if(r.beanQuantity>0&&!r.detail)detail+='，'+r.beanQuantity+' 京豆';
+ if(['hs','ys'].includes(r.task)){
+  if(r.beanQuantity===0)detail+='，0 京豆';
+  else if(r.beanQuantity>0&&r.detail)detail+='，接口返回 '+r.beanQuantity+' 京豆';
+  else if(r.beanQuantity===undefined&&r.status==='signed_confirmed')detail+='，接口未返回京豆数量';
+ }
  if(r.amount!==undefined)detail+='，现金 '+r.amount+' 元';
  if(r.couponCount>0)detail+='，优惠券 '+r.couponCount+' 张';
  return name+'：'+detail+(r.doubleSign?'\n'+jsLine(r.doubleSign):'');
@@ -1974,7 +2014,7 @@ function createSignins(host,legacy,crypto){
   lockToken={id:host.now()+':'+host.random(),expires:host.now()+2700000};
   write(JS_KEYS.lock,lockToken);owned=true;
   if(!read(JS_KEYS.bound,null))write(JS_KEYS.bound,{pin});
-  const extra=createExtraSignins({read,write,pin,day:host.day,guard,login:refresh,request:native},crypto);
+  const extra=createExtraSignins({read,write,pin,day:host.day,guard,login:refresh,request:native,log:host.log},crypto);
   let stopped=false;
   try{
    for(let i=0;i<JS_TASKS.length;i++){
