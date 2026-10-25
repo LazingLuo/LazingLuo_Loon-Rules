@@ -1,0 +1,15 @@
+#!name = 淘宝开屏时间改写（验证版）
+#!desc = 保留淘宝自身DNS。只改已识别开屏条目的展示时间为2099至2100年；支持首页和专用接口中的topViewSplashSection。尚待手机验证。
+#!author = LazingLuo
+#!loon_version = 3.5.1(983)
+#!date = 2026-10-25
+
+[Argument]
+notify = switch,true,tag=命中通知,desc=显示实际改写条数；只有字段时每小时最多提示一次
+
+[Script]
+response if ${url} ~= /^https:\/\/[^\/?#]+\/(?:gw|h5)\/mtop\.[a-z0-9_.]+\//i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-config.js?v=20261025-1", {${notify}}) with tag="淘宝开屏时间改写", timeout=15, requires_body=true
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-splash-config.js?v=20261025-1", "stats") with tag="淘宝开屏改写记录", timeout=10
+
+[Mitm]
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h5api.m.taobao.com, acs.m.tmall.com
