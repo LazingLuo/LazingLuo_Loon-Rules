@@ -1,10 +1,10 @@
 #!name = 闲鱼开屏净化（测试版）
-#!desc = 有广告就清除，广告列表为空则原样放行。分别通知“已清除广告”和“本次没有广告”。
-#!date = 2026-10-21
+#!desc = 清理广告列表及实时广告，延长普通热启动间隔；通知列出实际改动。尚待实机验证。
+#!date = 2026-10-25
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/xianyu.png
 
 [Script]
-http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js?v=20261021-notify2,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
+http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js?v=20261025-1,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
 
 [MITM]
 hostname = acs.m.goofish.com
