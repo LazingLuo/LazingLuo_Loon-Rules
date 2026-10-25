@@ -1,4 +1,3 @@
-// Offline response and rule-isolation checks. No JD, NAS or phone access.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const local=fs.existsSync(path.join(__dirname,'jd-splash.js'));
 const script=fs.readFileSync(local?path.join(__dirname,'jd-splash.js'):path.join(__dirname,'../Scripts/jd-splash.js'),'utf8');
@@ -6,44 +5,49 @@ const plugin=fs.readFileSync(local?path.join(__dirname,'jd_open.plugin'):path.jo
 const bridge=fs.readFileSync(local?path.join(__dirname,'../loon-qinglong-bridge/qinglong-bridge.plugin'):path.join(__dirname,'../Plugins/qinglong-bridge.plugin'),'utf8');
 let checks=0;
 function check(name,fn){fn();checks++;console.log('PASS '+name);}
-function run(body,{url='https://api.m.jd.com/client.action?functionId=start',status=200,failNotification=false}={}){
- let out,done=0,sideEffects=0;const notices=[];
- const forbidden=()=>{sideEffects++;throw Error('start handler must not store or request anything');};
- vm.runInNewContext(script,{$request:{url},$response:{body,status},console:{log:()=>{}},
+function run(body,options={}){
+ let out,done=0,sideEffects=0;const notices=[],logs=[];
+ const forbidden=()=>{sideEffects++;throw Error('unexpected side effect');};
+ vm.runInNewContext(script,{$request:{url:options.url||'https://api.m.jd.com/client.action?functionId=start'},
+  $response:{body,status:options.status??200},console:{log:x=>logs.push(x)},
   $persistentStore:{read:forbidden,write:forbidden},$httpClient:{get:forbidden,post:forbidden},
-  $notification:{post:(...args)=>{if(failNotification)throw Error('disabled');notices.push(args);}},$done:x=>{out=x;done++;}});
- assert.equal(done,1);assert.equal(sideEffects,0);return {out:JSON.parse(JSON.stringify(out)),notices};
+  $notification:{post:(...x)=>{if(options.failNotice)throw Error('disabled');notices.push(x);}},
+  $done:x=>{out=JSON.parse(JSON.stringify(x));done++;}});
+ assert.equal(done,1);assert.equal(sideEffects,0);return {out,notices,logs};
 }
-const targets={onlineTime:'2099-01-01 00:00:00',referralsTime:'2099-12-31 23:59:59',startTimeStamp:Date.UTC(2098,11,31,16),endTimeStamp:Date.UTC(2099,11,31,15,59,59)};
-function expectedDates(value){if(Array.isArray(value)){value.forEach(expectedDates);return;}if(!value||typeof value!=='object')return;for(const[key,v]of Object.entries(targets))if(Object.hasOwn(value,key)&&['string','number'].includes(typeof value[key]))value[key]=typeof value[key]==='string'?String(v):v;}
-const sample={code:'0',showTimesDaily:3,startTimeStamp:123,extra:{keep:true},images:[[{url:'https://img1.360buyimg.com/ad.jpg',videoUrl:'https://storage.360buyimg.com/ad.mp4',onlineTime:'2026-10-18 00:00:00',referralsTime:'2026-10-19 23:59:59',startTimeStamp:123,endTimeStamp:'456',showTimes:2,unknownTime:'keep'}],null]};
-check('only display dates change; materials, counters and other fields stay intact',()=>{
- const r=run(JSON.stringify(sample)),expected=structuredClone(sample);expectedDates(expected.images);
- assert.deepEqual(JSON.parse(r.out.body),expected);assert.equal(r.notices.length,1);assert(r.notices[0].join(' ').includes('2099'));
+const material={url:'https://img1.360buyimg.com/test.jpg',videoUrl:'https://storage.360buyimg.com/test.mp4',onlineTime:'2026-10-25 00:00:00',referralsTime:'2026-10-26 23:59:59',startTimeStamp:123,endTimeStamp:'456',maxShowTimes:8,nested:{onlineTime:'keep'}};
+const response={code:'0',showTimesDaily:3,images:[[material]],other:{onlineTime:'keep'}};
+function expire(item){return {...item,onlineTime:'2000-01-01 00:00:00',referralsTime:'2000-01-02 00:00:00'};}
+check('only two confirmed date fields change',()=>{const r=run(JSON.stringify(response));assert.deepEqual(JSON.parse(r.out.body),{...response,images:[[expire(material)]]});assert.equal(r.notices.length,1);});
+check('complete nested groups retain item order and other fields',()=>{const x={...response,images:[[material,null],[{...material,groupId:'other'}]]};const r=run(JSON.stringify(x));assert.deepEqual(JSON.parse(r.out.body),{...x,images:[[expire(material),null],[expire({...material,groupId:'other'})]]});assert(r.notices[0].join(' ').includes('2 条'));});
+check('flat material array is supported',()=>{const r=run(JSON.stringify({...response,images:[material]}));assert.deepEqual(JSON.parse(r.out.body).images,[expire(material)]);});
+check('missing showTimesDaily does not block date handling',()=>{const r=run(JSON.stringify({code:0,images:[[material]]}));const d=JSON.parse(r.out.body);assert.equal(d.images[0][0].onlineTime,'2000-01-01 00:00:00');assert(!Object.hasOwn(d,'showTimesDaily'));});
+check('already rewritten payload returns no replacement or repeated notification',()=>{const r=run(JSON.stringify({...response,images:[[expire(material)]]}));assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);});
+check('failed notification preserves response replacement',()=>{assert(run(JSON.stringify(response),{failNotice:true}).out.body);});
+for(const [name,patch] of Object.entries({missingOnline:{onlineTime:undefined},missingEnd:{referralsTime:undefined},number:{onlineTime:123},null:{referralsTime:null},object:{onlineTime:{}},invalidMonth:{onlineTime:'2026-13-01 00:00:00'},invalidDay:{onlineTime:'2026-02-30 00:00:00'},invalidLeap:{onlineTime:'2025-02-29 00:00:00'},invalidHour:{onlineTime:'2026-10-25 24:00:00'},invalidMinute:{onlineTime:'2026-10-25 00:60:00'},invalidSecond:{onlineTime:'2026-10-25 00:00:60'},timezoneSuffix:{onlineTime:'2026-10-25T00:00:00Z'},reversed:{onlineTime:'2027-01-01 00:00:00'}})){
+ check('unknown date unchanged: '+name,()=>{const r=run(JSON.stringify({...response,images:[{...material,...patch}]}));assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);});
+}
+check('valid leap day supported',()=>{assert(run(JSON.stringify({...response,images:[{...material,onlineTime:'2024-02-29 00:00:00'}]})).out.body);});
+check('unknown wrappers are not traversed',()=>{assert.deepEqual(run(JSON.stringify({...response,images:[{wrapper:material}]})).out,{});});
+check('too deeply nested payload is returned unchanged atomically',()=>{let nested=material;for(let i=0;i<5;i++)nested=[nested];assert.deepEqual(run(JSON.stringify({...response,images:[material,nested]})).out,{});});
+for(const [name,body] of Object.entries({bad:'broken',null:'null',array:'[]',empty:JSON.stringify({...response,images:[]}),unknown:JSON.stringify({code:0,data:response}),businessFailure:JSON.stringify({...response,code:1000})})){
+ check('unrelated payload unchanged: '+name,()=>{const r=run(body);assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);});
+}
+check('oversized payload is unchanged',()=>{assert.deepEqual(run(JSON.stringify({...response,pad:'x'.repeat(2*1024*1024)})).out,{});});
+for(const fid of ['startup','logConfig','welcomeHome','apTaskList','findBeanSceneNew'])check('other API unchanged: '+fid,()=>{assert.deepEqual(run(JSON.stringify(response),{url:'https://api.m.jd.com/client.action?functionId='+fid}).out,{});});
+check('non-success HTTP unchanged',()=>{for(const status of [403,500])assert.deepEqual(run(JSON.stringify(response),{status}).out,{});});
+check('one rule exclusively matches start, no DNS or resource rules',()=>{
+ const rows=plugin.split('\n').filter(x=>/^(request|response) if/.test(x));assert.equal(rows.length,1);
+ const re=new RegExp(rows[0].split(' ~= /')[1].split('/i &&')[0],'i');
+ assert(re.test('https://api.m.jd.com/client.action?x=1&functionId=start&y=2'));
+ for(const url of ['https://api.m.jd.com/client.action?functionId=startup','https://api.m.jd.com/client.action?x=functionId=start','https://img1.360buyimg.com/ad.jpg'])assert(!re.test(url));
+ assert(!/\[Rule\]|REJECT|HTTPDNS|360buyimg|\[Argument\]/.test(plugin));assert(plugin.includes('hostname = api.m.jd.com'));
 });
-check('response notification failure preserves the completed modification',()=>{const r=run(JSON.stringify(sample),{failNotification:true});assert(r.out.body);assert.equal(r.notices.length,0);});
-check('already postponed dates do not emit another handled notification',()=>{const s=structuredClone(sample);expectedDates(s.images);const r=run(JSON.stringify(s));assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);});
-check('empty, unfamiliar, rejected and malformed responses remain untouched and quiet',()=>{
- for(const body of ['bad','null','[]',JSON.stringify({...sample,code:'1000'}),JSON.stringify({...sample,images:{}}),JSON.stringify({code:0,images:[]}),JSON.stringify({code:0,images:[],showTimesDaily:3}),JSON.stringify({code:0,images:[{onlineTime:null,startTimeStamp:{value:123},unknownTime:'keep'}],showTimesDaily:3})]){const r=run(body);assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);}
- for(const status of [403,500]){const r=run(JSON.stringify(sample),{status});assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);}
+check('credential capture remains separate from splash response handling',()=>{
+ const row=bridge.split('\n').find(x=>x.startsWith('response if ')&&x.includes('api\\.m\\.jd'));
+ assert(row,'JD credential rule missing');
+ const capture=new RegExp(row.split(' ~= /')[1].split('/ && ')[0]);
+ assert(!capture.test('https://api.m.jd.com/client.action?functionId=start'));
+ for(const fid of ['startup','logConfig','bff_rightsCenter_jdInteractTask'])assert(capture.test('https://api.m.jd.com/client.action?functionId='+fid));
 });
-check('unrelated API responses never change or notify',()=>{
- for(const fid of ['startup','logConfig','welcomeHome','findBeanSceneNew','bff_rightsCenter_jdInteractTask']){const r=run(JSON.stringify(sample),{url:'https://api.m.jd.com/client.action?functionId='+fid});assert.deepEqual(r.out,{});assert.equal(r.notices.length,0);}
-});
-check('plugin has one start-only rule, one MITM host and no detection or media rules',()=>{
- const rules=plugin.split('\n').filter(x=>/^(request|response) if /.test(x));assert.equal(rules.length,1);assert(rules[0].startsWith('response if '));assert(plugin.includes('hostname = api.m.jd.com\n'));assert(!/\[Argument\]|probe_|jd-config-probe|jd-image-size|jd-video-block|360buyimg/.test(plugin));
- const match=new RegExp(rules[0].split(' ~= /')[1].split('/i && ')[0],'i');
- assert(match.test('https://api.m.jd.com/client.action?x=1&functionId=start&x=2'));
- for(const url of ['https://api.m.jd.com/client.action?functionId=startup','https://api.m.jd.com/api?functionId=logConfig','https://api.m.jd.com/client.action?functionId=welcomeHome','https://m.360buyimg.com/image.jpg','https://storage.360buyimg.com/material-video/video/test.mp4'])assert(!match.test(url));
- const credentialRule=bridge.split('\n').find(x=>x.startsWith('response if ')&&x.includes('api\\.m\\.jd'));
- const captureMatch=new RegExp(credentialRule.split(' ~= /')[1].split('/ && ')[0]);
- assert(!captureMatch.test('https://api.m.jd.com/client.action?functionId=start'));
- for(const id of ['startup','logConfig','bff_rightsCenter_jdInteractTask']){const url='https://api.m.jd.com/client.action?functionId='+id;assert(captureMatch.test(url));assert(!match.test(url));}
-});
-const harArg=process.argv.indexOf('--har');
-if(harArg>=0)check('private real start response preserves every field except the known display dates',()=>{
- const har=JSON.parse(fs.readFileSync(process.argv[harArg+1],'utf8'));let original;
- for(const e of har.log.entries){if(!/[?&]functionId=start(?:&|$)/.test(e.request.url)||e.response.status!==200)continue;const c=e.response.content,text=c.encoding==='base64'?Buffer.from(c.text,'base64').toString():c.text;try{const d=JSON.parse(text);if(d.images&&d.images.length){original=d;break;}}catch(_){}}
- assert(original,'no usable private start response');const r=run(JSON.stringify(original)),expected=structuredClone(original);expectedDates(expected.images);assert(r.out.body);assert.deepEqual(JSON.parse(r.out.body),expected);assert.equal(r.notices.length,1);
-});
-console.log(checks+' start-only checks passed. No storage writes or network requests.');
+console.log(checks+' checks passed; no live JD requests.');

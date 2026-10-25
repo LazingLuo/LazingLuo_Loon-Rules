@@ -1,12 +1,10 @@
 #!name = 京东开屏处理
-#!icon = https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/JD.png
-#!desc = 仅处理 start 开屏响应，将展示时间推迟至2099年，保留素材和展示次数；实际修改后通知。
+#!desc = 只改写 start 开屏配置的上线、结束日期为已过期；保留素材地址和次数，不拦截 DNS。已修改时通知。依据京东16.0.0静态分析，手机新版效果待验证。
 #!loon_version = 3.5.1(983)
-#!date = 2026-10-18
-#!tag = 京东,开屏广告
+#!date = 2026-10-25
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261018-start1") with tag="京东 start 展示推迟至2099", requires_body=true, timeout=15
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-expiry1") with tag="京东开屏配置过期处理", requires_body=true, timeout=15
 
 [Mitm]
 hostname = api.m.jd.com
