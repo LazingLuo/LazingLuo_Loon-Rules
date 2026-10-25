@@ -1,21 +1,37 @@
-# 京东开屏日期过期版
+# 京东开屏处理与诊断
 
-用于替换现有 `Scripts/jd-splash.js` 和 `Plugins/jd_open.plugin`。更新京东开屏插件后使用，不要与旧版同时启用。
+版本：2026-10-25.2。替换仓库现有 `Plugins/jd_open.plugin`、`Scripts/jd-splash.js`，不增加另一套需同时启用的插件。
 
-只处理 `api.m.jd.com/client.action?functionId=start` 的成功 JSON 响应，在 `images` 数组中的素材条目上，把完整有效的 `onlineTime`、`referralsTime` 日期对改为 2000-01-01 至 2000-01-02。其他字段，包括素材地址、展示次数、`startTimeStamp` 和 `endTimeStamp` 保留。缺少顶层 `showTimesDaily` 也可处理，因为客户端日期解析不以该字段存在为条件。
+## 手机操作
 
-修改后通知：“京东开屏 / 已处理 N 条配置 / 展示日期已设为过期”。空配置、已处理的配置只记简短日志。
+1. 更新原来的「京东开屏处理」插件，名称将变为「京东开屏处理与诊断」。按用户本轮选择，将它放在插件列表第一位测试。
+2. 正常使用京东，或下拉刷新主首页。不必同时抓HAR，也不要求刚好出现广告。
+3. 命中目标响应时通知，例如「命中 basicConfig」「已保存；找到开屏字段；HTTP 200」。没有目标字段时同样通知并保存接口状态和字段结构，文字为「本条没有开屏字段」。通知表示记录到配置响应，不能据此判断广告实际展示或拦截效果。
+4. 在Loon脚本列表手动运行「导出京东开屏诊断记录」，打开那次脚本任务日志，使用分享按钮导出日志文件，发回分析即可。若没有通知，也可以运行导出检查请求与响应次数。
+5. 需要重新开始时，运行「清空京东开屏诊断记录」。导出不会自动清空。
 
-依据用户提供的京东16.0.0安装包：
+## 保存内容
 
-- `LaunchAnimationManagerHelper.launchRequestModel` 与 `LaunchAnimationRPCUtil.requestWithfinish:fail:` 都使用 `start`。
-- `OpertationPicModel.initDataWithDic:` 按 `Asia/Shanghai`、`yyyy-MM-dd HH:mm:ss` 解析这两个日期。
-- `LaunchAnimationManager.checkAdModelValid:startViewModel:` 在当前时间早于上线、晚于结束时拒绝展示。
-- `LaunchAnimationManagerHelper.downloadImageType:path:modelPath:operationModel:` 先用结束日期调用 `isDateOk:`；已过期则跳过这里的图片下载。所以改为已过期比把开始、结束都推迟到2099年多覆盖了这一处下载检查。
-- 每日次数限制小于1时，`showCountLessThanMaxDailyCount` 返回允许继续；因此保留次数，不将0作为关闭广告开关。
+四个目标：`start`、`basicConfig`、`welcomeHome`、`searchBoxWord`。支持URL参数和表单/JSON请求体里的顶层functionId。
 
-仍需手机实测：用户现用16.1.50；本结论来自16.0.0的上述代码路径。不能保证其他资源下载分支都跳过，不能直接擦除App已保存的缓存，也不能在无法解密请求时生效。已有缓存可能先展示，待后续 `start` 配置刷新后再观察。无需屏蔽应用DNS或卸载重装。
+- 每个接口分别记录请求次数、响应次数、上次请求时间。响应样本带时间、HTTP状态、正文长度，以及可识别的数字业务码。
+- `expireAds`中的广告ID；带开屏日期字段的素材`groupId`。
+- `onlineTime`、`referralsTime`改写前的日期；`requestStartMins`、`showStartMins`、`showTimesDaily`、`maxShowTimes`。
+- `degradeSplashAD`、`homePageSplashAd`的数值/布尔开关；`extSwitch`的类型、键名和其中能识别的上述开关。支持有限层数的JSON字符串容器，例如`JDApp-home`下的配置字符串。
+- 经过筛选的响应键路径。其他值不复制，无法识别的开关字符串仅记录类型和长度。
 
-没有新增广泛API探测规则，与现有排除 `start` 的京东凭据获取规则保持相同分工。不修改请求，不读取或保存Cookie，不联网请求，不上传用户文件。
+不保存Cookie、登录令牌、签名、账号、完整URL、请求正文、完整响应、素材URL或原始密文。所有记录仅写本机专用存储键 `LAZING_JD_SPLASH_DIAG_V1`，不会联网发送或上传GitHub。导出JSON中的`at`、`lastRequestAt`是Unix毫秒时间。
 
-验证：运行 `node test.cjs`。该检查在本地使用合成响应，覆盖日期类型、非法日期、非目标接口、未知字段保留、重复处理、数组结构及异常回退；通过不等于手机广告已被验证拦截。
+每个接口保留最近3份响应摘要；计数继续累计。单条正文检查上限2MB，摘要上限约12K字符，总存储上限192K字符。过大、空正文、非JSON、HTTP异常同样记录状态，不存原文。`limited`表示遍历或摘要触及上限；字段缺失可能是采样边界，不等于客户端没有这项配置。
+
+## 原来的开屏处理
+
+只有 `start`、HTTP200、业务码0、`images`中完整有效的开屏日期对会改写为2000-01-01至2000-01-02。保留其他内容。三条新配置线路全部只观察，不改开关和过期广告名单。未知日期或结构不猜测修改。
+
+为了覆盖functionId放在请求体里的情况，请求和响应规则匹配`api.m.jd.com/api`和`/client.action`，然后脚本筛选四个接口；其他接口不写记录、不通知、不改内容。但这些响应规则会与签到/青龙/农场凭据获取规则重叠，原样返回也不保证Loon继续执行后面的响应脚本。本轮按用户选择不修改其他插件，以本插件排第一位进行诊断。
+
+只有已被Loon解密的HTTP通信才能记录；原始IP、私有协议或不可读取连接不会因此自动解密。请求有计数但响应为0时，可据此检查脚本优先级或响应捕获；两项均0时，仍需区分没发请求和Loon没看到，不能认定一定使用了额外加密。
+
+## 验证
+
+运行 `node test.cjs`（仓库中为 `node Tests/jd-splash.test.cjs`）。61项离线检查覆盖原日期改写回归、三接口只读、请求体路由、HTTP异常、存储限额、导出、清空、隐私筛选和错误隔离。另使用Apple JavaScriptCore检查运行兼容性。未调用真实京东接口，手机实际命中与效果待验证。

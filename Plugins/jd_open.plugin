@@ -1,10 +1,13 @@
-#!name = 京东开屏处理
-#!desc = 只改写 start 开屏配置的上线、结束日期为已过期；保留素材地址和次数，不拦截 DNS。已修改时通知。依据京东16.0.0静态分析，手机新版效果待验证。
+#!name = 京东开屏处理与诊断
+#!desc = 保留start日期过期处理；观察basicConfig、welcomeHome、searchBoxWord。命中响应时保存相关字段并通知，手动运行导出可分享日志。不保存Cookie和完整请求响应，不拦截DNS。
 #!loon_version = 3.5.1(983)
 #!date = 2026-10-25
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/client\.action\?(?:[^&]*&)*functionId=start(?:&|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-expiry1") with tag="京东开屏配置过期处理", requires_body=true, timeout=15
+request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2") with tag="京东开屏请求观察", requires_body=true, timeout=10
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2") with tag="京东开屏配置处理与记录", requires_body=true, timeout=15
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2", "export") with tag="导出京东开屏诊断记录", timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2", "reset") with tag="清空京东开屏诊断记录", timeout=5
 
 [Mitm]
 hostname = api.m.jd.com
