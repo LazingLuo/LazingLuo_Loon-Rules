@@ -156,7 +156,7 @@ function createEarnClient(host,crypto,profile){
   const pin=decodeURIComponent(profile.pin),signData=op==='next'?{missionId:data.missionId,PIN:pin}:op==='receive'?JSON.stringify({channelCode:data.channelCode,PIN:pin,missionId:data.missionId}):{missionId:data.missionId,readTime:String(data.readTime),PIN:pin};
   const sig=await signed(signData);
   const tokens={next:'iYhVPTDdcH',start:'jBJHOIrRhm',finish:'EaGIdTGDdn'};
-  const ep=profile.query.extParams||{},device=JSON.parse(ep.deviceInfos||'{}');
+  const ep=profile.query.extParams||{},device=profile.deviceInfo||JSON.parse(ep.deviceInfos||'{}');
   const body=op==='receive'?{environment:'2',missionId:data.missionId,channelCode:data.channelCode,...sig,deviceInfo1:device,clientType:'h5',clientVersion:profile.query.clientVersion}:
    {...data,...sig,version:'2.2.4',token:tokens[op],appId:'jrmission'};
   const headers={...profile.headers,'Content-Type':op==='receive'?'application/x-www-form-urlencoded':'text/plain;charset=UTF-8',Origin:op==='receive'?'https://member.jr.jd.com':'https://u.jr.jd.com',Referer:op==='receive'?'https://member.jr.jd.com/member/coinQuest/coin/':'https://u.jr.jd.com/','X-Lazing-Activity-Run':'1'};
@@ -173,7 +173,7 @@ function createEarnClient(host,crypto,profile){
  }
  async function run(){
   try{
-   const tasks=await query();let done=0;
+   const tasks=await query();host.log('读取任务 '+tasks.length+' 项');let done=0;
    for(const t of tasks){
     host.guard();const row={title:actTitle(t.title?.text||t.name),result:''};report.rows.push(row);host.log(row.title);
     if(t.status===1){row.result='已完成';continue;}
@@ -651,7 +651,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    const tracked=(k,f)=>{watched[k]=raw(k);return read(k,f);};
    const shared=actSharedMaterial(tracked,createFarmCrypto({read:(_k,f)=>f,write:()=>{},setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment),all=tracked(ACTIVITY_KEY,null);
    const profile=actDefaultProfile(ACTIVITY_KIND,shared,all?.[ACTIVITY_KIND]);
-   log('版本 20261026-3；使用'+shared.source+'；'+(all?.[ACTIVITY_KIND]?'已有活动模板':'运行时建立活动参数'));
+   log('版本 20261026-4；使用'+shared.source+'；'+(all?.[ACTIVITY_KIND]?'已有活动模板':'运行时建立活动参数'));
    write(PREFIX+'lock',{runId,until:deadline+30000});owned=true;
    const host={now:()=>Date.now(),day,guard,log,error,read:(k,f)=>read(PREFIX+k,f),write:(k,v)=>write(PREFIX+k,v),setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
     request,json,progress:log,
@@ -668,9 +668,16 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    if(ACTIVITY_KIND==='egg'&&!profile.params['x-api-eid-token']||ACTIVITY_KIND==='earn'&&!ep?.sdkToken){
     log('获取京东设备参数');
     const r=await request(actDeviceRequest(profile.headers['User-Agent'],Date.now(),crypto.hash(String(Date.now())).slice(0,32))),j=json(r),d=j.data;
-    if(!d||typeof d!=='object'||Array.isArray(d)||['token','eid','sdkToken'].some(k=>d[k]!==undefined&&(typeof d[k]!=='string'||d[k].length>16384)))throw Error('活动设备参数响应不完整');
+    if(!d||typeof d!=='object'||Array.isArray(d)||['token','eid','sdkToken'].some(k=>d[k]!==undefined&&d[k]!==null&&(typeof d[k]!=='string'||d[k].length>16384)))throw Error('活动设备参数响应不完整');
     if(ACTIVITY_KIND==='egg'){if(!d.token)throw Error('砸金蛋设备参数获取失败');profile.params['x-api-eid-token']=d.token;}
-    else {if(!d.sdkToken)throw Error('赚京豆设备参数获取失败');Object.assign(ep,{sdkToken:d.sdkToken,signData:{sdkToken:d.sdkToken},deviceInfos:JSON.stringify({jsToken:d.token||'',eid:d.eid||'',sdkToken:d.sdkToken,token:d.sdkToken,fp:crypto.hash(String(Date.now())).slice(0,32)})});profile.eid=d.eid||'';}
+    else {
+     // Faker's coinQuest flow explicitly defaults absent device fields to empty strings.
+     // Validate login and task-list success at the business API; do not demand sdkToken here.
+     const sdkToken=d.sdkToken||'';
+     profile.deviceInfo={jsToken:d.token||'',eid:d.eid||'',sdkToken,token:sdkToken,fp:crypto.hash(String(Date.now())).slice(0,32)};
+     Object.assign(ep,{sdkToken,signData:{sdkToken},deviceInfos:JSON.stringify({sdkToken})});profile.eid=d.eid||'';
+     log('设备参数：token'+(d.token?'有':'无')+'，eid'+(d.eid?'有':'无')+'，sdkToken'+(sdkToken?'有':'缺省，继续查询任务'));
+    }
    }
    const client=ACTIVITY_KIND==='egg'?createEggClient(host,crypto,profile):createEarnClient(host,crypto,profile);
    report=await client.run();write(PREFIX+ACTIVITY_KIND+'.last',report);

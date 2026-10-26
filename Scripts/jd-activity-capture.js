@@ -154,7 +154,7 @@ function createEarnClient(host,crypto,profile){
   const pin=decodeURIComponent(profile.pin),signData=op==='next'?{missionId:data.missionId,PIN:pin}:op==='receive'?JSON.stringify({channelCode:data.channelCode,PIN:pin,missionId:data.missionId}):{missionId:data.missionId,readTime:String(data.readTime),PIN:pin};
   const sig=await signed(signData);
   const tokens={next:'iYhVPTDdcH',start:'jBJHOIrRhm',finish:'EaGIdTGDdn'};
-  const ep=profile.query.extParams||{},device=JSON.parse(ep.deviceInfos||'{}');
+  const ep=profile.query.extParams||{},device=profile.deviceInfo||JSON.parse(ep.deviceInfos||'{}');
   const body=op==='receive'?{environment:'2',missionId:data.missionId,channelCode:data.channelCode,...sig,deviceInfo1:device,clientType:'h5',clientVersion:profile.query.clientVersion}:
    {...data,...sig,version:'2.2.4',token:tokens[op],appId:'jrmission'};
   const headers={...profile.headers,'Content-Type':op==='receive'?'application/x-www-form-urlencoded':'text/plain;charset=UTF-8',Origin:op==='receive'?'https://member.jr.jd.com':'https://u.jr.jd.com',Referer:op==='receive'?'https://member.jr.jd.com/member/coinQuest/coin/':'https://u.jr.jd.com/','X-Lazing-Activity-Run':'1'};
@@ -171,7 +171,7 @@ function createEarnClient(host,crypto,profile){
  }
  async function run(){
   try{
-   const tasks=await query();let done=0;
+   const tasks=await query();host.log('读取任务 '+tasks.length+' 项');let done=0;
    for(const t of tasks){
     host.guard();const row={title:actTitle(t.title?.text||t.name),result:''};report.rows.push(row);host.log(row.title);
     if(t.status===1){row.result='已完成';continue;}
