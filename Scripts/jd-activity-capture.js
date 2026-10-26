@@ -137,7 +137,8 @@ function createEggClient(host,crypto,profile){
  return {run,query};
 }
 function createEarnClient(host,crypto,profile){
- const journal=actJournal(host,'earn',profile.pin),report={name:'天天赚京豆',rows:[],beans:0,submitted:0,stopped:false},verifyRows=[];
+ const journal=actJournal(host,'earn',profile.pin),report={name:'天天赚京豆',pin:profile.pin,day:host.day(),rows:[],beans:0,submitted:0,stopped:false},verifyRows=[];
+ const receipts=createEarnLedger(host,crypto,profile,report);
  let signer;
  async function sdk(){if(!signer)signer=await host.aar(profile.headers['User-Agent']);return signer;}
  async function signed(data,raw=false){const s=await sdk(),nonce=s.nonce(),signature=s.sign(raw?String(data):JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融签名初始化失败');return {nonce,signature};}
@@ -174,11 +175,11 @@ function createEarnClient(host,crypto,profile){
  }
  async function run(){
   try{
-   const tasks=await query();host.log('读取任务 '+tasks.length+' 项');let done=0;
+   const tasks=await query();receipts.targets(tasks.map(t=>t.title?.text||t.name));host.log('读取任务 '+tasks.length+' 项');let done=0;
    if(tasks.some(t=>Number(t.status)!==1))await page(true);
    for(const t of tasks){
     host.guard();const row={title:actTitle(t.title?.text||t.name),result:''};report.rows.push(row);host.log(row.title);
-    if(Number(t.status)===1){row.result='已完成';continue;}
+    if(Number(t.status)===1){row.result='任务已完成，到账待确认';row.completed=true;continue;}
     if(!actId(t.missionId)||!actId(t.channelCode)){row.result='任务标识缺失';continue;}
     if(/下单|支付|购买|关注|订阅|邀请|助力|开户|借款|理财|保险/.test(row.title)){row.result='需App操作';continue;}
     const url=String(t.button?.jumpData?.jumpUrl||''),juid=/(?:\?|&)juid=([a-f0-9]{32})(?:&|$)/i.exec(url)?.[1],id=String(t.missionId);
@@ -187,7 +188,7 @@ function createEarnClient(host,crypto,profile){
      const key=id+':receive';
      if(journal.has(key)||journal.has(id+':jump')){row.result='已有提交记录，待确认';verifyRows.push({row,id});continue;}
      await mission('receive',{missionId:id,channelCode:t.channelCode},key);await jump(juid,id+':jump');
-     row.result='已接取并提交跳转，待复查';verifyRows.push({row,id});done++;report.submitted++;
+     row.result='已接取并提交跳转，待复查';row.submitted=true;verifyRows.push({row,id});done++;report.submitted++;
     }else if(/(?:\?|&)missionId=/.test(url)){
      const key=id+':next';if(journal.has(key)){row.result='已有提交记录，待确认';continue;}
      const next=await mission('next',{missionId:id,channelCode:t.channelCode,readTime:10},key),m=next?.data?.missionId;
@@ -196,15 +197,83 @@ function createEarnClient(host,crypto,profile){
      await mission('start',{missionId:mid,channelCode:t.channelCode,readTime:10},base+':start');await host.sleep(12000);
      const award=await mission('finish',{missionId:mid,channelCode:t.channelCode,readTime:10},base+':finish'),awards=award.data?.awards;let beans=0;
      if(Array.isArray(awards))for(const a of awards)if(/京豆/.test(String(a.awardName||a.name||''))&&Number.isFinite(Number(a.awardNum)))beans+=Number(a.awardNum);
-     report.beans+=beans;row.result=beans?'领取返回 '+beans+' 京豆':'已提交领奖，数量待明细确认';done++;report.submitted++;
+     report.beans+=beans;row.result=beans?'领取返回 '+beans+' 京豆':'已提交领奖，到账待确认';row.submitted=true;row.completed=beans>0;done++;report.submitted++;
     }else {row.result='需App操作';continue;}
     await host.pause(2000+Math.floor(Math.random()*1000));
    }
-   if(done>0&&verifyRows.length){const after=await query(true);for(const {row,id} of verifyRows){const task=after.find(x=>String(x.missionId)===id);if(Number(task?.status)===1)row.result='已确认完成，京豆数量待明细确认';else if(row.result==='已接取并提交跳转，待复查')row.result='已提交，进度待App确认';}}
+   if(done>0&&verifyRows.length){const after=await query(true);for(const {row,id} of verifyRows){const task=after.find(x=>String(x.missionId)===id);if(Number(task?.status)===1){row.result='任务已完成，到账待确认';row.completed=true;}else if(row.result==='已接取并提交跳转，待复查')row.result='已提交，进度待App确认';}}
   }catch(e){report.stopped=true;report.message='活动'+(report.phase||'执行')+'失败：'+host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='未完成：'+report.message;}
+  await receipts.confirm();
   return report;
  }
  return {run,query};
+}
+
+// Read-only bean receipts. Task offers and successful jump responses are not receipts.
+const EARN_LEDGER='https://bean.m.jd.com/beanDetail/detail.json';
+const earnTitle=s=>String(s||'').normalize('NFKC').replace(/\s+/g,'').slice(0,120);
+function earnReceiptRows(j,day,hash){
+ if(!j||String(j.code)!=='0'||!Array.isArray(j.jingDetailList)||j.jingDetailList.length>100)throw Error('京豆明细暂不可用');
+ const out=[];let older=false;
+ for(const r of j.jingDetailList){
+  const date=String(r?.date||''),m=/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(date);
+  if(!m)continue;
+  const at=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]-8,+m[5],+m[6]),round=new Date(at+8*3600000).toISOString().slice(0,19).replace('T',' ');
+  if(round!==date)continue;if(date.slice(0,10)<day){older=true;continue;}if(date.slice(0,10)!==day)continue;
+  const title=earnTitle(r.eventMassage||r.eventMessage),amount=Number(r.amount);
+  if(!title||!Number.isSafeInteger(amount)||amount<=0||amount>10000000)continue;
+  const id=r.id??r.jingDetailId??r.eventId;
+  const key=hash(JSON.stringify(id!==undefined&&id!==null?['id',String(id)]:['receipt',date,title,amount]));
+  out.push({key,title,amount,date});
+ }
+ return {rows:out,older,short:j.jingDetailList.length<20};
+}
+function createEarnLedger(host,crypto,profile,report){
+ const day=host.day(),key='receipts.earn.'+profile.pin,known=new Set(),cache=host.read(key,null);
+ const saved=cache?.pin===profile.pin&&cache.day===day&&Array.isArray(cache.rows)?cache.rows:[];
+ function add(names){for(const name of names){const s=earnTitle(name);if(s)known.add(s);}}
+ function targets(names){add(names);host.guard();host.write('receiptTargets.earn.'+profile.pin,{pin:profile.pin,day,titles:[...known].slice(0,200)});}
+ const previous=host.read('receiptTargets.earn.'+profile.pin,null);if(previous?.pin===profile.pin&&previous.day===day&&Array.isArray(previous.titles))add(previous.titles);
+ const last=host.read('earn.last',null),journal=host.read('journal.earn.'+profile.pin,null);
+ if(last?.pin===profile.pin&&last.day===day||!last?.pin&&!last?.day&&journal?.day===day&&Object.keys(journal.entries||{}).length){add((last?.rows||[]).map(x=>x.title));}
+ function apply(rows){
+  const sums=new Map();for(const r of rows)if(known.has(r.title))sums.set(r.title,(sums.get(r.title)||0)+r.amount);
+  report.ledgerBeans=[...sums.values()].reduce((a,b)=>a+b,0);
+  const duplicates=new Map();for(const row of report.rows){const t=earnTitle(row.title);duplicates.set(t,(duplicates.get(t)||0)+1);}
+  if(!report.rows.length)for(const [title,n] of sums){report.rows.push({title,result:'今日明细到账 '+n+' 京豆（此前任务）',creditedBeans:n,receiptState:'confirmed',completed:true});}
+  else for(const row of report.rows){
+   const n=sums.get(earnTitle(row.title));row.creditedBeans=null;row.receiptState='pending';
+   if(!n)continue;
+   if(duplicates.get(earnTitle(row.title))>1){row.receiptState='ambiguous';row.result+='；同名明细已有到账，归属待核对';continue;}
+   row.creditedBeans=n;row.receiptState='confirmed';
+   if(row.result.startsWith('未完成'))row.result+='；今日明细已有 '+n+' 京豆';
+   else {row.result='今日明细确认到账 '+n+' 京豆';row.completed=true;}
+  }
+ }
+ async function confirm(){
+  report.ledgerBeans=null;report.ledgerState='pending';
+  if(!known.size){report.ledgerState='no-targets';return;}
+  const seen=new Map(saved.filter(r=>r&&r.date?.slice(0,10)===day&&typeof r.key==='string'&&known.has(r.title)&&Number.isSafeInteger(r.amount)&&r.amount>0).map(r=>[r.key,r]));
+  try{
+   for(let page=1;page<=3;page++){
+    host.guard();host.log('核对京豆明细，第 '+page+' 页');
+    const j=host.json(await host.request({url:EARN_LEDGER+'?page='+page,headers:{Cookie:profile.headers.Cookie,'User-Agent':profile.headers['User-Agent'],'Content-Type':'application/x-www-form-urlencoded',Referer:'https://bean.m.jd.com/beanDetail/index.action?resourceValue=bean','X-Lazing-Activity-Run':'1'},body:actEncode({body:JSON.stringify({pageSize:'20',page:String(page)}),appid:'ld'})}));
+    const parsed=earnReceiptRows(j,day,crypto.hash);
+    for(const r of parsed.rows)if(known.has(r.title))seen.set(r.key,r);
+    report.ledgerState='checked';report.ledgerLimited=page===3&&!parsed.short&&!parsed.older;
+    if(parsed.short||parsed.older)break;
+    await host.pause(1000);
+   }
+   host.guard();host.write(key,{pin:profile.pin,day,rows:[...seen.values()].slice(-300),checkedAt:host.now()});
+  }catch(_){report.ledgerState=seen.size?'cached':'unavailable';host.log('京豆明细暂未核实，保留任务提交结果');}
+  if(report.ledgerState==='checked'||seen.size)apply([...seen.values()]);
+ }
+ return {targets,confirm};
+}
+function activityRewardText(kind,report){
+ if(kind!=='earn')return '接口返回 '+report.beans+' 京豆';
+ const ledger=report.ledgerBeans>0?(report.ledgerState==='cached'?'今日此前已核实到账 ':'今日明细确认到账 ')+report.ledgerBeans+' 京豆':report.beans>0?'领奖接口返回 '+report.beans+' 京豆':'到账待确认';
+ return ledger+'；本轮提交 '+(report.submitted||0)+' 项';
 }
 
 // Share login identity; activity templates are optional inputs, never login credentials.
