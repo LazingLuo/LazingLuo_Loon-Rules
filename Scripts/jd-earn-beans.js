@@ -78,7 +78,7 @@ function createEggClient(host,crypto,profile){
   const p={...profile.params,t:String(host.now()),functionId:mode==='task_list'?'interact_pre_executor':'interact_executor',channelCode:'bargain',sceneCode:mode,body:JSON.stringify(body)};
   if(mode==='do_task')p.alias='doInteractTask';
   const input={appid:p.appid,client:p.client,clientVersion:p.clientVersion,t:p.t,functionId:mode,body:crypto.hash(p.body)};
-  const signingProfile={pin:profile.pin,headers:profile.headers},env=crypto.decodeEnvironment(profile.signing.environment);
+  const signingProfile={pin:profile.pin,headers:profile.headers},env=profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined;
   p.h5st=await crypto.signOnline('39e8e',signingProfile,env,input);
   if(mark)journal.mark(mark);
   const r=await host.request({url:'https://api.m.jd.com/?'+actEncode({appid:p.appid,client:p.client,clientVersion:p.clientVersion,functionId:p.functionId,channelCode:p.channelCode,sceneCode:p.sceneCode,...(p.alias?{alias:p.alias}:{})}),headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode(Object.fromEntries(Object.entries(p).filter(([k])=>!['functionId','channelCode','sceneCode','alias','appid','client','clientVersion'].includes(k))))});
@@ -130,14 +130,14 @@ function createEarnClient(host,crypto,profile){
  async function signed(data){const s=await sdk(),nonce=s.nonce(),signature=s.sign(JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融签名初始化失败');return {nonce,signature};}
  function accepted(j,query=false){const d=actBusiness(j,'earn');if(!query&&d?.code!=='0000')throw Error('金融任务接口拒绝本次请求');return d;}
  async function query(){
-  if(!profile.signing)throw Error('赚京豆签名版本暂不支持，请提供该活动查询包');
+  if(!profile.query||!profile.headers)throw Error('赚京豆查询参数不完整');
   const q=actClone(profile.query),ep=q.extParams||(q.extParams={}),signData=ep.signData||{sdkToken:ep.sdkToken||''};
   Object.assign(ep,await signed(signData));
   const cco={...profile.cco,t:host.now()};
   const fields=String(cco._stk||'').split(',').filter(Boolean);
   if(!fields.length||fields.some(k=>!['clientType','clientVersion','ctp','pageId','pageNum','pageType'].includes(k)))throw Error('赚京豆查询签名字段不符');
-  const input={};for(const k of fields){if(q[k]===undefined)throw Error('赚京豆查询参数不完整');input[k]=q[k];}
-  cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},crypto.decodeEnvironment(profile.signing.environment),input);
+  const input={};for(const k of fields){if(q[k]===undefined)throw Error('赚京豆查询参数不完整');input[k]=k==='clientVersion'&&profile.signClientVersion?profile.signClientVersion:q[k];}
+  cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined,input);
   const r=await host.request({url:EARN_QUERY+'?pageType=11189',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})});
   const j=host.json(r);accepted(j,true);return actEarnList(j);
  }
@@ -194,6 +194,93 @@ function createEarnClient(host,crypto,profile){
   return report;
  }
  return {run,query};
+}
+
+// Share login identity; activity templates are optional inputs, never login credentials.
+function actSharedMaterial(read,decode){
+ const bound=read('JD_SIGNIN_ACCOUNT_V1',null)||read('QL_BRIDGE_ACCOUNT_V1',null),rows=[];
+ function add(pin,headers,at,signing,params,label){
+  const pair=actPair(actHeader(headers,'Cookie'));if(!pair||pin&&pair.pin!==pin)return;
+  const row={pin:pair.pin,headers,at:Number(at)||0,signing,params:params||{},label};rows.push(row);return row;
+ }
+ const canonical=[];
+ for(const key of ['JD_SIGNIN_LOGIN_V1','QL_BRIDGE_CREDENTIAL_V1']){
+  const x=read(key,null);if(x?.cookie){const h={...(x.headers||{}),Cookie:x.cookie};canonical.push(add(x.pin,h,x.capturedAt,null,null,'共享Cookie'));}
+ }
+ const farm=read('JD_FARM_TASKS_ACCOUNT_V1',null);
+ for(const g of Object.values(farm?.scopes||{}))for(const t of Object.values(g.templates||{}))add(farm.pin,t.headers,t.at,t.signing||g.signing,t.params,'农场');
+ const jx=read('JXZY_CHECKIN_ACCOUNT_V1',null);if(jx)add(jx.pin,jx.headers,jx.loginUpdatedAt||jx.capturedAt,jx.signing,{...jx.query?.params,'x-api-eid-token':jx.signing?.eidToken},'京喜');
+ const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null);for(const t of Object.values(retail?.modes||{}))add(retail.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'签到');
+ const plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null);for(const t of [plant?.query,plant?.claim])if(t)add(plant.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'种豆');
+ const all=read(ACTIVITY_KEY,null);for(const kind of ['egg','earn']){const t=all?.[kind];if(t)add(t.pin,t.headers,t.capturedAt,t.signing,t.params,'活动页');}
+ const pin=bound?.pin||canonical.filter(Boolean).sort((a,b)=>b.at-a.at)[0]?.pin||rows.sort((a,b)=>b.at-a.at)[0]?.pin;
+ const same=rows.filter(x=>x.pin===pin).sort((a,b)=>b.at-a.at);
+ const login=canonical.filter(x=>x?.pin===pin).sort((a,b)=>b.at-a.at)[0]||same[0];
+ if(!login)throw Error('缺少京东Cookie，请打开京东获取一次');
+ const context=same.find(x=>actHeader(x.headers,'User-Agent'));
+ if(!context)throw Error('缺少京东设备信息，请打开京东获取一次');
+ const h={Cookie:actPair(actHeader(login.headers,'Cookie')).cookie,'User-Agent':actHeader(context.headers,'User-Agent')};
+ const extra=String(actHeader(context.headers,'Cookie')).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x));h.Cookie+=extra.join(';')+';';
+ let signing,params={};
+ for(const x of same){
+  if(!params['x-api-eid-token']&&x.params['x-api-eid-token'])params={'x-api-eid-token':x.params['x-api-eid-token']};
+  if(!signing&&x.signing?.environment){try{const env=decode(x.signing.environment);if([pin,decodeURIComponent(pin)].includes(env.pp?.p1)){signing=actClone(x.signing);h['User-Agent']=actHeader(x.headers,'User-Agent')||h['User-Agent'];}}catch(_){}}
+ }
+ return {pin,headers:h,signing,params,source:login.label,capturedAt:login.at};
+}
+function actDefaultProfile(kind,shared,captured){
+ if(captured&&captured.pin!==shared.pin)throw Error('活动资料属于其他账号');
+ const p=captured?actClone(captured):{pin:shared.pin,capturedAt:shared.capturedAt};
+ const old=p.headers||{},extra=String(old.Cookie||shared.headers.Cookie).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x));
+ p.headers={...old,Cookie:actPair(shared.headers.Cookie).cookie+extra.join(';')+';','User-Agent':old['User-Agent']||shared.headers['User-Agent']};
+ p.signing=p.signing||shared.signing||{};
+ const version=/jdapp;[^;]+;([^;]+)/i.exec(p.headers['User-Agent'])?.[1]||'16.1.50';
+ if(kind==='egg'){
+  p.headers.Referer=p.headers.Referer||'https://pro.m.jd.com/';p.params={appid:'SecKill2020',client:'ios',clientVersion:version,...p.params};
+  if(!p.params['x-api-eid-token'])p.params['x-api-eid-token']=shared.params['x-api-eid-token']||'';
+ }else{
+  p.headers.Referer='https://member.jr.jd.com/member/coinQuest/coin/';p.headers.Origin='https://member.jr.jd.com';p.headers['X-Requested-With']='com.jd.jrapp';p.headers.Accept='application/json';
+  if(!/(?:^|;\s*)pwdt_id=/.test(p.headers.Cookie))p.headers.Cookie+='pwdt_id='+shared.pin+';';
+  p.query=p.query||{clientVersion:'6.9.02',clientType:'apple',pageType:11189,pageId:11189,ctp:11189,pageNum:-1,buildCodes:['common','topData','float','tag'],extParams:{channelCode:'inside',riskQdPageId:'gainJDbean',riskQdPageName:'赚京豆任务列表页',aarVersion:'2',osVersion:'12',itemIds:[],pageName:'pageCoinQuest',clientEnv:'2',jumpSource:'',abTest:'',schemaList:[],platformFlag:'2',sourceVersion:'62',reqSource:'0',dynamicReq:true,pageUrl:'https://member.jr.jd.com/member/coinQuest/coin/',urlKey:'/member/coinQuest/coin/',clientName:'web'}};
+  p.cco=p.cco||{client:'apple',clientVersion:'6.0.9',_stk:'clientType,clientVersion,ctp,pageId,pageNum,pageType',_ste:1};
+  if(!captured)p.signClientVersion='6.9.0';
+ }
+ return p;
+}
+function actJxProfile(read,decode){
+ const s=actSharedMaterial(read,decode),old=read('JXZY_CHECKIN_ACCOUNT_V1',null);
+ if(old?.query&&old?.signing?.environment&&old?.signing?.eidToken&&old?.headers){const p=actClone(old);if(p.pin!==s.pin)throw Error('京喜账号不一致');p.headers.Cookie=s.headers.Cookie;return p;}
+ if(!s.signing?.environment||!s.params['x-api-eid-token'])throw Error('京喜共享设备资料不完整，请打开京东农场或京喜刷新');
+ // Public page constants independently observed in 401 and 402; no user fields.
+ return {pin:s.pin,headers:{...s.headers,Referer:'https://pro.m.jd.com/mall/active/2iqSwv1JiDHxAkHAikfU6XAECFmo/index.html'},capturedAt:s.capturedAt,
+  query:{endpoint:'https://api.m.jd.com/api',params:{appid:'jx_h5_babel',client:'jxh5',clientVersion:'1.2.5',channel:'jxh5',functionId:'jxzy_active_querySign',body:JSON.stringify({source:'jxzy',craftId:'6824629a7c46584759d39b78',sceneval:2,buid:325,appCode:'ms1888ebbf'})}},
+  signing:{...s.signing,source:'jxzy_active_queryActive',eidToken:s.params['x-api-eid-token']}};
+}
+// JD's public device-token request uses an encoded browser description, without Cookie.
+function actTDEncode(value){
+ const s=encodeURIComponent(JSON.stringify(value)),map='23IL<N01c7KvwZO56RSTAfghiFyzWJqVabGH4PQdopUrsCuX*xeBjkltDEmn89.-';let out='';
+ for(let i=0;i<s.length;i+=3){const a=s.charCodeAt(i),b=s.charCodeAt(i+1),c=s.charCodeAt(i+2);out+=map.charAt(a>>2)+map.charAt((a&3)<<4|b>>4)+map.charAt(isNaN(b)?64:(b&15)<<2|c>>6)+map.charAt(isNaN(c)?64:c&63);}
+ return out+'/';
+}
+function actDeviceRequest(ua,now,fp){
+ const head={pin:'',oid:'',bizId:'jd-babelh5',fc:'',mode:'strict',p:'s',fp,ctype:1,v:'3.2.1.1',f:'3',o:'pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',qs:'',jsTk:'',qi:''};
+ const device={ts:{deviceTime:now,deviceEndTime:now+100},ca:{tdHash:''},m:{compatMode:'CSS1Compat'},fo:['Bauhaus 93','Casual'],n:{vendorSub:'',productSub:'20030107',vendor:'Apple Computer, Inc.',maxTouchPoints:1,hardwareConcurrency:8,cookieEnabled:true,appCodeName:'Mozilla',appName:'Netscape',appVersion:ua.split('M/')[1]||'',platform:'NA',product:'Gecko',userAgent:ua,language:'zh-CN',onLine:true,webdriver:false,javaEnabled:false,deviceMemory:8},p:[],w:{devicePixelRatio:2.75,screenTop:0,screenLeft:0},s:{availHeight:873,availWidth:393,colorDepth:24,height:873,width:393,pixelDepth:24},ss:{cookie:true,localStorage:true,sessionStorage:true,globalStorage:false,indexedDB:true},tz:-480,lil:'',wil:''};
+ return {url:'https://jra.jd.com/jsTk.do?a='+actTDEncode(head),headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':ua},body:actEncode({d:actTDEncode(device)})};
+}
+function actJxTaskCapture(host,req,res,decode){
+ if(req?.method!=='POST'||Number(res?.status)!==200||actHeader(req.headers,'X-Lazing-Activity-Run')==='1')return false;
+ if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)$/.test(actEndpoint(req.url)))return false;
+ const p=actParams(req);if(p.functionId!=='jxzy_active_task_queryTaskList'||p.appid!=='jx_h5_babel'||p.client!=='jxh5'||p.channel!=='jxh5')return false;
+ const b=JSON.parse(p.body||'{}'),j=JSON.parse(res.body||'{}');
+ if(b.source!=='jxzy'||b.craftId!=='6824629a7c46584759d39b78'||Number(b.sceneval)!==2||Number(b.buid)!==325||!b.appCode||String(j.code)!=='0'||!Array.isArray(j.data?.taskInfoList))return false;
+ const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin']){const v=actHeader(req.headers,k);if(v)headers[k]=v;}
+ const pair=actPair(headers.Cookie);if(!pair||!headers['User-Agent']||!/^https:\/\/pro\.m\.jd\.com\/mall\/active\/2iqSwv1JiDHxAkHAikfU6XAECFmo\/index\.html(?:\?|$)/.test(headers.Referer||''))return false;
+ const bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null),key='JXZY_CHECKIN_ACCOUNT_V1',old=host.read(key,null);
+ if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('京喜账号不一致');
+ const at=host.observedAt||Date.now();if(at<Number(old?.updatedAt||0))return false;
+ // Store only a verified query; bootstrap missing generic signing material at run time.
+ delete p.h5st;delete p.t;delete b.time;delete b.signStr;p.functionId='jxzy_active_querySign';p.body=JSON.stringify(b);
+ host.write(key,{...old,pin:pair.pin,headers,query:{endpoint:'https://api.m.jd.com/api',params:p},capturedAt:at,updatedAt:at});return true;
 }
 
 function createFarmCrypto(host) {
@@ -522,25 +609,27 @@ function createAar(userAgent) {
 if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  (async function(){
   const name=ACTIVITY_KIND==='egg'?'天天砸金蛋':'天天赚京豆',PREFIX='JD_ACTIVITY_MANUAL_V1.',start=Date.now(),deadline=start+540000,runId=String(start)+'-'+Math.random().toString(16).slice(2),day=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
-  let owned=false,snapshot='',loginSnapshot='',report;
+  let owned=false,snapshot='',loginSnapshot='',report;const watched={};
   const sessionCookies={};
   const raw=k=>$persistentStore.read(k)||'';
   const read=(k,f)=>{try{const s=raw(k);return s?JSON.parse(s):f;}catch(_){throw Error('活动本地记录无法读取');}};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('活动本地保存失败');};
   const notify=(s,b)=>{try{$notification.post(name,s,b);}catch(_){}};
-  const error=e=>/^(?:活动|金融|赚京豆|砸金蛋|本项|本次|签名|缺少|请)/.test(String(e?.message||''))?String(e.message).slice(0,150):'活动执行未完成，请查看凭据或接口状态';
+  const error=e=>/^(?:农场|原始签名环境|活动|金融|赚京豆|砸金蛋|本项|本次|签名|缺少|请)/.test(String(e?.message||''))?String(e.message).slice(0,150):'活动执行未完成，请查看凭据或接口状态';
   const guard=()=>{
    if(Date.now()+22000>=deadline)throw Error('活动接近本轮时限，可再次手动执行剩余任务');
    if(read(PREFIX+'lock',null)?.runId!==runId)throw Error('活动执行锁变化');
    if(day()!==runDay)throw Error('活动执行日期已变化');
-   if(raw(ACTIVITY_KEY)!==snapshot||raw('JD_SIGNIN_LOGIN_V1')!==loginSnapshot)throw Error('活动凭据已更新，请重新手动运行');
+   if(Object.entries(watched).some(([k,v])=>raw(k)!==v)||raw(ACTIVITY_KEY)!==snapshot||raw('JD_SIGNIN_LOGIN_V1')!==loginSnapshot)throw Error('活动凭据已更新，请重新手动运行');
   };
   const runDay=day();
   const log=t=>console.log('['+name+'] '+t);
   function request(options){
    guard();const url=String(options.url||''),base=actEndpoint(url),method=options.method||'post';
-   const target=ACTIVITY_KIND==='egg'?/^https:\/\/api\.m\.jd\.com\/$/.test(base):[EARN_QUERY,...Object.values(EARN_PATHS),'https://aks.jdpay.com/aar2/getJS'].includes(base);
+   const target=base==='https://jra.jd.com/jsTk.do'||(ACTIVITY_KIND==='egg'?/^https:\/\/api\.m\.jd\.com\/$/.test(base):[EARN_QUERY,...Object.values(EARN_PATHS),'https://aks.jdpay.com/aar2/getJS'].includes(base));
    if(!target)throw Error('活动请求地址不符');
+   if(base==='https://jra.jd.com/jsTk.do'&&Object.keys(options.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('活动设备参数请求不得带Cookie');
+   log('请求 '+(base==='https://api.m.jd.com/'?actParams(options).functionId:base.split('/').pop()));
    return new Promise((resolve,reject)=>{
     const o={...options,headers:{...(options.headers||{})},timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false,alpn:'h2'};delete o.method;
     const hostName=/^https:\/\/([^/]+)/.exec(url)?.[1];
@@ -550,25 +639,18 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
      // Carry rotating API-session sdtoken only within this run and this exact host.
      const set=Object.entries(r?.headers||{}).filter(([k])=>k.toLowerCase()==='set-cookie').flatMap(([,v])=>Array.isArray(v)?v:[v]);
      for(const value of set){const m=/(?:^|,\s*)sdtoken=([^;,\r\n]+)/.exec(String(value));if(m&&o.headers.Cookie)sessionCookies[hostName]=o.headers.Cookie.split(';').map(x=>x.trim()).filter(x=>x&&!x.startsWith('sdtoken=')).join('; ')+'; sdtoken='+m[1]+';';}
-     resolve({status:r?.status,headers:r?.headers||{},body:b});
+     log('返回 HTTP '+String(r?.status||0));resolve({status:r?.status,headers:r?.headers||{},body:b});
     });
    });
   }
   const json=r=>{guard();if(Number(r.status)!==200)throw Error('活动接口返回 HTTP '+String(r.status));try{return JSON.parse(r.body);}catch(_){throw Error('活动接口响应不是JSON');}};
   try{
    if(read(PREFIX+'lock',null)?.until>Date.now()||Number(read('JD_SIGNIN_LOCK_V1',0))>Date.now()){notify('正在执行','请等待当前活动或签到结束');return;}
-   snapshot=raw(ACTIVITY_KEY);loginSnapshot=raw('JD_SIGNIN_LOGIN_V1');const all=read(ACTIVITY_KEY,null),p=all?.[ACTIVITY_KIND];
-   if(!p)throw Error(ACTIVITY_KIND==='egg'?'缺少砸金蛋凭据，请打开天天砸金蛋／9.9包邮任务页刷新':'缺少赚京豆凭据，请打开金融的“天天赚京豆”页面刷新');
-   const profile=actClone(p),pair=actPair(profile.headers?.Cookie),bound=read('JD_SIGNIN_ACCOUNT_V1',null)||read('QL_BRIDGE_ACCOUNT_V1',null);
-   if(!pair||pair.pin!==profile.pin||all.pin!==profile.pin||bound?.pin&&bound.pin!==profile.pin)throw Error('活动账号不一致，请重新获取凭据');
-   if(ACTIVITY_KIND==='egg'){
-    const login=read('JD_SIGNIN_LOGIN_V1',null)||read('QL_BRIDGE_CREDENTIAL_V1',null);
-    if(login?.pin===profile.pin&&login.cookie&&Number(login.capturedAt)>Number(profile.capturedAt)){
-     const fresh=actPair(login.cookie);if(!fresh||fresh.pin!==profile.pin)throw Error('活动共享Cookie不完整');
-     profile.headers.Cookie=fresh.cookie+profile.headers.Cookie.split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x)).join(';')+';';
-    }
-   }
-   if(!profile.signing)throw Error('赚京豆签名版本暂不支持，请提供该活动查询包');
+   snapshot=raw(ACTIVITY_KEY);loginSnapshot=raw('JD_SIGNIN_LOGIN_V1');
+   const tracked=(k,f)=>{watched[k]=raw(k);return read(k,f);};
+   const shared=actSharedMaterial(tracked,createFarmCrypto({read:(_k,f)=>f,write:()=>{},setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment),all=tracked(ACTIVITY_KEY,null);
+   const profile=actDefaultProfile(ACTIVITY_KIND,shared,all?.[ACTIVITY_KIND]);
+   log('版本 20261026-2；使用'+shared.source+'；'+(all?.[ACTIVITY_KIND]?'已有活动模板':'运行时建立活动参数'));
    write(PREFIX+'lock',{runId,until:deadline+30000});owned=true;
    const host={now:()=>Date.now(),day,guard,log,error,read:(k,f)=>read(PREFIX+k,f),write:(k,v)=>write(PREFIX+k,v),setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
     request,json,progress:log,
@@ -580,7 +662,16 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
      if(Number(r.status)!==200||typeof r.body!=='string'||!r.body.startsWith('eyJ')||r.body.length>100000)throw Error('金融签名初始化内容异常');
      const A=createAar(ua);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('金融签名初始化超时')),8000);A.init({code:r.body,callback:ok=>{clearTimeout(timer);ok?resolve():reject(Error('金融签名初始化失败'));}});});return new A();
     }};
-   const crypto=createFarmCrypto(host),client=ACTIVITY_KIND==='egg'?createEggClient(host,crypto,profile):createEarnClient(host,crypto,profile);
+   const crypto=createFarmCrypto(host);
+   const ep=profile.query?.extParams;
+   if(ACTIVITY_KIND==='egg'&&!profile.params['x-api-eid-token']||ACTIVITY_KIND==='earn'&&!ep?.sdkToken){
+    log('获取京东设备参数');
+    const r=await request(actDeviceRequest(profile.headers['User-Agent'],Date.now(),crypto.hash(String(Date.now())).slice(0,32))),j=json(r),d=j.data;
+    if(!d||typeof d!=='object'||Array.isArray(d)||['token','eid','sdkToken'].some(k=>d[k]!==undefined&&(typeof d[k]!=='string'||d[k].length>16384)))throw Error('活动设备参数响应不完整');
+    if(ACTIVITY_KIND==='egg'){if(!d.token)throw Error('砸金蛋设备参数获取失败');profile.params['x-api-eid-token']=d.token;}
+    else {if(!d.sdkToken)throw Error('赚京豆设备参数获取失败');Object.assign(ep,{sdkToken:d.sdkToken,signData:{sdkToken:d.sdkToken},deviceInfos:JSON.stringify({jsToken:d.token||'',eid:d.eid||'',sdkToken:d.sdkToken,token:d.sdkToken,fp:crypto.hash(String(Date.now())).slice(0,32)})});profile.eid=d.eid||'';}
+   }
+   const client=ACTIVITY_KIND==='egg'?createEggClient(host,crypto,profile):createEarnClient(host,crypto,profile);
    report=await client.run();write(PREFIX+ACTIVITY_KIND+'.last',report);
    log((report.stopped?'已停止：'+report.message:'执行结束')+'\n'+report.rows.map(x=>x.title+'：'+x.result).join('\n')+'\n接口返回 '+report.beans+' 京豆');
    notify(report.stopped?'执行停止':'执行完成',report.stopped?report.message:'接口返回 '+report.beans+' 京豆；各任务结果见日志');
@@ -588,4 +679,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   finally{if(owned){try{if(read(PREFIX+'lock',null)?.runId===runId)$persistentStore.write('',PREFIX+'lock');}catch(_){}}$done({});}
  })();
 }
-if(typeof module!=='undefined')module.exports={activityCapture,createEggClient,createEarnClient,actPair,actParams,actForm,actEncode,actEndpoint,actEggList,actEarnList,actSignature,ACTIVITY_KEY,EGG_PROJECT,EARN_QUERY,EARN_PATHS};
+if(typeof module!=='undefined')module.exports={activityCapture,createEggClient,createEarnClient,actPair,actParams,actForm,actEncode,actEndpoint,actEggList,actEarnList,actSignature,actJxTaskCapture,actSharedMaterial,actDefaultProfile,actTDEncode,actDeviceRequest,actJxProfile,ACTIVITY_KEY,EGG_PROJECT,EARN_QUERY,EARN_PATHS};

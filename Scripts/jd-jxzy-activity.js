@@ -1,3 +1,286 @@
+// Independent manual clients. Upstream protocols reviewed statically; no upstream program is executed.
+const ACTIVITY_KEY='JD_ACTIVITY_TASKS_ACCOUNT_V1';
+const EGG_PROJECT='3v5KsTzmzH4KqQCpjR3QQgrviq5k';
+const EARN_QUERY='https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoSafetyTranslate';
+const EARN_PATHS={receive:'https://ms.jr.jd.com/gw2/generic/mission/newh5/m/receiveMissionForNa',jump:'https://ms.jr.jd.com/gw2/generic/mission/h5/m/getJumpInfo',next:'https://ms.jr.jd.com/gw2/generic/Mission/h5/m/queryNextBrowseMissionAndReceiveV3',start:'https://ms.jr.jd.com/gw2/generic/Mission/h5/m/startReadMissionV3',finish:'https://ms.jr.jd.com/gw2/generic/Mission/h5/m/finishReadAndAwardV3'};
+const actClone=x=>JSON.parse(JSON.stringify(x));
+const actObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+function actForm(text){const out={};for(const p of String(text||'').split('&')){if(!p)continue;const i=p.indexOf('='),dec=x=>decodeURIComponent(x.replace(/\+/g,' ')),k=dec(i<0?p:p.slice(0,i)),v=dec(i<0?'':p.slice(i+1));if(Object.prototype.hasOwnProperty.call(out,k))throw Error('活动请求参数重复');out[k]=v;}return out;}
+const actEncode=p=>Object.keys(p).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(String(p[k]))).join('&');
+function actHeader(h,k){const a=Object.keys(h||{}).find(x=>x.toLowerCase()===k.toLowerCase());return a?String(h[a]):'';}
+function actPair(cookie){const rows=String(cookie||'').split(';').map(x=>x.trim()),p=rows.filter(x=>x.startsWith('pt_pin=')),k=rows.filter(x=>x.startsWith('pt_key='));if(p.length!==1||k.length!==1||!p[0].slice(7)||!k[0].slice(7))return null;return {pin:p[0].slice(7),cookie:k[0]+';'+p[0]+';'};}
+function actParams(req){const q=actForm(String(req.url||'').split('?')[1]?.split('#')[0]||''),p=actForm(req.body);for(const k of Object.keys(q))if(p[k]!==undefined&&p[k]!==q[k])throw Error('活动请求参数冲突');return {...q,...p};}
+function actEndpoint(url){return String(url||'').split('?')[0];}
+const actNum=(v,f=0)=>v!==null&&v!==''&&v!==undefined&&Number.isFinite(Number(v))?Number(v):f;
+const actId=v=>(typeof v==='string'||typeof v==='number')&&/^[A-Za-z0-9_-]{1,128}$/.test(String(v));
+const actTitle=v=>String(v||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
+function actBusiness(j,kind){
+ if(!actObject(j))throw Error('活动响应结构不符');
+ if(kind==='egg'){if(String(j.code)!=='0'||String(j.data?.bizCode)!=='0'||j.success===false)throw Error('活动接口拒绝本次请求');return j.data.result;}
+ if(j.success!==true||j.resultCode!==undefined&&String(j.resultCode)!=='0')throw Error('活动接口拒绝本次请求');return j.resultData;
+}
+function actEggList(j){const a=actBusiness(j,'egg')?.taskInfo?.taskList;if(!Array.isArray(a)||a.length>100)throw Error('砸金蛋任务列表结构变化');return a;}
+function actEarnList(j){const rows=actBusiness(j,'earn')?.resultList;if(!Array.isArray(rows)||rows.length>100)throw Error('赚京豆任务列表结构变化');const out=[];for(const r of rows){if(Array.isArray(r?.templateData?.taskList))out.push(...r.templateData.taskList);}if(out.length>100)throw Error('赚京豆任务数量异常');return out;}
+function actSignature(p,app,pin,decode){
+ const s=String(p.h5st||'').split(';');
+ if(s.length!==10||s[2]!==app||s[5]!=='5.3')return null;
+ const env=decode(s[7]);if(![pin,decodeURIComponent(pin)].includes(env.pp?.p1))throw Error('活动签名账号不一致');
+ return {environment:s[7],encoding:s[9]};
+}
+function activityCapture(host,req,res,decode){
+ if(req?.method!=='POST'||Number(res?.status)!==200||actHeader(req.headers,'X-Lazing-Activity-Run')==='1')return null;
+ const endpoint=actEndpoint(req.url);let kind,p,q,body,j;
+ if(/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?$/.test(endpoint)){
+  p=actParams(req);if(p.functionId!=='interact_pre_executor'||p.channelCode!=='bargain'||p.sceneCode!=='task_list')return null;
+  body=JSON.parse(p.body||'{}');if(body.encryptProjectId!==EGG_PROJECT||p.appid!=='SecKill2020')return null;
+  j=JSON.parse(res.body||'{}');actEggList(j);kind='egg';
+ }else if(endpoint===EARN_QUERY){
+  p=actParams(req);q=JSON.parse(p.reqData||'{}');
+  if(Number(q.pageId)!==11189||Number(q.pageType)!==11189)return null;
+  j=JSON.parse(res.body||'{}');actEarnList(j);kind='earn';
+ }else return null;
+ const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token']){const v=actHeader(req.headers,k);if(v)headers[k]=v;}
+ const pair=actPair(headers.Cookie);if(!pair||!headers['User-Agent'])return null;
+ const bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
+ const old=host.read(ACTIVITY_KEY,null);if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('活动账号与本机账号不同');
+ const at=host.observedAt||Date.now(),profile={pin:pair.pin,headers,capturedAt:at};
+ if(kind==='egg'){
+  if(!/^https:\/\/pro\.m\.jd\.com\//.test(headers.Referer||''))return null;
+  const sig=actSignature(p,'39e8e',pair.pin,decode);if(!sig||!p['x-api-eid-token'])return null;
+  profile.params={appid:p.appid,client:p.client||'ios',clientVersion:p.clientVersion,'x-api-eid-token':p['x-api-eid-token']};
+  if(!profile.params.clientVersion)return null;
+  profile.signing=sig;profile.query=body;
+ }else{
+  const ref=headers.Referer||'';if(!/^https:\/\/member\.jr\.jd\.com\/member\/coinQuest\/coin\/(?:\?|$)/.test(ref))return null;
+  let cco=JSON.parse(p.cco||'{}');const sig=actSignature({h5st:cco.h5st},'73fdb',pair.pin,decode);
+  if(!sig){
+   profile.unsupportedSigning=true;
+   const parts=String(cco.h5st||'').split(';');profile.signVersion=/^[0-9.]{1,12}$/.test(parts[5]||'')?parts[5]:'未识别';
+  }else profile.signing=sig;
+  // Keep this activity's own query and risk material. Never save an old h5st/nonce/signature.
+  profile.query=actClone(q);
+  if(profile.query.extParams){delete profile.query.extParams.nonce;delete profile.query.extParams.signature;}
+  profile.cco={client:cco.client,clientVersion:cco.clientVersion,_stk:cco._stk,_ste:cco._ste};
+  profile.eid=p.eid||'';
+ }
+ const all=old||{pin:pair.pin};if(at<Number(all[kind]?.capturedAt||0))return null;
+ const first=!all[kind];all[kind]=profile;host.write(ACTIVITY_KEY,all);return {kind,first,unsupportedSigning:!!profile.unsupportedSigning};
+}
+function actJournal(host,kind,pin){
+ const day=host.day(),key='journal.'+kind+'.'+pin,saved=host.read(key,null),data=saved?.day===day?saved:{day,entries:{}};
+ return {has:k=>!!data.entries[k],mark(k){host.guard();if(host.day()!==day)throw Error('活动执行日期已变化');if(data.entries[k])throw Error('本项已有提交记录，请到活动页核对');data.entries[k]='pending';host.write(key,data);},settle(k){data.entries[k]='submitted';host.write(key,data);}};
+}
+function createEggClient(host,crypto,profile){
+ const journal=actJournal(host,'egg',profile.pin),report={name:'天天砸金蛋',rows:[],beans:0,stopped:false};
+ async function call(mode,body,mark){
+  const p={...profile.params,t:String(host.now()),functionId:mode==='task_list'?'interact_pre_executor':'interact_executor',channelCode:'bargain',sceneCode:mode,body:JSON.stringify(body)};
+  if(mode==='do_task')p.alias='doInteractTask';
+  const input={appid:p.appid,client:p.client,clientVersion:p.clientVersion,t:p.t,functionId:mode,body:crypto.hash(p.body)};
+  const signingProfile={pin:profile.pin,headers:profile.headers},env=profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined;
+  p.h5st=await crypto.signOnline('39e8e',signingProfile,env,input);
+  if(mark)journal.mark(mark);
+  const r=await host.request({url:'https://api.m.jd.com/?'+actEncode({appid:p.appid,client:p.client,clientVersion:p.clientVersion,functionId:p.functionId,channelCode:p.channelCode,sceneCode:p.sceneCode,...(p.alias?{alias:p.alias}:{})}),headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode(Object.fromEntries(Object.entries(p).filter(([k])=>!['functionId','channelCode','sceneCode','alias','appid','client','clientVersion'].includes(k))))});
+  const j=host.json(r);actBusiness(j,'egg');if(mark)journal.settle(mark);return j;
+ }
+ async function query(){return actEggList(await call('task_list',{encryptProjectId:EGG_PROJECT,ext:{queryReceiveTimes:1}}));}
+ function rewards(j){let n=0;const a=j.data?.result?.assignmentResult?.rewardsInfo?.successRewards;if(actObject(a))for(const rows of Object.values(a))if(Array.isArray(rows))for(const r of rows)if(Number(r?.rewardType)===3&&Number.isFinite(Number(r.quantity)))n+=Number(r.quantity);return n;}
+ async function run(){
+  try{
+   const initial=await query();let actions=0;
+   for(const before of initial){
+    host.guard();const t=(await query()).find(t=>t.encryptAssignmentId===before.encryptAssignmentId);if(!t)continue;
+    const row={title:actTitle(t.assignmentName||t.assignmentDesc),result:''};report.rows.push(row);host.log(row.title);
+    if(t.completionFlag){row.result='已完成';continue;}
+    if(!actId(t.encryptAssignmentId)){row.result='任务标识缺失';continue;}
+    if(/下单|订阅|抽奖|加购|关注|助力|邀请|组件|购买/.test(row.title)){row.result='需App操作';continue;}
+    const items=typeof t.ext?.extraType==='string'&&Array.isArray(t.ext[t.ext.extraType])?t.ext[t.ext.extraType]:[];
+    if(!/浏览|逛|签到/.test(row.title)&&!items.length){row.result='暂不支持此任务';continue;}
+    const left=Math.max(0,Math.min(20,actNum(t.assignmentTimesLimit)-actNum(t.completionCnt)));
+    if(!left){row.result='已完成';continue;}
+    const wait=actNum(t.ext?.waitDuration);if(wait<0||wait>120){row.result='计时要求不符，需App操作';continue;}
+    const selected=items.length?items.slice(0,left):/签到/.test(row.title)?[{itemId:'1'}]:[];
+    if(!selected.length){row.result='缺少浏览项目，留待App';continue;}
+    let count=actNum(t.completionCnt),confirmed=0;
+    for(const item of selected){
+     if(actions>=40){row.result='本轮达到处理上限';break;}
+     if(!actId(item?.itemId))continue;
+     const base=t.encryptAssignmentId+':'+count+':'+item.itemId;
+     if(journal.has(base+':finish')||journal.has(base+':start')){row.result='本次进度已有提交记录，留待App核对';continue;}
+     const ext=typeof item.url==='string'&&/^https:\/\//.test(item.url)?{jumpUrl:item.url}:{};
+     if(items.length){await call('do_task',{encryptAssignmentId:t.encryptAssignmentId,itemId:String(item.itemId),actionType:1,ext},base+':start');await host.sleep(wait*1000+1000);}
+     const j=await call('do_task',{encryptAssignmentId:t.encryptAssignmentId,itemId:String(item.itemId),actionType:0,ext,...(ext.jumpUrl?{jumpUrl:ext.jumpUrl}:{})},base+':finish');actions++;
+     report.beans+=rewards(j);await host.pause(1200);
+     const after=(await query()).find(x=>x.encryptAssignmentId===t.encryptAssignmentId);
+     if(after&&(after.completionFlag||actNum(after.completionCnt)>count)){confirmed++;count=actNum(after.completionCnt);row.result='已确认完成 '+confirmed+' 次';}
+     else{row.result='已提交，进度待App确认';break;}
+    }
+    if(!row.result)row.result='缺少有效浏览项目';
+   }
+  }catch(e){report.stopped=true;report.message=host.error(e);}
+  return report;
+ }
+ return {run,query};
+}
+function createEarnClient(host,crypto,profile){
+ const journal=actJournal(host,'earn',profile.pin),report={name:'天天赚京豆',rows:[],beans:0,stopped:false};
+ let signer;
+ async function sdk(){if(!signer)signer=await host.aar(profile.headers['User-Agent']);return signer;}
+ async function signed(data){const s=await sdk(),nonce=s.nonce(),signature=s.sign(JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融签名初始化失败');return {nonce,signature};}
+ function accepted(j,query=false){const d=actBusiness(j,'earn');if(!query&&d?.code!=='0000')throw Error('金融任务接口拒绝本次请求');return d;}
+ async function query(){
+  if(!profile.query||!profile.headers)throw Error('赚京豆查询参数不完整');
+  const q=actClone(profile.query),ep=q.extParams||(q.extParams={}),signData=ep.signData||{sdkToken:ep.sdkToken||''};
+  Object.assign(ep,await signed(signData));
+  const cco={...profile.cco,t:host.now()};
+  const fields=String(cco._stk||'').split(',').filter(Boolean);
+  if(!fields.length||fields.some(k=>!['clientType','clientVersion','ctp','pageId','pageNum','pageType'].includes(k)))throw Error('赚京豆查询签名字段不符');
+  const input={};for(const k of fields){if(q[k]===undefined)throw Error('赚京豆查询参数不完整');input[k]=k==='clientVersion'&&profile.signClientVersion?profile.signClientVersion:q[k];}
+  cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined,input);
+  const r=await host.request({url:EARN_QUERY+'?pageType=11189',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})});
+  const j=host.json(r);accepted(j,true);return actEarnList(j);
+ }
+ async function mission(op,data,key){
+  if(!['next','start','finish','receive'].includes(op))throw Error('金融任务操作不符');
+  const pin=decodeURIComponent(profile.pin),signData=op==='next'?{missionId:data.missionId,PIN:pin}:op==='receive'?JSON.stringify({channelCode:data.channelCode,PIN:pin,missionId:data.missionId}):{missionId:data.missionId,readTime:String(data.readTime),PIN:pin};
+  const sig=await signed(signData);
+  const tokens={next:'iYhVPTDdcH',start:'jBJHOIrRhm',finish:'EaGIdTGDdn'};
+  const ep=profile.query.extParams||{},device=JSON.parse(ep.deviceInfos||'{}');
+  const body=op==='receive'?{environment:'2',missionId:data.missionId,channelCode:data.channelCode,...sig,deviceInfo1:device,clientType:'h5',clientVersion:profile.query.clientVersion}:
+   {...data,...sig,version:'2.2.4',token:tokens[op],appId:'jrmission'};
+  const headers={...profile.headers,'Content-Type':op==='receive'?'application/x-www-form-urlencoded':'text/plain;charset=UTF-8',Origin:op==='receive'?'https://member.jr.jd.com':'https://u.jr.jd.com',Referer:op==='receive'?'https://member.jr.jd.com/member/coinQuest/coin/':'https://u.jr.jd.com/','X-Lazing-Activity-Run':'1'};
+  journal.mark(key);
+  const j=host.json(await host.request({url:EARN_PATHS[op],headers,body:op==='receive'?actEncode({reqData:JSON.stringify(body)}):JSON.stringify(body)}));
+  const d=accepted(j);journal.settle(key);return d;
+ }
+ async function jump(juid,key){
+  if(!/^[a-f0-9]{32}$/i.test(juid))throw Error('金融跳转任务标识不符');
+  const sig=await signed(juid);journal.mark(key);
+  const url=EARN_PATHS.jump+'?'+actEncode({juid,...sig,jrAppVersion:profile.query.clientVersion,systemEnv:'IOS'});
+  const d=accepted(host.json(await host.request({method:'get',url,headers:{...profile.headers,Origin:'https://show.jd.com',Referer:'https://show.jd.com/static-page/mission/forever/jumpmission-v2/index.html?juid='+juid,'X-Lazing-Activity-Run':'1'}})));
+  journal.settle(key);return d;
+ }
+ async function run(){
+  try{
+   const tasks=await query();let done=0;
+   for(const t of tasks){
+    host.guard();const row={title:actTitle(t.title?.text||t.name),result:''};report.rows.push(row);host.log(row.title);
+    if(t.status===1){row.result='已完成';continue;}
+    if(!actId(t.missionId)||!actId(t.channelCode)){row.result='任务标识缺失';continue;}
+    if(/下单|支付|购买|关注|订阅|邀请|助力|开户|借款|理财|保险/.test(row.title)){row.result='需App操作';continue;}
+    const url=String(t.button?.jumpData?.jumpUrl||''),juid=/(?:\?|&)juid=([a-f0-9]{32})(?:&|$)/i.exec(url)?.[1],id=String(t.missionId);
+    if(done>=25){row.result='本轮达到处理上限';break;}
+    if(juid){
+     const key=id+':receive';if(journal.has(key)||journal.has(id+':jump')){row.result='本次任务已有提交记录，留待App核对';continue;}
+     await mission('receive',{missionId:id,channelCode:t.channelCode},key);await jump(juid,id+':jump');
+     const after=(await query()).find(x=>String(x.missionId)===id);
+     row.result=after?.status===1?'已确认完成':'已提交，进度待App确认';done++;
+     // Displayed awardNumber is an offer, not a payment receipt. Do not count it as beans.
+    }else if(/(?:\?|&)missionId=/.test(url)){
+     const key=id+':next';if(journal.has(key)){row.result='本次任务已有提交记录，留待App核对';continue;}
+     const next=await mission('next',{missionId:id,channelCode:t.channelCode,readTime:10},key),m=next?.data?.missionId;
+     if(!actId(m)){row.result='本次没有浏览项目';continue;}
+     const mid=String(m),base=id+':'+mid;
+     await mission('start',{missionId:mid,channelCode:t.channelCode,readTime:10},base+':start');await host.sleep(12000);
+     const award=await mission('finish',{missionId:mid,channelCode:t.channelCode,readTime:10},base+':finish');
+     const awards=award.data?.awards;let beans=0;
+     if(Array.isArray(awards))for(const a of awards){if(/京豆/.test(String(a.awardName||a.name||''))&&Number.isFinite(Number(a.awardNum)))beans+=Number(a.awardNum);}
+     report.beans+=beans;row.result=beans?'领取返回 '+beans+' 京豆':'已提交领奖，数量待App确认';done++;
+    }else row.result='需App操作';
+    await host.pause(1500);
+   }
+  }catch(e){report.stopped=true;report.message=host.error(e);}
+  return report;
+ }
+ return {run,query};
+}
+
+// Share login identity; activity templates are optional inputs, never login credentials.
+function actSharedMaterial(read,decode){
+ const bound=read('JD_SIGNIN_ACCOUNT_V1',null)||read('QL_BRIDGE_ACCOUNT_V1',null),rows=[];
+ function add(pin,headers,at,signing,params,label){
+  const pair=actPair(actHeader(headers,'Cookie'));if(!pair||pin&&pair.pin!==pin)return;
+  const row={pin:pair.pin,headers,at:Number(at)||0,signing,params:params||{},label};rows.push(row);return row;
+ }
+ const canonical=[];
+ for(const key of ['JD_SIGNIN_LOGIN_V1','QL_BRIDGE_CREDENTIAL_V1']){
+  const x=read(key,null);if(x?.cookie){const h={...(x.headers||{}),Cookie:x.cookie};canonical.push(add(x.pin,h,x.capturedAt,null,null,'共享Cookie'));}
+ }
+ const farm=read('JD_FARM_TASKS_ACCOUNT_V1',null);
+ for(const g of Object.values(farm?.scopes||{}))for(const t of Object.values(g.templates||{}))add(farm.pin,t.headers,t.at,t.signing||g.signing,t.params,'农场');
+ const jx=read('JXZY_CHECKIN_ACCOUNT_V1',null);if(jx)add(jx.pin,jx.headers,jx.loginUpdatedAt||jx.capturedAt,jx.signing,{...jx.query?.params,'x-api-eid-token':jx.signing?.eidToken},'京喜');
+ const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null);for(const t of Object.values(retail?.modes||{}))add(retail.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'签到');
+ const plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null);for(const t of [plant?.query,plant?.claim])if(t)add(plant.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'种豆');
+ const all=read(ACTIVITY_KEY,null);for(const kind of ['egg','earn']){const t=all?.[kind];if(t)add(t.pin,t.headers,t.capturedAt,t.signing,t.params,'活动页');}
+ const pin=bound?.pin||canonical.filter(Boolean).sort((a,b)=>b.at-a.at)[0]?.pin||rows.sort((a,b)=>b.at-a.at)[0]?.pin;
+ const same=rows.filter(x=>x.pin===pin).sort((a,b)=>b.at-a.at);
+ const login=canonical.filter(x=>x?.pin===pin).sort((a,b)=>b.at-a.at)[0]||same[0];
+ if(!login)throw Error('缺少京东Cookie，请打开京东获取一次');
+ const context=same.find(x=>actHeader(x.headers,'User-Agent'));
+ if(!context)throw Error('缺少京东设备信息，请打开京东获取一次');
+ const h={Cookie:actPair(actHeader(login.headers,'Cookie')).cookie,'User-Agent':actHeader(context.headers,'User-Agent')};
+ const extra=String(actHeader(context.headers,'Cookie')).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x));h.Cookie+=extra.join(';')+';';
+ let signing,params={};
+ for(const x of same){
+  if(!params['x-api-eid-token']&&x.params['x-api-eid-token'])params={'x-api-eid-token':x.params['x-api-eid-token']};
+  if(!signing&&x.signing?.environment){try{const env=decode(x.signing.environment);if([pin,decodeURIComponent(pin)].includes(env.pp?.p1)){signing=actClone(x.signing);h['User-Agent']=actHeader(x.headers,'User-Agent')||h['User-Agent'];}}catch(_){}}
+ }
+ return {pin,headers:h,signing,params,source:login.label,capturedAt:login.at};
+}
+function actDefaultProfile(kind,shared,captured){
+ if(captured&&captured.pin!==shared.pin)throw Error('活动资料属于其他账号');
+ const p=captured?actClone(captured):{pin:shared.pin,capturedAt:shared.capturedAt};
+ const old=p.headers||{},extra=String(old.Cookie||shared.headers.Cookie).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x));
+ p.headers={...old,Cookie:actPair(shared.headers.Cookie).cookie+extra.join(';')+';','User-Agent':old['User-Agent']||shared.headers['User-Agent']};
+ p.signing=p.signing||shared.signing||{};
+ const version=/jdapp;[^;]+;([^;]+)/i.exec(p.headers['User-Agent'])?.[1]||'16.1.50';
+ if(kind==='egg'){
+  p.headers.Referer=p.headers.Referer||'https://pro.m.jd.com/';p.params={appid:'SecKill2020',client:'ios',clientVersion:version,...p.params};
+  if(!p.params['x-api-eid-token'])p.params['x-api-eid-token']=shared.params['x-api-eid-token']||'';
+ }else{
+  p.headers.Referer='https://member.jr.jd.com/member/coinQuest/coin/';p.headers.Origin='https://member.jr.jd.com';p.headers['X-Requested-With']='com.jd.jrapp';p.headers.Accept='application/json';
+  if(!/(?:^|;\s*)pwdt_id=/.test(p.headers.Cookie))p.headers.Cookie+='pwdt_id='+shared.pin+';';
+  p.query=p.query||{clientVersion:'6.9.02',clientType:'apple',pageType:11189,pageId:11189,ctp:11189,pageNum:-1,buildCodes:['common','topData','float','tag'],extParams:{channelCode:'inside',riskQdPageId:'gainJDbean',riskQdPageName:'赚京豆任务列表页',aarVersion:'2',osVersion:'12',itemIds:[],pageName:'pageCoinQuest',clientEnv:'2',jumpSource:'',abTest:'',schemaList:[],platformFlag:'2',sourceVersion:'62',reqSource:'0',dynamicReq:true,pageUrl:'https://member.jr.jd.com/member/coinQuest/coin/',urlKey:'/member/coinQuest/coin/',clientName:'web'}};
+  p.cco=p.cco||{client:'apple',clientVersion:'6.0.9',_stk:'clientType,clientVersion,ctp,pageId,pageNum,pageType',_ste:1};
+  if(!captured)p.signClientVersion='6.9.0';
+ }
+ return p;
+}
+function actJxProfile(read,decode){
+ const s=actSharedMaterial(read,decode),old=read('JXZY_CHECKIN_ACCOUNT_V1',null);
+ if(old?.query&&old?.signing?.environment&&old?.signing?.eidToken&&old?.headers){const p=actClone(old);if(p.pin!==s.pin)throw Error('京喜账号不一致');p.headers.Cookie=s.headers.Cookie;return p;}
+ if(!s.signing?.environment||!s.params['x-api-eid-token'])throw Error('京喜共享设备资料不完整，请打开京东农场或京喜刷新');
+ // Public page constants independently observed in 401 and 402; no user fields.
+ return {pin:s.pin,headers:{...s.headers,Referer:'https://pro.m.jd.com/mall/active/2iqSwv1JiDHxAkHAikfU6XAECFmo/index.html'},capturedAt:s.capturedAt,
+  query:{endpoint:'https://api.m.jd.com/api',params:{appid:'jx_h5_babel',client:'jxh5',clientVersion:'1.2.5',channel:'jxh5',functionId:'jxzy_active_querySign',body:JSON.stringify({source:'jxzy',craftId:'6824629a7c46584759d39b78',sceneval:2,buid:325,appCode:'ms1888ebbf'})}},
+  signing:{...s.signing,source:'jxzy_active_queryActive',eidToken:s.params['x-api-eid-token']}};
+}
+// JD's public device-token request uses an encoded browser description, without Cookie.
+function actTDEncode(value){
+ const s=encodeURIComponent(JSON.stringify(value)),map='23IL<N01c7KvwZO56RSTAfghiFyzWJqVabGH4PQdopUrsCuX*xeBjkltDEmn89.-';let out='';
+ for(let i=0;i<s.length;i+=3){const a=s.charCodeAt(i),b=s.charCodeAt(i+1),c=s.charCodeAt(i+2);out+=map.charAt(a>>2)+map.charAt((a&3)<<4|b>>4)+map.charAt(isNaN(b)?64:(b&15)<<2|c>>6)+map.charAt(isNaN(c)?64:c&63);}
+ return out+'/';
+}
+function actDeviceRequest(ua,now,fp){
+ const head={pin:'',oid:'',bizId:'jd-babelh5',fc:'',mode:'strict',p:'s',fp,ctype:1,v:'3.2.1.1',f:'3',o:'pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',qs:'',jsTk:'',qi:''};
+ const device={ts:{deviceTime:now,deviceEndTime:now+100},ca:{tdHash:''},m:{compatMode:'CSS1Compat'},fo:['Bauhaus 93','Casual'],n:{vendorSub:'',productSub:'20030107',vendor:'Apple Computer, Inc.',maxTouchPoints:1,hardwareConcurrency:8,cookieEnabled:true,appCodeName:'Mozilla',appName:'Netscape',appVersion:ua.split('M/')[1]||'',platform:'NA',product:'Gecko',userAgent:ua,language:'zh-CN',onLine:true,webdriver:false,javaEnabled:false,deviceMemory:8},p:[],w:{devicePixelRatio:2.75,screenTop:0,screenLeft:0},s:{availHeight:873,availWidth:393,colorDepth:24,height:873,width:393,pixelDepth:24},ss:{cookie:true,localStorage:true,sessionStorage:true,globalStorage:false,indexedDB:true},tz:-480,lil:'',wil:''};
+ return {url:'https://jra.jd.com/jsTk.do?a='+actTDEncode(head),headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':ua},body:actEncode({d:actTDEncode(device)})};
+}
+function actJxTaskCapture(host,req,res,decode){
+ if(req?.method!=='POST'||Number(res?.status)!==200||actHeader(req.headers,'X-Lazing-Activity-Run')==='1')return false;
+ if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)$/.test(actEndpoint(req.url)))return false;
+ const p=actParams(req);if(p.functionId!=='jxzy_active_task_queryTaskList'||p.appid!=='jx_h5_babel'||p.client!=='jxh5'||p.channel!=='jxh5')return false;
+ const b=JSON.parse(p.body||'{}'),j=JSON.parse(res.body||'{}');
+ if(b.source!=='jxzy'||b.craftId!=='6824629a7c46584759d39b78'||Number(b.sceneval)!==2||Number(b.buid)!==325||!b.appCode||String(j.code)!=='0'||!Array.isArray(j.data?.taskInfoList))return false;
+ const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin']){const v=actHeader(req.headers,k);if(v)headers[k]=v;}
+ const pair=actPair(headers.Cookie);if(!pair||!headers['User-Agent']||!/^https:\/\/pro\.m\.jd\.com\/mall\/active\/2iqSwv1JiDHxAkHAikfU6XAECFmo\/index\.html(?:\?|$)/.test(headers.Referer||''))return false;
+ const bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null),key='JXZY_CHECKIN_ACCOUNT_V1',old=host.read(key,null);
+ if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('京喜账号不一致');
+ const at=host.observedAt||Date.now();if(at<Number(old?.updatedAt||0))return false;
+ // Store only a verified query; bootstrap missing generic signing material at run time.
+ delete p.h5st;delete p.t;delete b.time;delete b.signStr;p.functionId='jxzy_active_querySign';p.body=JSON.stringify(b);
+ host.write(key,{...old,pin:pair.pin,headers,query:{endpoint:'https://api.m.jd.com/api',params:p},capturedAt:at,updatedAt:at});return true;
+}
+
 // 京喜自营任务 v0.1.0. Manual only; shared credentials stay in Loon.
 function createJxTaskCrypto(host) {
 const setTimeout=host.setTimeout,clearTimeout=host.clearTimeout;
@@ -428,7 +711,7 @@ function createJxTaskClient(host, crypto) {
 
 // Read the existing Jingxi profile; never overwrite the capture/sign-in store.
 function jxTaskSharedProfile(shared) {
-  const help='请在青龙任务接入中开启“获取独立活动凭据”，再进入京喜自营首页刷新';
+  const help='请更新活动插件，再进入京喜自营首页刷新';
   if(!shared||!shared.query||!shared.signing||!shared.headers)throw Error('缺少完整京喜共享凭据；'+help);
   if(shared.query.endpoint!=='https://api.m.jd.com/api')throw Error('京喜共享接口来源不符；'+help);
   const params={...shared.query.params};
@@ -444,14 +727,14 @@ function jxTaskSharedProfile(shared) {
   const headers={};
   for(const name of ['Cookie','User-Agent','Referer','Origin','x-rp-client','x-referer-page','request-from'])if(shared.headers[name])headers[name]=shared.headers[name];
   return {pin:shared.pin,headers,query:params,environment:shared.signing.environment,
-    encoding:'qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT',
+    encoding:shared.signing.encoding||'qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT',
     eidToken:shared.signing.eidToken,importedAt:Number(shared.updatedAt||shared.capturedAt||0)};
 }
 
 (async function jxLoonTaskMain(){
   const PREFIX='JXZY_TASKS_V1.',ACCOUNT='JXZY_CHECKIN_ACCOUNT_V1',SIGN_LOCK='JXZY_CHECKIN_LOCK_V1';
   const startedAt=Date.now(),deadline=startedAt+540000,runId=String(startedAt)+'-'+Math.random().toString(16).slice(2);
-  let owned=false,sharedLock=0,snapshot='',report=null,preserve=false;
+  let owned=false,sharedLock=0,snapshot='',watched={},report=null,preserve=false;
   let progress={time:startedAt,runId,phase:'准备',index:0,total:0,title:''};
   const rawRead=k=>$persistentStore.read(k)||'';
   function read(k,fallback){const raw=rawRead(PREFIX+k);if(!raw)return fallback;try{return JSON.parse(raw);}catch(_){throw Error('京喜任务本地记录无法读取');}}
@@ -461,7 +744,7 @@ function jxTaskSharedProfile(shared) {
   function guard(reserve=0){
     if(Date.now()+reserve>=deadline)throw Error('接近执行时限，本次停止；可重新执行处理剩余任务');
     if(!ownLock()||Number(rawRead(SIGN_LOCK))!==sharedLock)throw Error('执行锁已变化，本次停止');
-    if(rawRead(ACCOUNT)!==snapshot)throw Error('京喜共享凭据已更新，本次停止；请重新手动执行');
+    if(rawRead(ACCOUNT)!==snapshot||Object.entries(watched).some(([k,v])=>rawRead(k)!==v))throw Error('京喜共享凭据已更新，本次停止；请重新手动执行');
   }
   function update(phase,extra={}){
     progress={...progress,...extra,phase,time:Date.now()};write('progress',progress);
@@ -493,7 +776,8 @@ function jxTaskSharedProfile(shared) {
     }
     snapshot=rawRead(ACCOUNT);let shared;
     try{shared=JSON.parse(snapshot||'null');}catch(_){throw Error('京喜共享凭据无法读取，请重新进入京喜自营首页获取');}
-    const profile=jxTaskSharedProfile(shared);
+    const profile=jxTaskSharedProfile(actJxProfile((k,f)=>{const s=rawRead(k);watched[k]=s;return s?JSON.parse(s):f;},createJxTaskCrypto({read,write,setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment));
+    console.log('[京喜任务] 版本 20261026-2；使用同账号共享资料');
     const host={now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),read,write,setTimeout,
       clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
       progress:(index,total,title)=>update('开始处理',{index,total,title}),
@@ -535,7 +819,7 @@ function jxTaskSharedProfile(shared) {
   }catch(e){
     // Only known messages reach notifications; SDK/JSON errors may contain input.
     const message=String(e.message||'');
-    const safe=/^(缺少完整京喜|京喜共享|京喜账号|京喜签名|京喜任务|签名环境|原始签名环境|请从 Loon|接近执行时限|执行锁)/.test(message)?message.slice(0,180):'凭据校验或脚本处理未完成，请重新进入京喜自营首页刷新后再试';
+    const safe=/^(缺少京东|缺少完整京喜|京喜共享|京喜账号|京喜签名|京喜任务|签名环境|原始签名环境|请从 Loon|接近执行时限|执行锁)/.test(message)?message.slice(0,180):'凭据校验或脚本处理未完成，请重新进入京喜自营首页刷新后再试';
     if(!preserve){report={date:new Date(Date.now()+8*3600000).toISOString().slice(0,10),stopped:true,message:safe,rows:[],claimedBeans:0,confirmedBeans:0,finishedAt:Date.now()};try{write('last',report);}catch(_){} }
     console.log('[京喜任务] '+safe);notify('未继续',safe);
   }finally{
