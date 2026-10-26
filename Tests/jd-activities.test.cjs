@@ -164,6 +164,13 @@ check('task names survive a failed run for future read-only receipt checks',asyn
 check('stable receipt ID updates do not count the same credit twice',async()=>{const store={},a=ledgerFixture([receipt('浏览测试甲',1,'stable')],{store});await a.ledger.confirm();const b=ledgerFixture([receipt('浏览测试甲',2,'stable',receiptDate+' 10:04:00')],{store});await b.ledger.confirm();assert.equal(b.report.ledgerBeans,2);});
 // Included by build.py in the single public offline check file.
 function credentialChecks(){
+ for(const seeded of [false,true])check('full activity capture saves PLUS signin template with '+(seeded?'existing login':'empty store'),async()=>{
+  const records={},notes=[];if(seeded)records.JD_SIGNIN_LOGIN_V1=JSON.stringify({pin:'offline',cookie:'pt_key=OLD;pt_pin=offline;',headers:{Cookie:'pt_key=OLD;pt_pin=offline;'},capturedAt:1});
+  const env='OFFLINE_PLUS_ENV',params={functionId:'bff_marketing_interaction',appid:'plus_business',body:JSON.stringify({scene:'blindBox',touchPoint:'purePlusIndexNew2608'}),h5st:['time','fp','35fa0','token','hash','5.3','timestamp',env,'hash','ENCODING'].join(';')};let ended=false;
+  const sandbox={console:{log:()=>{}},setTimeout,clearTimeout,$request:{method:'POST',url:'https://api.m.jd.com/api',headers:{Cookie:'pt_key=NEW;pt_pin=offline;','User-Agent':'Offline test',Referer:'https://plus.m.jd.com/'},body:new URLSearchParams(params).toString()},$response:{status:200,body:JSON.stringify({code:'1711000',msg:'成功',rs:{leftTimes:1,sendBenefitList:[]}})},$persistentStore:{read:k=>records[k]||null,write:(v,k)=>{records[k]=v;return true;}},$notification:{post:(...x)=>notes.push(x)},$httpClient:{post:()=>{throw Error('Capture must not issue requests');}},$done:()=>{ended=true;}};
+  vm.runInNewContext(src('jd-activity-capture.js'),sandbox,{timeout:5000});for(let i=0;i<30&&!ended;i++)await new Promise(r=>setTimeout(r,1));assert(ended);const p=JSON.parse(records.JD_CHECKIN_TEST_ACCOUNT_V1);assert.equal(p.modes.blindbox.query.signatureAppId,'35fa0');assert.equal(p.modes.blindbox.query.referenceEnvironmentEncoded,env);assert(JSON.parse(records.JD_SIGNIN_LOGIN_V1).cookie.includes('NEW'));assert(!p.modes.blindbox.query.params.h5st);
+ });
+
  const decode=()=>({pp:{p1:'account1'},extend:{},v:'h5_file_v5.3.6'});
  const cookie='pt_key=NEW_KEY;pt_pin=account1;',ua='jdapp;iPhone;16.1.50;Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
  const from=values=>(k,f)=>values[k]||f;

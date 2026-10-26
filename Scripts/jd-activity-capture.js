@@ -398,7 +398,7 @@ function jsLogin(read){
  // response handling, which could otherwise make a delayed old response win.
  const hasCanonical=read(JS_KEYS.login,null)?.pin===pin;
  const canonicalKeys=[JS_KEYS.login,'QL_BRIDGE_CREDENTIAL_V1'];
- const canonical=canonicalKeys.map(k=>read(k,null)).filter(p=>p?.pin===pin&&p.cookie).map(p=>({...jsPair(p.cookie),headers:p.headers||{Cookie:p.cookie},time:Number(p.capturedAt)||0})).filter(p=>p.pin===pin);
+ const canonical=canonicalKeys.map(k=>read(k,null)).filter(p=>p&&p.pin===pin&&p.cookie).map(p=>({...jsPair(p.cookie),headers:p.headers||{Cookie:p.cookie},time:Number(p.capturedAt)||0})).filter(p=>p.pin===pin);
  const same=candidates.filter(p=>p.pin===pin).sort((a,b)=>b.time-a.time);const login=(hasCanonical?canonical.sort((a,b)=>b.time-a.time)[0]:same[0])||null;
  if(login){const context=same.find(p=>jsHeader(p.headers,'user-agent'));login.headers={...(context?.headers||{}),Cookie:jsMergeCookie(jsHeader(context?.headers,'cookie')||login.cookie,login)};}
  return {pin,login,profiles};

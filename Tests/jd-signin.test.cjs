@@ -40,6 +40,15 @@ function seedLegacy(h){
  h.reply=async(t,o)=>{const p=api.jsParams(o);if(['hs','ys'].includes(t))return response({code:0,result:{status:4}});if(t==='game')return response({success:true,data:{signMainVo:{currentStatus:3}}});if(t==='delivery')return response({code:0,data:{bizCode:0,result:{value:1}}});throw Error('Unexpected task');};
 }
 (async()=>{
+ await test('empty local store can select login without dereferencing a missing record',()=>{assert.equal(api.jsLogin((k,f)=>f).login,null);});
+ await test('first PLUS page capture supplies the exact template read by the signin runner',async()=>{
+  const h=host();h.map.clear();
+  await capture(h,request('bff_marketing_interaction',{scene:'blindBox',touchPoint:'purePlusIndexNew2608'},{appid:'plus_business',h5st:sig('35fa0')}),{code:'1711000',msg:'成功',rs:{leftTimes:1,sendBenefitList:[]}});
+  const login=api.jsLogin(h.read).login;assert(login);const value=api.jsLegacyAccount('blindbox','offline',h.read,login).value;
+  assert.equal(value.modes.blindbox.query.signatureAppId,'35fa0');assert.equal(value.modes.blindbox.query.referenceEnvironmentEncoded,encodeEnv(env()));assert.equal(h.calls.length,0);
+ });
+ await test('shared Cookie alone does not invent a PLUS-specific template',()=>{const h=host();assert.equal(api.jsLegacyAccount('blindbox','offline',h.read,api.jsLogin(h.read).login).value,null);});
+
  await test('only two settings and one manual / one automatic entry',()=>{
   const p=fs.readFileSync(pluginPath,'utf8'),args=p.split('[Argument]')[1].split('[Script]')[0];assert.deepEqual([...args.matchAll(/^(\w+) = /gm)].map(x=>x[1]),['gapSeconds','cronExp']);assert.equal((p.match(/^generic /gm)||[]).length,1);assert.equal((p.match(/^cron /gm)||[]).length,1);assert(!/dailyEnabled|autoEnabled|delayMin|delayMax/.test(p));
  });

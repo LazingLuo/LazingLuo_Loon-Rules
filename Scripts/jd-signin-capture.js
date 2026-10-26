@@ -1,6 +1,6 @@
 // Passive consolidated capture; original response unchanged.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-25.1';
+const JS_VERSION='2026-10-26.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
@@ -33,7 +33,7 @@ function jsLogin(read){
  // response handling, which could otherwise make a delayed old response win.
  const hasCanonical=read(JS_KEYS.login,null)?.pin===pin;
  const canonicalKeys=[JS_KEYS.login,'QL_BRIDGE_CREDENTIAL_V1'];
- const canonical=canonicalKeys.map(k=>read(k,null)).filter(p=>p?.pin===pin&&p.cookie).map(p=>({...jsPair(p.cookie),headers:p.headers||{Cookie:p.cookie},time:Number(p.capturedAt)||0})).filter(p=>p.pin===pin);
+ const canonical=canonicalKeys.map(k=>read(k,null)).filter(p=>p&&p.pin===pin&&p.cookie).map(p=>({...jsPair(p.cookie),headers:p.headers||{Cookie:p.cookie},time:Number(p.capturedAt)||0})).filter(p=>p.pin===pin);
  const same=candidates.filter(p=>p.pin===pin).sort((a,b)=>b.time-a.time);const login=(hasCanonical?canonical.sort((a,b)=>b.time-a.time)[0]:same[0])||null;
  if(login){const context=same.find(p=>jsHeader(p.headers,'user-agent'));login.headers={...(context?.headers||{}),Cookie:jsMergeCookie(jsHeader(context?.headers,'cookie')||login.cookie,login)};}
  return {pin,login,profiles};
