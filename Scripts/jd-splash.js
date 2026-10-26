@@ -897,7 +897,7 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
 })(context);
 });}
 
-// JD splash 2026-10-26.3. Local diagnostics; no network requests.
+// JD splash 2026-10-26.4. Local diagnostics; no network requests.
 (function () {
   'use strict';
   const KEY='LAZING_JD_SPLASH_DIAG_V1', APIS=['start','basicConfig','welcomeHome','searchBoxWord'];
@@ -1005,14 +1005,11 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
     while(stack.length){const {a,d}=stack.pop();for(const v of a){if(++n>500)return 0;if(Array.isArray(v)){if(d>=3)return 0;stack.push({a:v,d:d+1});continue;}if(!obj(v))continue;const begin=dateValue(v.onlineTime),end=dateValue(v.referralsTime);if(begin===null||end===null||begin>end)continue;if(v.onlineTime!=='2000-01-01 00:00:00'||v.referralsTime!=='2000-01-02 00:00:00')pending.push(v);}}
     for(const v of pending){v.onlineTime='2000-01-01 00:00:00';v.referralsTime='2000-01-02 00:00:00';}return pending.length;
   }
-  function resourceKnown(s,a,kind){return s.materials.find(m=>m.kind===kind&&(m.url===a.url||a.sid&&m.sid===a.sid));}
   function recordAsset(s,a,action,reason,size,groupId){
     const r={at:Date.now(),action,reason,size:size||'',groupId:id(groupId),...a};s.assets.recorded=Math.min(s.assets.recorded+1,1000000);if(action==='blocked')s.assets.blocked=Math.min(s.assets.blocked+1,1000000);
     s.assets.records=s.assets.records.filter(x=>x.url!==r.url||x.action!==r.action);s.assets.records.push(r);s.assets.records=s.assets.records.slice(-30);
-    const key=reason+'|'+a.url,n=s.assets.notices.find(n=>n.key===key),notify=action==='blocked'&&(!n||Date.now()-n.at>10*60*1000);
-    if(notify){s.assets.notices=s.assets.notices.filter(n=>n.key!==key);s.assets.notices.push({key,at:Date.now()});s.assets.notices=s.assets.notices.slice(-20);}const ok=save(s);
-    console.log('[京东素材] '+(action==='blocked'?'已处理':'候选，待核对')+' '+(size||'')+' '+a.url+(ok?'':'；记录保存失败'));
-    if(notify)notice(reason==='size'?'图片已替换':'确认素材已拦截',(size||'按开屏配置确认')+(ok?'':'；记录保存失败'));
+    const ok=save(s);
+    console.log('[京东素材] 已拒绝 '+(size||'')+' '+a.url+(ok?'':'；记录保存失败'));
   }
   function getImageSize(b){
     const ascii=(o,n)=>{let s='';for(let i=0;i<n;i++)s+=String.fromCharCode(b[o+i]);return s;};
@@ -1026,18 +1023,15 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
     return null;
   }
   function resources(req,res){
-    if(req.method!=='GET')return;const a=asset(String(req.url||''));if(!a)return;
-    const s=load(),video=/\.mp4$/i.test(a.path),known=resourceKnown(s,a,video?'video':'image');
-    if(!res){
-      if(known){recordAsset(s,a,'blocked','known','',known.groupId);result={response:{status:404,headers:{'Content-Type':'text/plain','Cache-Control':'no-store'},body:''}};}
-      else if(video&&/^\/material-video\/video\//.test(a.path))recordAsset(s,a,'candidate','video','');return;
-    }
+    // Only the original mobilecms path may reach the binary dimension reader.
+    // No global CDN learning/matching on the request path.
+    if(req.method!=='GET'||!/^https?:\/\/m\.360buyimg\.com(?::(?:443|80))?\/mobilecms\//i.test(String(req.url||'')))return;
+    const a=asset(String(req.url||''));if(!a||!res)return;
     const b=res.body;if(Number(res.status||res.statusCode)!==200||!/^image\//i.test(header(res.headers,'content-type'))||Object.prototype.toString.call(b)!=='[object Uint8Array]'||b.length>12*1024*1024)return;
     const x=getImageSize(b);if(!x)return;const size=x.width+'x'+x.height;
-    if(known||SIZES.includes(size)){
-      const h={...(res.headers||{})};for(const k of Object.keys(h))if(/^(?:content-length|content-encoding|transfer-encoding|content-type|etag|last-modified|cache-control)$/i.test(k))delete h[k];h['Content-Type']='image/png';h['Cache-Control']='no-store';
-      result={headers:h,body:new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,11,73,68,65,84,120,156,99,96,0,2,0,0,5,0,1,122,94,171,63,0,0,0,0,73,69,78,68,174,66,96,130])};recordAsset(s,a,'blocked',known?'known':'size',size,known?.groupId);
-    }else if(x.width>=720&&x.height>=1200&&x.height/x.width>=1.35&&x.height/x.width<=2.7)recordAsset(s,a,'candidate','portrait',size);
+    if(!SIZES.includes(size))return;
+    result={status:404,headers:{'Content-Type':'text/plain','Cache-Control':'no-store'},body:new Uint8Array(0)};
+    recordAsset(load(),a,'blocked','size',size);
   }
   try{
     if(typeof $request==='undefined'){
@@ -1062,7 +1056,8 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
     while(JSON.stringify(s).length>20*1024&&(s.structure.length||s.materials?.length||s.fields.length)){s.limited=true;s.result='记录已截断，请查看保留的目标字段';if(s.structure.length)s.structure.pop();else if(s.materials?.length)s.materials.pop();else s.fields.pop();}
     b.hits=Math.min(b.hits+1,1000000);b.samples.push(s);b.samples=b.samples.slice(-3);const ok=save(state);
     console.log('[京东开屏] '+f+'：'+s.result+'；HTTP '+s.httpStatus+(ok?'':'；记录保存失败'));
-    if(s.changed)notice('广告日期已处理',s.changed+' 条'+(ok?'':'；记录保存失败'));
+    if(s.changed)notice('开屏配置已修改',s.changed+' 条广告日期已过期'+(ok?'':'；记录保存失败'));
+    else if(f==='start')notice('start 已命中','本次未修改开屏配置'+(ok?'':'；记录保存失败'));
   }catch(_){console.log('[京东开屏] 诊断未完成，原处理结果保留');}
   finally{if(!deferred)$done(result);}
 })();
