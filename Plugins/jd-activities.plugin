@@ -4,13 +4,13 @@
 #!date = 2026-10-26
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?(?![^#]*[?&]functionId=(?:start|basicConfig|welcomeHome|searchBoxWord)(?:&|$))(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-activity-capture.js?v=20261026-2") with tag="京东活动共享凭据获取", requires_body=true, timeout=20
-response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/(?:getPageInfoDoubleSignInForH5|getPageInfoSafetyTranslate))(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-activity-capture.js?v=20261026-2") with tag="京东金融活动凭据获取", requires_body=true, timeout=20
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jxzy-activity.js?v=20261026-2") with tag="京喜自营", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-activity.js?v=20261026-2") with tag="东东农场", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-wheel-activity.js?v=20261026-2") with tag="幸运转盘", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-golden-egg.js?v=20261026-2") with tag="天天砸金蛋", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-earn-beans.js?v=20261026-2") with tag="天天赚京豆", timeout=600
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?(?![^#]*[?&]functionId=(?:start|basicConfig|welcomeHome|searchBoxWord)(?:&|$))(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-activity-capture.js?v=20261026-3") with tag="京东活动共享凭据获取", requires_body=true, timeout=20
+response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/(?:getPageInfoDoubleSignInForH5|getPageInfoSafetyTranslate))(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-activity-capture.js?v=20261026-3") with tag="京东金融活动凭据获取", requires_body=true, timeout=20
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jxzy-activity.js?v=20261026-3") with tag="京喜自营", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-activity.js?v=20261026-3") with tag="东东农场", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-wheel-activity.js?v=20261026-3") with tag="幸运转盘", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-golden-egg.js?v=20261026-3") with tag="天天砸金蛋", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-earn-beans.js?v=20261026-3") with tag="天天赚京豆", timeout=600
 
 [Mitm]
 hostname = api.m.jd.com, ms.jr.jd.com

@@ -14,11 +14,19 @@ function actEndpoint(url){return String(url||'').split('?')[0];}
 const actNum=(v,f=0)=>v!==null&&v!==''&&v!==undefined&&Number.isFinite(Number(v))?Number(v):f;
 const actId=v=>(typeof v==='string'||typeof v==='number')&&/^[A-Za-z0-9_-]{1,128}$/.test(String(v));
 const actTitle=v=>String(v||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
+function actServiceCode(v){return v!==undefined&&v!==null&&/^[A-Za-z0-9_-]{1,32}$/.test(String(v))?String(v):'未提供';}
+function actRejection(j,kind){
+ const text=[j?.message,j?.msg,j?.data?.bizMsg,j?.resultData?.msg].filter(x=>typeof x==='string').join(' ');
+ const known=[['未登录|登录失效|请登录','登录失效'],['已完成|已领取|重复','已完成或重复提交'],['频繁|太快','请求频繁'],['风险|风控|安全验证|火爆','需App核对'],['时间|时长|计时','计时条件未满足'],['参数|不存在','参数不符']].find(([p])=>new RegExp(p).test(text));
+ return '活动接口拒绝本次请求（code='+actServiceCode(j?.code??j?.resultCode)+'，bizCode='+actServiceCode(kind==='egg'?j?.data?.bizCode:j?.resultData?.code)+'）'+(known?'：'+known[1]:'');
+}
 function actBusiness(j,kind){
  if(!actObject(j))throw Error('活动响应结构不符');
- if(kind==='egg'){if(String(j.code)!=='0'||String(j.data?.bizCode)!=='0'||j.success===false)throw Error('活动接口拒绝本次请求');return j.data.result;}
- if(j.success!==true||j.resultCode!==undefined&&String(j.resultCode)!=='0')throw Error('活动接口拒绝本次请求');return j.resultData;
+ if(kind==='egg'){if(String(j.code)!=='0'||String(j.data?.bizCode)!=='0'||j.success===false)throw Error(actRejection(j,kind));return j.data.result;}
+ if(j.success!==true||j.resultCode!==undefined&&String(j.resultCode)!=='0')throw Error(actRejection(j,kind));return j.resultData;
 }
+// itemId is an opaque server-issued value, sometimes containing Base64 punctuation.
+const actItemId=v=>(typeof v==='string'&&v.length>0&&v.length<=2048&&!/[\x00-\x1f\x7f]/.test(v))||(typeof v==='number'&&Number.isFinite(v));
 function actEggList(j){const a=actBusiness(j,'egg')?.taskInfo?.taskList;if(!Array.isArray(a)||a.length>100)throw Error('砸金蛋任务列表结构变化');return a;}
 function actEarnList(j){const rows=actBusiness(j,'earn')?.resultList;if(!Array.isArray(rows)||rows.length>100)throw Error('赚京豆任务列表结构变化');const out=[];for(const r of rows){if(Array.isArray(r?.templateData?.taskList))out.push(...r.templateData.taskList);}if(out.length>100)throw Error('赚京豆任务数量异常');return out;}
 function actSignature(p,app,pin,decode){
@@ -75,12 +83,13 @@ function createEggClient(host,crypto,profile){
  async function call(mode,body,mark){
   const p={...profile.params,t:String(host.now()),functionId:mode==='task_list'?'interact_pre_executor':'interact_executor',channelCode:'bargain',sceneCode:mode,body:JSON.stringify(body)};
   if(mode==='do_task')p.alias='doInteractTask';
+  report.phase=mode==='task_list'?'查询任务':body.actionType===1?'开始浏览':'提交完成';host.log(report.phase);
   const input={appid:p.appid,client:p.client,clientVersion:p.clientVersion,t:p.t,functionId:mode,body:crypto.hash(p.body)};
   const signingProfile={pin:profile.pin,headers:profile.headers},env=profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined;
   p.h5st=await crypto.signOnline('39e8e',signingProfile,env,input);
   if(mark)journal.mark(mark);
-  const r=await host.request({url:'https://api.m.jd.com/?'+actEncode({appid:p.appid,client:p.client,clientVersion:p.clientVersion,functionId:p.functionId,channelCode:p.channelCode,sceneCode:p.sceneCode,...(p.alias?{alias:p.alias}:{})}),headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode(Object.fromEntries(Object.entries(p).filter(([k])=>!['functionId','channelCode','sceneCode','alias','appid','client','clientVersion'].includes(k))))});
-  const j=host.json(r);actBusiness(j,'egg');if(mark)journal.settle(mark);return j;
+  const r=await host.request({url:'https://api.m.jd.com/?'+actEncode({appid:p.appid,client:p.client,clientVersion:p.clientVersion,functionId:p.functionId,channelCode:p.channelCode,sceneCode:p.sceneCode,t:p.t,area:'',uemps:'0-2-0',ext:JSON.stringify({prstate:'0'}),loginType:2,...(p.alias?{alias:p.alias}:{})}),headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode({...Object.fromEntries(Object.entries(p).filter(([k])=>!['functionId','channelCode','sceneCode','alias','appid','client','clientVersion'].includes(k))),xAPIRegion:'CN',xAPIClientLanguage:'zh_CN',xAPIClientMode:0,xAPITz:'Asia/Shanghai',xAPICurrency:''})});
+  const j=host.json(r);try{actBusiness(j,'egg');}catch(e){throw Error('活动'+report.phase+'失败：'+e.message);}if(mark)journal.settle(mark);return j;
  }
  async function query(){return actEggList(await call('task_list',{encryptProjectId:EGG_PROJECT,ext:{queryReceiveTimes:1}}));}
  function rewards(j){let n=0;const a=j.data?.result?.assignmentResult?.rewardsInfo?.successRewards;if(actObject(a))for(const rows of Object.values(a))if(Array.isArray(rows))for(const r of rows)if(Number(r?.rewardType)===3&&Number.isFinite(Number(r.quantity)))n+=Number(r.quantity);return n;}
@@ -91,6 +100,7 @@ function createEggClient(host,crypto,profile){
     host.guard();const t=(await query()).find(t=>t.encryptAssignmentId===before.encryptAssignmentId);if(!t)continue;
     const row={title:actTitle(t.assignmentName||t.assignmentDesc),result:''};report.rows.push(row);host.log(row.title);
     if(t.completionFlag){row.result='已完成';continue;}
+    if(Array.isArray(t.rewards)&&!t.rewards.some(x=>/京豆/.test(String(x?.rewardName||'')))){row.result='奖励不是京豆，跳过';continue;}
     if(!actId(t.encryptAssignmentId)){row.result='任务标识缺失';continue;}
     if(/下单|订阅|抽奖|加购|关注|助力|邀请|组件|购买/.test(row.title)){row.result='需App操作';continue;}
     const items=typeof t.ext?.extraType==='string'&&Array.isArray(t.ext[t.ext.extraType])?t.ext[t.ext.extraType]:[];
@@ -98,12 +108,12 @@ function createEggClient(host,crypto,profile){
     const left=Math.max(0,Math.min(20,actNum(t.assignmentTimesLimit)-actNum(t.completionCnt)));
     if(!left){row.result='已完成';continue;}
     const wait=actNum(t.ext?.waitDuration);if(wait<0||wait>120){row.result='计时要求不符，需App操作';continue;}
-    const selected=items.length?items.slice(0,left):/签到/.test(row.title)?[{itemId:'1'}]:[];
+    const selected=items.length?items.slice(0,left):!t.ext?.extraType?[{itemId:'1'}]:[];
     if(!selected.length){row.result='缺少浏览项目，留待App';continue;}
     let count=actNum(t.completionCnt),confirmed=0;
     for(const item of selected){
      if(actions>=40){row.result='本轮达到处理上限';break;}
-     if(!actId(item?.itemId))continue;
+     if(!actItemId(item?.itemId))continue;
      const base=t.encryptAssignmentId+':'+count+':'+item.itemId;
      if(journal.has(base+':finish')||journal.has(base+':start')){row.result='本次进度已有提交记录，留待App核对';continue;}
      const ext=typeof item.url==='string'&&/^https:\/\//.test(item.url)?{jumpUrl:item.url}:{};
@@ -116,7 +126,7 @@ function createEggClient(host,crypto,profile){
     }
     if(!row.result)row.result='缺少有效浏览项目';
    }
-  }catch(e){report.stopped=true;report.message=host.error(e);}
+  }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='未完成：'+report.message;}
   return report;
  }
  return {run,query};
@@ -126,7 +136,7 @@ function createEarnClient(host,crypto,profile){
  let signer;
  async function sdk(){if(!signer)signer=await host.aar(profile.headers['User-Agent']);return signer;}
  async function signed(data){const s=await sdk(),nonce=s.nonce(),signature=s.sign(JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融签名初始化失败');return {nonce,signature};}
- function accepted(j,query=false){const d=actBusiness(j,'earn');if(!query&&d?.code!=='0000')throw Error('金融任务接口拒绝本次请求');return d;}
+ function accepted(j,query=false){const d=actBusiness(j,'earn');if(!query&&d?.code!=='0000')throw Error(actRejection(j,'earn'));return d;}
  async function query(){
   if(!profile.query||!profile.headers)throw Error('赚京豆查询参数不完整');
   const q=actClone(profile.query),ep=q.extParams||(q.extParams={}),signData=ep.signData||{sdkToken:ep.sdkToken||''};
@@ -188,7 +198,7 @@ function createEarnClient(host,crypto,profile){
     }else row.result='需App操作';
     await host.pause(1500);
    }
-  }catch(e){report.stopped=true;report.message=host.error(e);}
+  }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='未完成：'+report.message;}
   return report;
  }
  return {run,query};
@@ -262,8 +272,8 @@ function actTDEncode(value){
 }
 function actDeviceRequest(ua,now,fp){
  const head={pin:'',oid:'',bizId:'jd-babelh5',fc:'',mode:'strict',p:'s',fp,ctype:1,v:'3.2.1.1',f:'3',o:'pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',qs:'',jsTk:'',qi:''};
- const device={ts:{deviceTime:now,deviceEndTime:now+100},ca:{tdHash:''},m:{compatMode:'CSS1Compat'},fo:['Bauhaus 93','Casual'],n:{vendorSub:'',productSub:'20030107',vendor:'Apple Computer, Inc.',maxTouchPoints:1,hardwareConcurrency:8,cookieEnabled:true,appCodeName:'Mozilla',appName:'Netscape',appVersion:ua.split('M/')[1]||'',platform:'NA',product:'Gecko',userAgent:ua,language:'zh-CN',onLine:true,webdriver:false,javaEnabled:false,deviceMemory:8},p:[],w:{devicePixelRatio:2.75,screenTop:0,screenLeft:0},s:{availHeight:873,availWidth:393,colorDepth:24,height:873,width:393,pixelDepth:24},ss:{cookie:true,localStorage:true,sessionStorage:true,globalStorage:false,indexedDB:true},tz:-480,lil:'',wil:''};
- return {url:'https://jra.jd.com/jsTk.do?a='+actTDEncode(head),headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':ua},body:actEncode({d:actTDEncode(device)})};
+ const device={ts:{deviceTime:now,deviceEndTime:now+100},ca:{tdHash:''},m:{compatMode:'CSS1Compat'},fo:['Bauhaus 93','Casual'],n:{vendorSub:'',productSub:'20030107',vendor:'Apple Computer, Inc.',maxTouchPoints:1,hardwareConcurrency:8,cookieEnabled:true,appCodeName:'Mozilla',appName:'Netscape',appVersion:ua.split('M/')[1]||'',platform:'NA',product:'Gecko',userAgent:ua,language:'zh-CN',onLine:true,webdriver:false,javaEnabled:false,deviceMemory:8,enumerationOrder:["vendorSub","productSub","vendor","maxTouchPoints","userActivation","doNotTrack","geolocation","connection","plugins","mimeTypes","webkitTemporaryStorage","webkitPersistentStorage","hardwareConcurrency","cookieEnabled","appCodeName","appName","appVersion","platform","product","userAgent","language","languages","onLine","webdriver","getBattery","getGamepads","javaEnabled","sendBeacon","vibrate","scheduling","mediaCapabilities","locks","wakeLock","usb","clipboard","credentials","keyboard","mediaDevices","storage","serviceWorker","deviceMemory","bluetooth","getUserMedia","requestMIDIAccess","requestMediaKeySystemAccess","webkitGetUserMedia","clearAppBadge","setAppBadge"]},p:[],w:{devicePixelRatio:2.75,screenTop:0,screenLeft:0},s:{availHeight:873,availWidth:393,colorDepth:24,height:873,width:393,pixelDepth:24},sc:{"ActiveBorder":"rgb(118, 118, 118)","ActiveCaption":"rgb(0, 0, 0)","AppWorkspace":"rgb(255, 255, 255)","Background":"rgb(255, 255, 255)","ButtonFace":"rgb(239, 239, 239)","ButtonHighlight":"rgb(239, 239, 239)","ButtonShadow":"rgb(239, 239, 239)","ButtonText":"rgb(0, 0, 0)","CaptionText":"rgb(0, 0, 0)","GrayText":"rgb(128, 128, 128)","Highlight":"rgba(51, 181, 229, 0.4)","HighlightText":"rgb(255, 255, 255)","InactiveBorder":"rgb(118, 118, 118)","InactiveCaption":"rgb(255, 255, 255)","InactiveCaptionText":"rgb(128, 128, 128)","InfoBackground":"rgb(255, 255, 255)","InfoText":"rgb(0, 0, 0)","Menu":"rgb(255, 255, 255)","MenuText":"rgb(0, 0, 0)","Scrollbar":"rgb(255, 255, 255)","ThreeDDarkShadow":"rgb(118, 118, 118)","ThreeDFace":"rgb(239, 239, 239)","ThreeDHighlight":"rgb(118, 118, 118)","ThreeDLightShadow":"rgb(118, 118, 118)","ThreeDShadow":"rgb(118, 118, 118)","Window":"rgb(255, 255, 255)","WindowFrame":"rgb(118, 118, 118)","WindowText":"rgb(0, 0, 0)"},ss:{cookie:true,localStorage:true,sessionStorage:true,globalStorage:false,indexedDB:true},tz:-480,lil:'',wil:''};
+ return {url:'https://jra.jd.com/jsTk.do?a='+encodeURIComponent(actTDEncode(head)),headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':ua},body:actEncode({d:actTDEncode(device)})};
 }
 function actJxTaskCapture(host,req,res,decode){
  if(req?.method!=='POST'||Number(res?.status)!==200||actHeader(req.headers,'X-Lazing-Activity-Run')==='1')return false;
