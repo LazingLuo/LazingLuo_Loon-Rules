@@ -559,7 +559,7 @@ function jxTaskSharedProfile(shared) {
     snapshot=rawRead(ACCOUNT);let shared;
     try{shared=JSON.parse(snapshot||'null');}catch(_){throw Error('京喜共享凭据无法读取，请重新进入京喜自营首页获取');}
     const profile=jxTaskSharedProfile(actJxProfile((k,f)=>{const s=rawRead(k);watched[k]=s;return s?JSON.parse(s):f;},createJxTaskCrypto({read,write,setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment));
-    console.log('[京喜任务] 版本 20261026-8；使用同账号共享资料');
+    console.log('[京喜任务] 版本 20261026-9；使用同账号共享资料');
     const host={now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),read,write,setTimeout,
       clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
       progress:(index,total,title)=>update('开始处理',{index,total,title}),

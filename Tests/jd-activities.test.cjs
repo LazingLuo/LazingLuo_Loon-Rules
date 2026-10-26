@@ -1,4 +1,4 @@
-// Remaining two activities; synthetic identities and responses, no live account requests.
+// Three manual activities; synthetic identities and responses, no live account requests.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const root=fs.existsSync(path.join(__dirname,'发布包'))?path.join(__dirname,'发布包'):path.join(__dirname,'..');
 const src=n=>fs.readFileSync(path.join(root,'Scripts',n),'utf8');
@@ -18,7 +18,7 @@ async function dispatch(fn,body,extra={},response={code:0},initial={}){
  $notification:{post:(...x)=>notes.push(x)},$httpClient:{get:()=>{throw Error('forbidden network');},post:()=>{throw Error('forbidden network');}},$done:x=>{out=x;finished=true;}};
  vm.runInNewContext(captureSource,sandbox,{timeout:3000});for(let i=0;i<30&&!finished;i++)await new Promise(r=>setTimeout(r,1));assert(finished);return {store,logs,notes,out};
 }
-test('two manual entries, no cron',()=>{assert.equal((plugin.match(/^generic then/gm)||[]).length,2);assert(!/^cron /m.test(plugin));assert(plugin.includes('tag="京喜自营"'));assert(plugin.includes('tag="东东农场"'));});
+test('three manual entries, no cron',()=>{assert.equal((plugin.match(/^generic then/gm)||[]).length,3);assert(!/^cron /m.test(plugin));assert(plugin.includes('tag="京喜自营"'));assert(plugin.includes('tag="东东农场"'));});
 for(const n of ['jd-golden-egg.js','jd-earn-beans.js','jd-wheel-activity.js'])test('removed release file '+n,()=>{assert(!fs.existsSync(path.join(root,'Scripts',n)));assert(!plugin.includes(n));});
 test('capture keeps PLUS and financial signin routes',()=>{assert(captureSource.includes("expected = mode==='blindbox' ? '35fa0'"));assert(plugin.includes('getPageInfoDoubleSignInForH5'));assert(!plugin.includes('getPageInfoSafetyTranslate'));});
 test('retired clients and automatic device/receipt requests absent',()=>{for(const s of [captureSource,jxSource])for(const key of ['createEggClient','createEarnClient','createEarnLedger','EARN_PATHS','EGG_PROJECT','jsTk.do','beanDetail/detail.json'])assert(!s.includes(key),key);});
@@ -34,5 +34,5 @@ test('farm has no automatic watering endpoint',()=>{const t=farm.farmTools();ass
 test('latest canonical Cookie beats stale page Cookie',()=>{const d={JD_SIGNIN_LOGIN_V1:{pin:'offline',cookie:'pt_key=NEW;pt_pin=offline;',headers:{...headers,Cookie:'pt_key=STALE;pt_pin=offline;'},capturedAt:10},JD_CHECKIN_TEST_ACCOUNT_V1:{pin:'offline',modes:{blindbox:{headers,capturedAt:2}}}};const s=jx.actSharedMaterial((k,f)=>d[k]||f,()=>({pp:{p1:'offline'}}));assert(s.headers.Cookie.includes('NEW'));assert(!s.headers.Cookie.includes('STALE'));});
 test('another account cannot supply shared material',()=>{assert.throws(()=>jx.actSharedMaterial((k,f)=>k==='JD_SIGNIN_ACCOUNT_V1'?{pin:'other'}:k==='JD_SIGNIN_LOGIN_V1'?{pin:'offline',cookie:headers.Cookie,headers,capturedAt:1}:f,()=>({})),/缺少京东Cookie/);});
 test('Cookie alone does not fabricate PLUS or Jingxi signing templates',()=>{const d={JD_SIGNIN_LOGIN_V1:{pin:'offline',cookie:headers.Cookie,headers,capturedAt:1}};assert.throws(()=>jx.actJxProfile((k,f)=>d[k]||f,()=>({})),/共享设备资料不完整/);});
-test('all release scripts parse',()=>{for(const n of ['jd-jxzy-activity.js','jd-farm-activity.js','jd-activity-capture.js'])new vm.Script(src(n));});
+test('all release scripts parse',()=>{for(const n of ['jd-jxzy-activity.js','jd-farm-activity.js','jd-activity-capture.js','jd-coupon-activity.js'])new vm.Script(src(n));});
 (async()=>{for(const [n,f]of tests){await f();total++;console.log('PASS '+n);}console.log(total+' checks passed; synthetic data, no live account requests.');})().catch(e=>{console.error(e);process.exitCode=1;});

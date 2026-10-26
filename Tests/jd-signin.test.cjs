@@ -26,16 +26,16 @@ const fakeCrypto={hash:s=>crypto.createHash('sha256').update(s).digest('hex'),de
 const extra=h=>api.createExtraSignins(h,fakeCrypto);
 let total=0;
 async function test(name,fn){await fn();total++;console.log('OK '+name);}
-function parsers(){return {retail:cap.runRetailCapture,jxzy:cap.runJxCapture,finance:cap.runFinanceCapture,plant:cap.runPlantCapture,farm:cap.farmCapture};}
+function parsers(){return {retail:cap.runRetailCapture,jxzy:cap.runJxCapture,home:cap.runHomeCapture,finance:cap.runFinanceCapture,plant:cap.runPlantCapture,farm:cap.farmCapture};}
 function request(f,b,params={}){return {method:'POST',url:'https://api.m.jd.com/api?functionId='+f,headers:headers(),body:form({functionId:f,body:JSON.stringify(b),...params})};}
 const capture=(h,req,j)=>cap.jsCapture(h,req,response(j),parsers(),cap.farmDecodeEnvironment);
 function basicLegacy(h){
  const write=(c,k,extra={})=>{c.$persistentStore.write(JSON.stringify({time:Date.now(),date:day(),status:'already_done',...extra}),k);c.$done({});};
- return {retail:c=>write(c,'JD_CHECKIN_TEST_LAST_RESULT_V1'),plant:c=>write(c,'JD_PLANT_CHECKIN_LAST_RESULT_V1'),jxzy:c=>write(c,'JXZY_CHECKIN_LAST_RESULT_V1'),finance:c=>write(c,'JD_JR_CHECKIN_LAST_RESULT_V1',{doubleSign:{status:'already_done'}})};
+ return {retail:c=>write(c,'JD_CHECKIN_TEST_LAST_RESULT_V1'),plant:c=>write(c,'JD_PLANT_CHECKIN_LAST_RESULT_V1'),jxzy:c=>write(c,'JXZY_CHECKIN_LAST_RESULT_V1'),home:c=>write(c,'JD_HOME_CHECKIN_LAST_RESULT_V1'),finance:c=>write(c,'JD_JR_CHECKIN_LAST_RESULT_V1',{doubleSign:{status:'already_done'}})};
 }
 function seedLegacy(h){
  h.write('JD_CHECKIN_TEST_ACCOUNT_V1',{pin:'offline',modes:{daily:{headers:headers()},scratch:{headers:headers()},blindbox:{headers:headers()}}});
- h.write('JXZY_CHECKIN_ACCOUNT_V1',{pin:'offline',headers:headers()});h.write('JD_PLANT_CHECKIN_ACCOUNT_V1',{pin:'offline',query:{headers:headers()}});
+ h.write('JXZY_CHECKIN_ACCOUNT_V1',{pin:'offline',headers:headers()});h.write('JD_HOME_CHECKIN_ACCOUNT_V1',{pin:'offline',headers:headers()});h.write('JD_PLANT_CHECKIN_ACCOUNT_V1',{pin:'offline',query:{headers:headers()}});
  h.write('JD_JR_CHECKIN_ACCOUNT_V1',{pin:'offline',headers:{...headers(),Cookie:'pt_pin=offline;pt_key=FINANCE_SECRET;'}});
  h.reply=async(t,o)=>{const p=api.jsParams(o);if(['hs','ys'].includes(t))return response({code:0,result:{status:4}});if(t==='game')return response({success:true,data:{signMainVo:{currentStatus:3}}});if(t==='delivery')return response({code:0,data:{bizCode:0,result:{value:1}}});throw Error('Unexpected task');};
 }
@@ -132,8 +132,8 @@ function seedLegacy(h){
  await test('mutation journal failure blocks health action',async()=>{const h=host();h.write=(k,v)=>{if(k===K.attempts)throw Error('保存失败');h.map.set(k,JSON.stringify(v));};h.reply=()=>response({code:0,result:{status:1,id:'t',encodeId:'e'}});await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.length,1);});
  await test('date change after signing blocks mutation',async()=>{const h=host();h.reply=()=>response({success:true,data:{signMainVo:{currentStatus:1,markStr:'m'}}});let n=0;const c={...fakeCrypto,signOnline:async app=>{if(++n===2)h.changeDay('2099-01-01');return sig(app);}};await assert.rejects(()=>api.createExtraSignins(h,c).run('game'));assert.equal(h.calls.length,1);});
  await test('new day has independent journal',async()=>{const h=host();h.reply=(t,o)=>api.jsParams(o).functionId==='jdh_bm_getKitTask'?response({code:0,result:{status:1,id:'t',encodeId:'e'}}):Promise.reject(Error('network'));await assert.rejects(()=>extra(h).run('hs'));h.changeDay('2099-01-01');await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.filter(x=>api.jsParams(x).functionId==='jdh_msoa_doTaskGw').length,2);});
- await test('combined task ordering and finance double-sign position',async()=>{const h=host();seedLegacy(h);const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.deepEqual(r.results.map(x=>x.task),api.JS_TASKS.map(x=>x[0]));assert(r.results[5].doubleSign);assert.equal(h.waits.length,0);assert.equal(r.results.length,10);});
- await test('random wait occurs only between tasks',async()=>{const h=host();seedLegacy(h);const events=[];h.log=s=>events.push(s);h.random=()=>0;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:15});assert.equal(h.waits.length,9);assert(h.waits.every(x=>x===5000));assert(events[0].includes('第 1/10 项'));});
+ await test('combined task ordering and finance double-sign position',async()=>{const h=host();seedLegacy(h);const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.deepEqual(r.results.map(x=>x.task),api.JS_TASKS.map(x=>x[0]));assert(r.results[5].doubleSign);assert.equal(h.waits.length,0);assert.equal(r.results.length,11);});
+ await test('random wait occurs only between tasks',async()=>{const h=host();seedLegacy(h);const events=[];h.log=s=>events.push(s);h.random=()=>0;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:15});assert.equal(h.waits.length,10);assert(h.waits.every(x=>x===5000));assert(events[0].includes('第 1/11 项'));});
  await test('random wait upper bound',async()=>{const h=host();seedLegacy(h);h.random=()=>0.999999;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:120});assert(h.waits.every(x=>x===120000));});
  await test('single failed legacy task leaves other sign-ins running',async()=>{const h=host();seedLegacy(h);const l=basicLegacy(h);l.jxzy=()=>{throw Error('test');};const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[4].status,'stopped');assert.equal(r.results[9].status,'already_done');assert(r.finished);});
  await test('old LAST is not reused when a legacy lock returns early',async()=>{const h=host();seedLegacy(h);h.write('JXZY_CHECKIN_LAST_RESULT_V1',{time:1,date:day(),status:'signed_confirmed'});const l=basicLegacy(h);l.jxzy=c=>c.$done({});const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[4].status,'stopped');});
@@ -196,7 +196,7 @@ function seedLegacy(h){
    else{const p=api.jsParams(o);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);if(p.functionId==='jdh_bm_getKitTask')j={code:0,result:{status:4}};else if(p.functionId==='weGameHome')j={success:true,data:{signMainVo:{currentStatus:3}}};else if(p.functionId.startsWith('bean_deliverySign_'))j={code:0,data:{bizCode:0,result:{value:1}}};else throw Error('Unexpected native call');}
    cb(null,{status:200},JSON.stringify(j));
   }}};
-  try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,10);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
+  try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,11);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
  });
  // Verify generated artifacts parse in a native-like context without Node globals.
  await test('generated Loon scripts parse without Node APIs',()=>{for(const p of [mainPath,capturePath])new vm.Script(fs.readFileSync(p,'utf8'));});
