@@ -1,13 +1,15 @@
 #!name = 京东开屏处理与诊断
-#!desc = 保留start日期过期处理；观察basicConfig、welcomeHome、searchBoxWord。命中响应时保存相关字段并通知，手动运行导出可分享日志。不保存Cookie和完整请求响应，不拦截DNS。
+#!desc = 保留start日期过期处理；处理已确认素材及1125×2436、1125×1602图片，其他大竖图只记录。定向检查配置并保存广告编号与素材地址；仅实际处理时通知。内置统一凭据获取，放在签到和活动插件前面。
 #!loon_version = 3.5.1(983)
-#!date = 2026-10-25
+#!date = 2026-10-26
 
 [Script]
-request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2") with tag="京东开屏请求观察", requires_body=true, timeout=10
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2") with tag="京东开屏配置处理与记录", requires_body=true, timeout=15
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2", "export") with tag="导出京东开屏诊断记录", timeout=10
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261025-diag2", "reset") with tag="清空京东开屏诊断记录", timeout=5
+request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-3") with tag="京东开屏请求观察", requires_body=true, timeout=10
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-3") with tag="京东开屏配置处理与凭据获取", requires_body=true, timeout=20
+request if ${url} ~= /^https?:\/\/(?:(?:[a-z0-9-]+\.)?360buyimg\.com|storage\.jd\.com|(?:jvod|vod)\.300hu\.com)(?::(?:443|80))?\//i && ${request.method} == "GET" then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-3", "assets") with tag="京东确认素材拦截", timeout=10
+response if ${url} ~= /^https?:\/\/(?:(?:[a-z0-9-]+\.)?360buyimg\.com|storage\.jd\.com|(?:jvod|vod)\.300hu\.com)(?::(?:443|80))?\//i && ${request.method} == "GET" && ${response.status} == 200 && ${response.header['Content-Type']} ~= /^image\//i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-3", "assets") with tag="京东图片尺寸检查", requires_body=true, binary_body_mode=true, timeout=20
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-3", "export") with tag="导出京东开屏诊断记录", timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-3", "reset") with tag="清空京东开屏诊断记录", timeout=5
 
 [Mitm]
-hostname = api.m.jd.com
+hostname = api.m.jd.com, *.360buyimg.com, storage.jd.com, vod.300hu.com, jvod.300hu.com

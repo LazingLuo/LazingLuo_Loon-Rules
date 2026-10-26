@@ -1,9 +1,5 @@
-// Independent manual clients. Upstream protocols reviewed statically; no upstream program is executed.
-const ACTIVITY_KEY='JD_ACTIVITY_TASKS_ACCOUNT_V1';
-const EGG_PROJECT='3v5KsTzmzH4KqQCpjR3QQgrviq5k';
-const EARN_QUERY='https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoSafetyTranslate';
-const EARN_POP='https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPopTemplateData';
-const EARN_PATHS={receive:'https://ms.jr.jd.com/gw2/generic/mission/newh5/m/receiveMissionForNa',jump:'https://ms.jr.jd.com/gw2/generic/mission/h5/m/getJumpInfo',next:'https://ms.jr.jd.com/gw2/generic/Mission/h5/m/queryNextBrowseMissionAndReceiveV3',start:'https://ms.jr.jd.com/gw2/generic/Mission/h5/m/startReadMissionV3',finish:'https://ms.jr.jd.com/gw2/generic/Mission/h5/m/finishReadAndAwardV3'};
+// Shared credential capture 20261026-8; Jingxi and farm activities.
+// Shared login and Jingxi adapters only. No retired activity clients.
 const actClone=x=>JSON.parse(JSON.stringify(x));
 const actObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 function actForm(text){const out={};for(const p of String(text||'').split('&')){if(!p)continue;const i=p.indexOf('='),dec=x=>decodeURIComponent(x.replace(/\+/g,' ')),k=dec(i<0?p:p.slice(0,i)),v=dec(i<0?'':p.slice(i+1));if(Object.prototype.hasOwnProperty.call(out,k))throw Error('活动请求参数重复');out[k]=v;}return out;}
@@ -12,270 +8,6 @@ function actHeader(h,k){const a=Object.keys(h||{}).find(x=>x.toLowerCase()===k.t
 function actPair(cookie){const rows=String(cookie||'').split(';').map(x=>x.trim()),p=rows.filter(x=>x.startsWith('pt_pin=')),k=rows.filter(x=>x.startsWith('pt_key='));if(p.length!==1||k.length!==1||!p[0].slice(7)||!k[0].slice(7))return null;return {pin:p[0].slice(7),cookie:k[0]+';'+p[0]+';'};}
 function actParams(req){const q=actForm(String(req.url||'').split('?')[1]?.split('#')[0]||''),p=actForm(req.body);for(const k of Object.keys(q))if(p[k]!==undefined&&p[k]!==q[k])throw Error('活动请求参数冲突');return {...q,...p};}
 function actEndpoint(url){return String(url||'').split('?')[0];}
-const actNum=(v,f=0)=>v!==null&&v!==''&&v!==undefined&&Number.isFinite(Number(v))?Number(v):f;
-const actId=v=>(typeof v==='string'||typeof v==='number')&&/^[A-Za-z0-9_-]{1,128}$/.test(String(v));
-const actTitle=v=>String(v||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
-function actServiceCode(v){return v!==undefined&&v!==null&&/^[A-Za-z0-9_-]{1,32}$/.test(String(v))?String(v):'未提供';}
-function actRejection(j,kind){
- const codes=[],code=j?.code??j?.resultCode,biz=kind==='egg'?j?.data?.bizCode:j?.resultData?.code;
- if(code!==undefined&&code!==null)codes.push('code='+actServiceCode(code));
- if(biz!==undefined&&biz!==null)codes.push('bizCode='+actServiceCode(biz));
- const raw=[j?.resultMsg,j?.message,j?.msg,j?.data?.bizMsg,j?.resultData?.msg,j?.resultData?.message].find(x=>typeof x==='string'&&/[\u3400-\u9fff]/.test(x));
- let message='';
- if(raw&&!/[<>{}\[\]]/.test(raw))message=raw.replace(/https?:\/\/\S+/gi,'[链接]').replace(/(?:pt_key|pt_pin|cookie|h5st|signature|nonce|token|authorization|eid)\s*[:=]\s*[^\s;，。]+/gi,'[凭据字段]').replace(/[A-Za-z0-9_+\-/%=]{24,}/g,'[长字段]').replace(/\d{6,}/g,'[编号]').replace(/[\r\n]/g,' ').slice(0,90);
- return '活动接口拒绝本次请求'+(codes.length?'（'+codes.join('，')+'）':'')+(message?'：'+message:'');
-}
-function actBusiness(j,kind){
- if(!actObject(j))throw Error('活动响应结构不符');
- if(kind==='egg'){if(String(j.code)!=='0'||String(j.data?.bizCode)!=='0'||j.success===false)throw Error(actRejection(j,kind));return j.data.result;}
- if(j.success!==true||j.resultCode!==undefined&&String(j.resultCode)!=='0')throw Error(actRejection(j,kind));return j.resultData;
-}
-// itemId is an opaque server-issued value, sometimes containing Base64 punctuation.
-const actItemId=v=>(typeof v==='string'&&v.length>0&&v.length<=2048&&!/[\x00-\x1f\x7f]/.test(v))||(typeof v==='number'&&Number.isFinite(v));
-function actEggList(j){const a=actBusiness(j,'egg')?.taskInfo?.taskList;if(!Array.isArray(a)||a.length>100)throw Error('砸金蛋任务列表结构变化');return a;}
-function actEarnList(j){const rows=actBusiness(j,'earn')?.resultList;if(!Array.isArray(rows)||rows.length>100)throw Error('赚京豆任务列表结构变化');const out=[];for(const r of rows){if(Array.isArray(r?.templateData?.taskList))out.push(...r.templateData.taskList);}if(out.length>100)throw Error('赚京豆任务数量异常');return out;}
-function actSignature(p,app,pin,decode){
- const s=String(p.h5st||'').split(';');
- if(s.length!==10||s[2]!==app||s[5]!=='5.3')return null;
- const env=decode(s[7]);if(![pin,decodeURIComponent(pin)].includes(env.pp?.p1))throw Error('活动签名账号不一致');
- return {environment:s[7],encoding:s[9]};
-}
-function activityCapture(host,req,res,decode){
- if(req?.method!=='POST'||Number(res?.status)!==200||actHeader(req.headers,'X-Lazing-Activity-Run')==='1')return null;
- const endpoint=actEndpoint(req.url);let kind,p,q,body,j;
- if(/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?$/.test(endpoint)){
-  p=actParams(req);if(p.functionId!=='interact_pre_executor'||p.channelCode!=='bargain'||p.sceneCode!=='task_list')return null;
-  body=JSON.parse(p.body||'{}');if(body.encryptProjectId!==EGG_PROJECT||p.appid!=='SecKill2020')return null;
-  j=JSON.parse(res.body||'{}');actEggList(j);kind='egg';
- }else if(endpoint===EARN_QUERY){
-  p=actParams(req);q=JSON.parse(p.reqData||'{}');
-  if(Number(q.pageId)!==11189||Number(q.pageType)!==11189)return null;
-  j=JSON.parse(res.body||'{}');actEarnList(j);kind='earn';
- }else return null;
- const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token']){const v=actHeader(req.headers,k);if(v)headers[k]=v;}
- const pair=actPair(headers.Cookie);if(!pair||!headers['User-Agent'])return null;
- const bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
- const old=host.read(ACTIVITY_KEY,null);if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('活动账号与本机账号不同');
- const at=host.observedAt||Date.now(),profile={pin:pair.pin,headers,capturedAt:at};
- if(kind==='egg'){
-  if(!/^https:\/\/pro\.m\.jd\.com\//.test(headers.Referer||''))return null;
-  const sig=actSignature(p,'39e8e',pair.pin,decode);if(!sig||!p['x-api-eid-token'])return null;
-  profile.params={appid:p.appid,client:p.client||'ios',clientVersion:p.clientVersion,'x-api-eid-token':p['x-api-eid-token']};
-  if(!profile.params.clientVersion)return null;
-  profile.signing=sig;profile.query=body;
- }else{
-  const ref=headers.Referer||'';if(!/^https:\/\/member\.jr\.jd\.com\/member\/coinQuest\/coin\/(?:\?|$)/.test(ref))return null;
-  let cco=JSON.parse(p.cco||'{}');const sig=actSignature({h5st:cco.h5st},'73fdb',pair.pin,decode);
-  if(!sig){
-   profile.unsupportedSigning=true;
-   const parts=String(cco.h5st||'').split(';');profile.signVersion=/^[0-9.]{1,12}$/.test(parts[5]||'')?parts[5]:'未识别';
-  }else profile.signing=sig;
-  // Keep this activity's own query and risk material. Never save an old h5st/nonce/signature.
-  profile.query=actClone(q);
-  if(profile.query.extParams){delete profile.query.extParams.nonce;delete profile.query.extParams.signature;}
-  profile.cco={client:cco.client,clientVersion:cco.clientVersion,_stk:cco._stk,_ste:cco._ste};
-  profile.eid=p.eid||'';
- }
- const all=old||{pin:pair.pin};if(at<Number(all[kind]?.capturedAt||0))return null;
- const first=!all[kind];all[kind]=profile;host.write(ACTIVITY_KEY,all);return {kind,first,unsupportedSigning:!!profile.unsupportedSigning};
-}
-function actJournal(host,kind,pin){
- const day=host.day(),key='journal.'+kind+'.'+pin,saved=host.read(key,null),data=saved?.day===day?saved:{day,entries:{}};
- return {has:k=>!!data.entries[k],mark(k){host.guard();if(host.day()!==day)throw Error('活动执行日期已变化');if(data.entries[k])throw Error('本项已有提交记录，请到活动页核对');data.entries[k]='pending';host.write(key,data);},settle(k){data.entries[k]='submitted';host.write(key,data);}};
-}
-function createEggClient(host,crypto,profile){
- const journal=actJournal(host,'egg',profile.pin),report={name:'天天砸金蛋',rows:[],beans:0,stopped:false};
- async function call(mode,body,mark){
-  const p={...profile.params,t:String(host.now()),functionId:mode==='task_list'?'interact_pre_executor':'interact_executor',channelCode:'bargain',sceneCode:mode,body:JSON.stringify(body)};
-  if(mode==='do_task')p.alias='doInteractTask';
-  report.phase=mode==='task_list'?'查询任务':body.actionType===1?'开始浏览':'提交完成';host.log(report.phase);
-  const input={appid:p.appid,client:p.client,clientVersion:p.clientVersion,t:p.t,functionId:mode,body:crypto.hash(p.body)};
-  const signingProfile={pin:profile.pin,headers:profile.headers},env=profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined;
-  p.h5st=await crypto.signOnline('39e8e',signingProfile,env,input);
-  if(mark)journal.mark(mark);
-  const r=await host.request({url:'https://api.m.jd.com/?'+actEncode({appid:p.appid,client:p.client,clientVersion:p.clientVersion,functionId:p.functionId,channelCode:p.channelCode,sceneCode:p.sceneCode,t:p.t,area:'',uemps:'0-2-0',ext:JSON.stringify({prstate:'0'}),loginType:2,...(p.alias?{alias:p.alias}:{})}),headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode({...Object.fromEntries(Object.entries(p).filter(([k])=>!['functionId','channelCode','sceneCode','alias','appid','client','clientVersion'].includes(k))),xAPIRegion:'CN',xAPIClientLanguage:'zh_CN',xAPIClientMode:0,xAPITz:'Asia/Shanghai',xAPICurrency:''})});
-  const j=host.json(r);try{actBusiness(j,'egg');}catch(e){throw Error('活动'+report.phase+'失败：'+e.message);}if(mark)journal.settle(mark);return j;
- }
- async function query(){return actEggList(await call('task_list',{encryptProjectId:EGG_PROJECT,ext:{queryReceiveTimes:1}}));}
- function rewards(j){let n=0;const a=j.data?.result?.assignmentResult?.rewardsInfo?.successRewards;if(actObject(a))for(const rows of Object.values(a))if(Array.isArray(rows))for(const r of rows)if(Number(r?.rewardType)===3&&Number.isFinite(Number(r.quantity)))n+=Number(r.quantity);return n;}
- async function run(){
-  try{
-   const initial=await query();let actions=0;
-   for(const before of initial){
-    host.guard();const t=(await query()).find(t=>t.encryptAssignmentId===before.encryptAssignmentId);if(!t)continue;
-    const row={title:actTitle(t.assignmentName||t.assignmentDesc),result:''};report.rows.push(row);host.log(row.title);
-    if(t.completionFlag){row.result='已完成';continue;}
-    if(Array.isArray(t.rewards)&&!t.rewards.some(x=>/京豆/.test(String(x?.rewardName||'')))){row.result='奖励不是京豆，跳过';continue;}
-    if(!actId(t.encryptAssignmentId)){row.result='任务标识缺失';continue;}
-    if(/下单|订阅|抽奖|加购|关注|助力|邀请|组件|购买/.test(row.title)){row.result='需App操作';continue;}
-    const items=typeof t.ext?.extraType==='string'&&Array.isArray(t.ext[t.ext.extraType])?t.ext[t.ext.extraType]:[];
-    if(!/浏览|逛|签到/.test(row.title)&&!items.length){row.result='暂不支持此任务';continue;}
-    const left=Math.max(0,Math.min(20,actNum(t.assignmentTimesLimit)-actNum(t.completionCnt)));
-    if(!left){row.result='已完成';continue;}
-    const wait=actNum(t.ext?.waitDuration);if(wait<0||wait>120){row.result='计时要求不符，需App操作';continue;}
-    const selected=items.length?items.slice(0,left):!t.ext?.extraType?[{itemId:'1'}]:[];
-    if(!selected.length){row.result='缺少浏览项目，留待App';continue;}
-    let count=actNum(t.completionCnt),confirmed=0;
-    for(const item of selected){
-     if(actions>=40){row.result='本轮达到处理上限';break;}
-     if(!actItemId(item?.itemId))continue;
-     const base=t.encryptAssignmentId+':'+count+':'+item.itemId;
-     if(journal.has(base+':finish')||journal.has(base+':start')){row.result='本次进度已有提交记录，留待App核对';continue;}
-     const ext=typeof item.url==='string'&&/^https:\/\//.test(item.url)?{jumpUrl:item.url}:{};
-     if(items.length){await call('do_task',{encryptAssignmentId:t.encryptAssignmentId,itemId:String(item.itemId),actionType:1,ext},base+':start');await host.sleep(wait*1000+1000);}
-     const j=await call('do_task',{encryptAssignmentId:t.encryptAssignmentId,itemId:String(item.itemId),actionType:0,ext,...(ext.jumpUrl?{jumpUrl:ext.jumpUrl}:{})},base+':finish');actions++;
-     report.beans+=rewards(j);await host.pause(1200);
-     const after=(await query()).find(x=>x.encryptAssignmentId===t.encryptAssignmentId);
-     if(after&&(after.completionFlag||actNum(after.completionCnt)>count)){confirmed++;count=actNum(after.completionCnt);row.result='已确认完成 '+confirmed+' 次';}
-     else{row.result='已提交，进度待App确认';break;}
-    }
-    if(!row.result)row.result='缺少有效浏览项目';
-   }
-  }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='未完成：'+report.message;}
-  return report;
- }
- return {run,query};
-}
-function createEarnClient(host,crypto,profile){
- const journal=actJournal(host,'earn',profile.pin),report={name:'天天赚京豆',pin:profile.pin,day:host.day(),rows:[],beans:0,submitted:0,stopped:false},verifyRows=[];
- const receipts=createEarnLedger(host,crypto,profile,report);
- let signer;
- async function sdk(){if(!signer)signer=await host.aar(profile.headers['User-Agent']);return signer;}
- async function signed(data,raw=false){const s=await sdk(),nonce=s.nonce(),signature=s.sign(raw?String(data):JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融签名初始化失败');return {nonce,signature};}
- function accepted(j,query=false){const d=actBusiness(j,'earn');if(!query&&d?.code!=='0000')throw Error(actRejection(j,'earn'));return d;}
- async function page(pop=false,verify=false){
-  report.phase=pop?'初始化任务页':verify?'复查任务列表':'读取任务列表';host.log(report.phase);
-  if(!profile.query||!profile.headers)throw Error('赚京豆查询参数不完整');
-  const q=actClone(profile.query);let ep=q.extParams||(q.extParams={});
-  if(pop){const keys=['channelCode','signData','sdkToken','deviceInfos','riskQdPageId','riskQdPageName','aarVersion','sourceVersion','reqSource','dynamicReq','clientName'];ep=q.extParams=Object.fromEntries(keys.filter(k=>ep[k]!==undefined).map(k=>[k,ep[k]]));}
-  Object.assign(ep,await signed(ep.signData||{sdkToken:ep.sdkToken||''}));
-  const cco={...profile.cco,t:host.now()},fields=String(cco._stk||'').split(',').filter(Boolean);
-  if(!fields.length||fields.some(k=>!['clientType','clientVersion','ctp','pageId','pageNum','pageType'].includes(k)))throw Error('赚京豆查询签名字段不符');
-  const input={};for(const k of fields){if(q[k]===undefined)throw Error('赚京豆查询参数不完整');input[k]=k==='clientVersion'&&profile.signClientVersion?profile.signClientVersion:q[k];}
-  cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},profile.signing?.environment?crypto.decodeEnvironment(profile.signing.environment):undefined,input);
-  const url=pop?EARN_POP+'?timekey='+host.now():EARN_QUERY+'?pageType=11189';
-  const j=host.json(await host.request({url,headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'},body:actEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})}));accepted(j,true);if(pop&&j.resultData?.code!==undefined&&!['0','0000'].includes(String(j.resultData.code)))throw Error(actRejection(j,'earn'));return j;
- }
- const query=async verify=>actEarnList(await page(false,verify));
- async function mission(op,data,key){
-  if(!['next','start','finish','receive'].includes(op))throw Error('金融任务操作不符');
-  report.phase={receive:'接取任务',next:'查询浏览项目',start:'开始浏览',finish:'提交领奖'}[op];host.log(report.phase);
-  const pin=decodeURIComponent(profile.pin),signData=op==='next'?{missionId:data.missionId,PIN:pin}:op==='receive'?JSON.stringify({channelCode:data.channelCode,PIN:pin,missionId:data.missionId}):{missionId:data.missionId,readTime:String(data.readTime),PIN:pin};
-  const sig=await signed(signData),tokens={next:'iYhVPTDdcH',start:'jBJHOIrRhm',finish:'EaGIdTGDdn'},ep=profile.query.extParams||{},device=profile.deviceInfo||JSON.parse(ep.deviceInfos||'{}');
-  const body=op==='receive'?{environment:'2',missionId:data.missionId,channelCode:data.channelCode,...sig,deviceInfo1:device,clientType:'h5',clientVersion:profile.query.clientVersion}:{...data,...sig,version:'2.2.4',token:tokens[op],appId:'jrmission'};
-  const headers={...profile.headers,'Content-Type':op==='receive'?'application/x-www-form-urlencoded':'text/plain;charset=UTF-8',Origin:op==='receive'?'https://member.jr.jd.com':'https://u.jr.jd.com',Referer:op==='receive'?'https://member.jr.jd.com/member/coinQuest/coin/':'https://u.jr.jd.com/','X-Lazing-Activity-Run':'1'};
-  journal.mark(key);const d=accepted(host.json(await host.request({url:EARN_PATHS[op],headers,body:op==='receive'?actEncode({reqData:JSON.stringify(body)}):JSON.stringify(body)})));journal.settle(key);return d;
- }
- async function jump(juid,key){
-  if(!/^[a-f0-9]{32}$/i.test(juid))throw Error('金融跳转任务标识不符');
-  report.phase='提交跳转';host.log(report.phase);
-  // Upstream AAR2 signs juid itself, without JSON string quotation marks.
-  const sig=await signed(juid,true),url=EARN_PATHS.jump+'?'+actEncode({juid,...sig,jrAppVersion:profile.query.clientVersion,systemEnv:'IOS'});journal.mark(key);
-  const d=accepted(host.json(await host.request({method:'get',url,headers:{...profile.headers,Origin:'https://show.jd.com',Referer:'https://show.jd.com/static-page/mission/forever/jumpmission-v2/index.html?juid='+juid+'&channelCode=CH202503192','X-Lazing-Activity-Run':'1'}})));journal.settle(key);return d;
- }
- async function run(){
-  try{
-   const tasks=await query();receipts.targets(tasks.map(t=>t.title?.text||t.name));host.log('读取任务 '+tasks.length+' 项');let done=0;
-   if(tasks.some(t=>Number(t.status)!==1))await page(true);
-   for(const t of tasks){
-    host.guard();const row={title:actTitle(t.title?.text||t.name),result:''};report.rows.push(row);host.log(row.title);
-    if(Number(t.status)===1){row.result='任务已完成，到账待确认';row.completed=true;continue;}
-    if(!actId(t.missionId)||!actId(t.channelCode)){row.result='任务标识缺失';continue;}
-    if(/下单|支付|购买|关注|订阅|邀请|助力|开户|借款|理财|保险/.test(row.title)){row.result='需App操作';continue;}
-    const url=String(t.button?.jumpData?.jumpUrl||''),juid=/(?:\?|&)juid=([a-f0-9]{32})(?:&|$)/i.exec(url)?.[1],id=String(t.missionId);
-    if(done>=25){row.result='本轮达到处理上限';break;}
-    if(juid){
-     const key=id+':receive';
-     if(journal.has(key)||journal.has(id+':jump')){row.result='已有提交记录，待确认';verifyRows.push({row,id});continue;}
-     await mission('receive',{missionId:id,channelCode:t.channelCode},key);await jump(juid,id+':jump');
-     row.result='已接取并提交跳转，待复查';row.submitted=true;verifyRows.push({row,id});done++;report.submitted++;
-    }else if(/(?:\?|&)missionId=/.test(url)){
-     const key=id+':next';if(journal.has(key)){row.result='已有提交记录，待确认';continue;}
-     const next=await mission('next',{missionId:id,channelCode:t.channelCode,readTime:10},key),m=next?.data?.missionId;
-     if(!actId(m)){row.result='本次没有浏览项目';continue;}
-     const mid=String(m),base=id+':'+mid;
-     await mission('start',{missionId:mid,channelCode:t.channelCode,readTime:10},base+':start');await host.sleep(12000);
-     const award=await mission('finish',{missionId:mid,channelCode:t.channelCode,readTime:10},base+':finish'),awards=award.data?.awards;let beans=0;
-     if(Array.isArray(awards))for(const a of awards)if(/京豆/.test(String(a.awardName||a.name||''))&&Number.isFinite(Number(a.awardNum)))beans+=Number(a.awardNum);
-     report.beans+=beans;row.result=beans?'领取返回 '+beans+' 京豆':'已提交领奖，到账待确认';row.submitted=true;row.completed=beans>0;done++;report.submitted++;
-    }else {row.result='需App操作';continue;}
-    await host.pause(2000+Math.floor(Math.random()*1000));
-   }
-   if(done>0&&verifyRows.length){const after=await query(true);for(const {row,id} of verifyRows){const task=after.find(x=>String(x.missionId)===id);if(Number(task?.status)===1){row.result='任务已完成，到账待确认';row.completed=true;}else if(row.result==='已接取并提交跳转，待复查')row.result='已提交，进度待App确认';}}
-  }catch(e){report.stopped=true;report.message='活动'+(report.phase||'执行')+'失败：'+host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='未完成：'+report.message;}
-  await receipts.confirm();
-  return report;
- }
- return {run,query};
-}
-
-// Read-only bean receipts. Task offers and successful jump responses are not receipts.
-const EARN_LEDGER='https://bean.m.jd.com/beanDetail/detail.json';
-const earnTitle=s=>String(s||'').normalize('NFKC').replace(/\s+/g,'').slice(0,120);
-function earnReceiptRows(j,day,hash){
- if(!j||String(j.code)!=='0'||!Array.isArray(j.jingDetailList)||j.jingDetailList.length>100)throw Error('京豆明细暂不可用');
- const out=[];let older=false;
- for(const r of j.jingDetailList){
-  const date=String(r?.date||''),m=/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(date);
-  if(!m)continue;
-  const at=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]-8,+m[5],+m[6]),round=new Date(at+8*3600000).toISOString().slice(0,19).replace('T',' ');
-  if(round!==date)continue;if(date.slice(0,10)<day){older=true;continue;}if(date.slice(0,10)!==day)continue;
-  const title=earnTitle(r.eventMassage||r.eventMessage),amount=Number(r.amount);
-  if(!title||!Number.isSafeInteger(amount)||amount<=0||amount>10000000)continue;
-  const id=r.id??r.jingDetailId??r.eventId;
-  const key=hash(JSON.stringify(id!==undefined&&id!==null?['id',String(id)]:['receipt',date,title,amount]));
-  out.push({key,title,amount,date});
- }
- return {rows:out,older,short:j.jingDetailList.length<20};
-}
-function createEarnLedger(host,crypto,profile,report){
- const day=host.day(),key='receipts.earn.'+profile.pin,known=new Set(),cache=host.read(key,null);
- const saved=cache?.pin===profile.pin&&cache.day===day&&Array.isArray(cache.rows)?cache.rows:[];
- function add(names){for(const name of names){const s=earnTitle(name);if(s)known.add(s);}}
- function targets(names){add(names);host.guard();host.write('receiptTargets.earn.'+profile.pin,{pin:profile.pin,day,titles:[...known].slice(0,200)});}
- const previous=host.read('receiptTargets.earn.'+profile.pin,null);if(previous?.pin===profile.pin&&previous.day===day&&Array.isArray(previous.titles))add(previous.titles);
- const last=host.read('earn.last',null),journal=host.read('journal.earn.'+profile.pin,null);
- if(last?.pin===profile.pin&&last.day===day||!last?.pin&&!last?.day&&journal?.day===day&&Object.keys(journal.entries||{}).length){add((last?.rows||[]).map(x=>x.title));}
- function apply(rows){
-  const sums=new Map();for(const r of rows)if(known.has(r.title))sums.set(r.title,(sums.get(r.title)||0)+r.amount);
-  report.ledgerBeans=[...sums.values()].reduce((a,b)=>a+b,0);
-  const duplicates=new Map();for(const row of report.rows){const t=earnTitle(row.title);duplicates.set(t,(duplicates.get(t)||0)+1);}
-  if(!report.rows.length)for(const [title,n] of sums){report.rows.push({title,result:'今日明细到账 '+n+' 京豆（此前任务）',creditedBeans:n,receiptState:'confirmed',completed:true});}
-  else for(const row of report.rows){
-   const n=sums.get(earnTitle(row.title));row.creditedBeans=null;row.receiptState='pending';
-   if(!n)continue;
-   if(duplicates.get(earnTitle(row.title))>1){row.receiptState='ambiguous';row.result+='；同名明细已有到账，归属待核对';continue;}
-   row.creditedBeans=n;row.receiptState='confirmed';
-   if(row.result.startsWith('未完成'))row.result+='；今日明细已有 '+n+' 京豆';
-   else {row.result='今日明细确认到账 '+n+' 京豆';row.completed=true;}
-  }
- }
- async function confirm(){
-  report.ledgerBeans=null;report.ledgerState='pending';
-  if(!known.size){report.ledgerState='no-targets';return;}
-  const seen=new Map(saved.filter(r=>r&&r.date?.slice(0,10)===day&&typeof r.key==='string'&&known.has(r.title)&&Number.isSafeInteger(r.amount)&&r.amount>0).map(r=>[r.key,r]));
-  try{
-   for(let page=1;page<=3;page++){
-    host.guard();host.log('核对京豆明细，第 '+page+' 页');
-    const j=host.json(await host.request({url:EARN_LEDGER+'?page='+page,headers:{Cookie:profile.headers.Cookie,'User-Agent':profile.headers['User-Agent'],'Content-Type':'application/x-www-form-urlencoded',Referer:'https://bean.m.jd.com/beanDetail/index.action?resourceValue=bean','X-Lazing-Activity-Run':'1'},body:actEncode({body:JSON.stringify({pageSize:'20',page:String(page)}),appid:'ld'})}));
-    const parsed=earnReceiptRows(j,day,crypto.hash);
-    for(const r of parsed.rows)if(known.has(r.title))seen.set(r.key,r);
-    report.ledgerState='checked';report.ledgerLimited=page===3&&!parsed.short&&!parsed.older;
-    if(parsed.short||parsed.older)break;
-    await host.pause(1000);
-   }
-   host.guard();host.write(key,{pin:profile.pin,day,rows:[...seen.values()].slice(-300),checkedAt:host.now()});
-  }catch(_){report.ledgerState=seen.size?'cached':'unavailable';host.log('京豆明细暂未核实，保留任务提交结果');}
-  if(report.ledgerState==='checked'||seen.size)apply([...seen.values()]);
- }
- return {targets,confirm};
-}
-function activityRewardText(kind,report){
- if(kind!=='earn')return '接口返回 '+report.beans+' 京豆';
- const ledger=report.ledgerBeans>0?(report.ledgerState==='cached'?'今日此前已核实到账 ':'今日明细确认到账 ')+report.ledgerBeans+' 京豆':report.beans>0?'领奖接口返回 '+report.beans+' 京豆':'到账待确认';
- return ledger+'；本轮提交 '+(report.submitted||0)+' 项';
-}
-
 // Share login identity; activity templates are optional inputs, never login credentials.
 function actSharedMaterial(read,decode){
  const bound=read('JD_SIGNIN_ACCOUNT_V1',null)||read('QL_BRIDGE_ACCOUNT_V1',null),rows=[];
@@ -292,7 +24,6 @@ function actSharedMaterial(read,decode){
  const jx=read('JXZY_CHECKIN_ACCOUNT_V1',null);if(jx)add(jx.pin,jx.headers,jx.loginUpdatedAt||jx.capturedAt,jx.signing,{...jx.query?.params,'x-api-eid-token':jx.signing?.eidToken},'京喜');
  const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null);for(const t of Object.values(retail?.modes||{}))add(retail.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'签到');
  const plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null);for(const t of [plant?.query,plant?.claim])if(t)add(plant.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'种豆');
- const all=read(ACTIVITY_KEY,null);for(const kind of ['egg','earn']){const t=all?.[kind];if(t)add(t.pin,t.headers,t.capturedAt,t.signing,t.params,'活动页');}
  const pin=bound?.pin||canonical.filter(Boolean).sort((a,b)=>b.at-a.at)[0]?.pin||rows.sort((a,b)=>b.at-a.at)[0]?.pin;
  const same=rows.filter(x=>x.pin===pin).sort((a,b)=>b.at-a.at);
  const login=canonical.filter(x=>x?.pin===pin).sort((a,b)=>b.at-a.at)[0]||same[0];
@@ -308,25 +39,6 @@ function actSharedMaterial(read,decode){
  }
  return {pin,headers:h,signing,params,source:login.label,capturedAt:login.at};
 }
-function actDefaultProfile(kind,shared,captured){
- if(captured&&captured.pin!==shared.pin)throw Error('活动资料属于其他账号');
- const p=captured?actClone(captured):{pin:shared.pin,capturedAt:shared.capturedAt};
- const old=p.headers||{},extra=String(old.Cookie||shared.headers.Cookie).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x));
- p.headers={...old,Cookie:actPair(shared.headers.Cookie).cookie+extra.join(';')+';','User-Agent':old['User-Agent']||shared.headers['User-Agent']};
- p.signing=p.signing||shared.signing||{};
- const version=/jdapp;[^;]+;([^;]+)/i.exec(p.headers['User-Agent'])?.[1]||'16.1.50';
- if(kind==='egg'){
-  p.headers.Referer=p.headers.Referer||'https://pro.m.jd.com/';p.params={appid:'SecKill2020',client:'ios',clientVersion:version,...p.params};
-  if(!p.params['x-api-eid-token'])p.params['x-api-eid-token']=shared.params['x-api-eid-token']||'';
- }else{
-  p.headers.Referer='https://member.jr.jd.com/member/coinQuest/coin/';p.headers.Origin='https://member.jr.jd.com';p.headers['X-Requested-With']='com.jd.jrapp';p.headers.Accept='application/json';
-  if(!/(?:^|;\s*)pwdt_id=/.test(p.headers.Cookie))p.headers.Cookie+='pwdt_id='+shared.pin+';';
-  p.query=p.query||{clientVersion:'6.9.02',clientType:'apple',pageType:11189,pageId:11189,ctp:11189,pageNum:-1,buildCodes:['common','topData','float','tag'],extParams:{channelCode:'inside',riskQdPageId:'gainJDbean',riskQdPageName:'赚京豆任务列表页',aarVersion:'2',osVersion:'12',itemIds:[],pageName:'pageCoinQuest',clientEnv:'2',jumpSource:'',abTest:'',schemaList:[],platformFlag:'2',sourceVersion:'62',reqSource:'0',dynamicReq:true,pageUrl:'https://member.jr.jd.com/member/coinQuest/coin/',urlKey:'/member/coinQuest/coin/',clientName:'web'}};
-  p.cco=p.cco||{client:'apple',clientVersion:'6.0.9',_stk:'clientType,clientVersion,ctp,pageId,pageNum,pageType',_ste:1};
-  if(!captured)p.signClientVersion='6.9.0';
- }
- return p;
-}
 function actJxProfile(read,decode){
  const s=actSharedMaterial(read,decode),old=read('JXZY_CHECKIN_ACCOUNT_V1',null);
  if(old?.query&&old?.signing?.environment&&old?.signing?.eidToken&&old?.headers){const p=actClone(old);if(p.pin!==s.pin)throw Error('京喜账号不一致');p.headers.Cookie=s.headers.Cookie;return p;}
@@ -335,17 +47,6 @@ function actJxProfile(read,decode){
  return {pin:s.pin,headers:{...s.headers,Referer:'https://pro.m.jd.com/mall/active/2iqSwv1JiDHxAkHAikfU6XAECFmo/index.html'},capturedAt:s.capturedAt,
   query:{endpoint:'https://api.m.jd.com/api',params:{appid:'jx_h5_babel',client:'jxh5',clientVersion:'1.2.5',channel:'jxh5',functionId:'jxzy_active_querySign',body:JSON.stringify({source:'jxzy',craftId:'6824629a7c46584759d39b78',sceneval:2,buid:325,appCode:'ms1888ebbf'})}},
   signing:{...s.signing,source:'jxzy_active_queryActive',eidToken:s.params['x-api-eid-token']}};
-}
-// JD's public device-token request uses an encoded browser description, without Cookie.
-function actTDEncode(value){
- const s=encodeURIComponent(JSON.stringify(value)),map='23IL<N01c7KvwZO56RSTAfghiFyzWJqVabGH4PQdopUrsCuX*xeBjkltDEmn89.-';let out='';
- for(let i=0;i<s.length;i+=3){const a=s.charCodeAt(i),b=s.charCodeAt(i+1),c=s.charCodeAt(i+2);out+=map.charAt(a>>2)+map.charAt((a&3)<<4|b>>4)+map.charAt(isNaN(b)?64:(b&15)<<2|c>>6)+map.charAt(isNaN(c)?64:c&63);}
- return out+'/';
-}
-function actDeviceRequest(ua,now,fp){
- const head={pin:'',oid:'',bizId:'jd-babelh5',fc:'',mode:'strict',p:'s',fp,ctype:1,v:'3.2.1.1',f:'3',o:'pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',qs:'',jsTk:'',qi:''};
- const device={ts:{deviceTime:now,deviceEndTime:now+100},ca:{tdHash:''},m:{compatMode:'CSS1Compat'},fo:['Bauhaus 93','Casual'],n:{vendorSub:'',productSub:'20030107',vendor:'Apple Computer, Inc.',maxTouchPoints:1,hardwareConcurrency:8,cookieEnabled:true,appCodeName:'Mozilla',appName:'Netscape',appVersion:ua.split('M/')[1]||'',platform:'NA',product:'Gecko',userAgent:ua,language:'zh-CN',onLine:true,webdriver:false,javaEnabled:false,deviceMemory:8,enumerationOrder:["vendorSub","productSub","vendor","maxTouchPoints","userActivation","doNotTrack","geolocation","connection","plugins","mimeTypes","webkitTemporaryStorage","webkitPersistentStorage","hardwareConcurrency","cookieEnabled","appCodeName","appName","appVersion","platform","product","userAgent","language","languages","onLine","webdriver","getBattery","getGamepads","javaEnabled","sendBeacon","vibrate","scheduling","mediaCapabilities","locks","wakeLock","usb","clipboard","credentials","keyboard","mediaDevices","storage","serviceWorker","deviceMemory","bluetooth","getUserMedia","requestMIDIAccess","requestMediaKeySystemAccess","webkitGetUserMedia","clearAppBadge","setAppBadge"]},p:[],w:{devicePixelRatio:2.75,screenTop:0,screenLeft:0},s:{availHeight:873,availWidth:393,colorDepth:24,height:873,width:393,pixelDepth:24},sc:{"ActiveBorder":"rgb(118, 118, 118)","ActiveCaption":"rgb(0, 0, 0)","AppWorkspace":"rgb(255, 255, 255)","Background":"rgb(255, 255, 255)","ButtonFace":"rgb(239, 239, 239)","ButtonHighlight":"rgb(239, 239, 239)","ButtonShadow":"rgb(239, 239, 239)","ButtonText":"rgb(0, 0, 0)","CaptionText":"rgb(0, 0, 0)","GrayText":"rgb(128, 128, 128)","Highlight":"rgba(51, 181, 229, 0.4)","HighlightText":"rgb(255, 255, 255)","InactiveBorder":"rgb(118, 118, 118)","InactiveCaption":"rgb(255, 255, 255)","InactiveCaptionText":"rgb(128, 128, 128)","InfoBackground":"rgb(255, 255, 255)","InfoText":"rgb(0, 0, 0)","Menu":"rgb(255, 255, 255)","MenuText":"rgb(0, 0, 0)","Scrollbar":"rgb(255, 255, 255)","ThreeDDarkShadow":"rgb(118, 118, 118)","ThreeDFace":"rgb(239, 239, 239)","ThreeDHighlight":"rgb(118, 118, 118)","ThreeDLightShadow":"rgb(118, 118, 118)","ThreeDShadow":"rgb(118, 118, 118)","Window":"rgb(255, 255, 255)","WindowFrame":"rgb(118, 118, 118)","WindowText":"rgb(0, 0, 0)"},ss:{cookie:true,localStorage:true,sessionStorage:true,globalStorage:false,indexedDB:true},tz:-480,lil:'',wil:''};
- return {url:'https://jra.jd.com/jsTk.do?a='+encodeURIComponent(actTDEncode(head)),headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':ua},body:actEncode({d:actTDEncode(device)})};
 }
 function actJxTaskCapture(host,req,res,decode){
  if(req?.method!=='POST'||Number(res?.status)!==200||actHeader(req.headers,'X-Lazing-Activity-Run')==='1')return false;
@@ -365,7 +66,7 @@ function actJxTaskCapture(host,req,res,decode){
 
 // Passive consolidated capture; original response unchanged.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-25.1';
+const JS_VERSION='2026-10-26.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
@@ -1174,12 +875,10 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
   const read=(k,f)=>{const v=$persistentStore.read(k);if(!v)return f;return JSON.parse(v);};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('本地记录保存失败');};
   try{
-   const names={'JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场／转盘',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
+   const names={'JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    if(actHeader($request.headers,'X-Lazing-Activity-Run')==='1')return;
-   let activity;try{activity=activityCapture({read,write,observedAt:Number.isFinite(at)&&at>0?at:Date.now()},$request,$response,farmDecodeEnvironment);}catch(_){console.log('[活动凭据] 活动模板未更新，继续检查共享Cookie');}
    try{if(actJxTaskCapture({read,write,observedAt:Number.isFinite(at)&&at>0?at:Date.now()},$request,$response,farmDecodeEnvironment))console.log('[活动凭据] 京喜任务查询资料已更新');}catch(_){console.log('[活动凭据] 京喜任务资料未更新，继续检查共享Cookie');}
-   if(activity){const title=activity.kind==='egg'?'天天砸金蛋':'天天赚京豆';console.log('[活动凭据] '+title+'已更新');if(activity.first)$notification.post('京东活动','凭据已保存',title+(activity.unsupportedSigning?'；签名版本还需适配':'可以手动执行'));}
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment);
    if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
   }catch(_){console.log('[签到凭据] 获取未完成，保留原记录');}
