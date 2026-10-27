@@ -1,0 +1,15 @@
+#!name = 京东签到快捷指令桥接
+#!desc = 配套快捷指令逐项调用现有11项签到。共用本机凭据和提交记录，无新增凭据获取或定时任务。首次填一次私人配对码。
+#!author = LazingLuo
+#!loon_version = 3.5.1(983)
+#!date = 2026-10-27
+
+[Argument]
+pairing = input,"",type=string,tag=本机配对码,desc=粘贴配套快捷指令测试包里的整行配对码，包含中间的竖线。不要填写Cookie
+
+[Script]
+request if ${url} ~= /^http:\/\/example\.com\/loon-jd-signin\/v1\/(?:probe|status|start|finish|task\/(?:daily|scratch|blindbox|plant|jxzy|finance|hs|ys|delivery|game|home))$/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-shortcut.js?v=20261027-1", {${pairing}}) with tag="快捷指令调用京东签到", requires_body=false, timeout=55
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-shortcut.js?v=20261027-1") with tag="查看快捷指令签到结果", timeout=5
+
+[Rule]
+DOMAIN,example.com,DIRECT
