@@ -1,0 +1,12 @@
+#!name = 淘宝双11计时恢复（验证版）
+#!desc = 仅原双11赛车快捷指令的17种任务入口：将官方任务页0.0.5切回0.0.4，验证能否恢复计时。收到改写有通知；成功仍需核对活动任务进度。原快捷指令无需更新。
+#!author = LazingLuo
+#!loon_version = 3.5.1(983)
+#!date = 2026-10-28
+
+[Script]
+response if ${url} ~= /^https:\/\/market\.m\.taobao\.com\/app\/tbsearchwireless-pages\/tao-gold-srp-task-pop\/index\?/ && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-double11-restore.js?v=20261028-1") with tag="双11任务页计时恢复", timeout=5, requires_body=true
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-double11-restore.js?v=20261028-1") with tag="双11计时恢复记录", timeout=5
+
+[Mitm]
+hostname = market.m.taobao.com
