@@ -1,0 +1,20 @@
+#!name = 美团跳转任务助手
+#!desc = 记录7个指定入口的iPhone任务链接，交给配套快捷指令跳转。每项停留8秒；首次填写一次私人配对码。
+#!author = LazingLuo
+#!loon_version = 3.5.1(983)
+#!date = 2026-10-28
+
+[Argument]
+pairing = input,"",type=string,tag=本机配对码,desc=粘贴私人安装包内的整行配对码，包含中间的竖线
+
+[Script]
+request if ${url} ~= /^https:\/\/lx\d*\.meituan\.com\/(?:\?.*)?$/ && ${request.method} == "POST" then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/meituan-jump.js?v=20261028-1") with tag="记录美团任务链接", requires_body=true, timeout=10
+request if ${url} ~= /^http:\/\/example\.com\/loon-meituan-jump\/v1\/(?:probe|tasks)$/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/meituan-jump.js?v=20261028-1", {${pairing}}) with tag="读取美团任务链接", requires_body=false, timeout=5
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/meituan-jump.js?v=20261028-1") with tag="查看美团任务记录", timeout=5
+
+[Rule]
+DOMAIN,lx0.meituan.com,DIRECT
+DOMAIN,example.com,DIRECT
+
+[MITM]
+hostname = lx0.meituan.com

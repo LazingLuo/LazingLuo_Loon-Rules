@@ -1,0 +1,121 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const core = require('../Scripts/meituan-jump.js');
+const {MT_TASKS, MT_BASE, MT_KEY, MT_TTL, mtObserve, mtDecode, mtPlan, mtBridge, mtValidLink} = core;
+let checks = 0;
+function check(ok, label) { assert.ok(ok, label); checks += 1; }
+const now = Date.now(), key = 'a'.repeat(64), proof = 'b'.repeat(64);
+const links = {
+  antManor: 'alipays://platformapi/startapp?appId=20000067&url=FAKE',
+  antForest: 'alipays://platformapi/startapp?appId=20000067&url=FAKE_FOREST',
+  taobaoFarm: 'tbopen://m.taobao.com/tbopen/index.html?fake=1',
+  alipayFarm: 'alipays://platformapi/startapp?appId=68687299&fake=1',
+  etao: 'https://market.m.taobao.com/app/etao/test?fake=1',
+  cmcc: 'cn.10086.app://url=https%3A%2F%2Fwx.10086.cn%2Ffake',
+  weibo: 'sinaweibo://changegroup?groupid=FAKE'
+};
+function envelope(account = 'FAKE_ACCOUNT') {
+  return [{uid: account, package_tm: now, lx_dict: false, evs: JSON.stringify(MT_TASKS.map(t => ({stm: now,
+    val_lab: {title: t.prefix + '可得100', task_detail: {task_code: 'FAKE_CODE',
+      task_url: {iosDeeplink: links[t.key], androidDeeplink: 'intent://NOT_IOS'}}}})))}];
+}
+const full = mtObserve(JSON.stringify(envelope()), null, now);
+check(Object.keys(full.record.tasks).length === 7, 'all seven selected tasks captured');
+check(full.changed.length === 7, 'first capture reports seven changes');
+check(mtPlan(full.record, now).count === 7, 'seven valid plan fields');
+const unchanged = mtObserve(JSON.stringify(envelope()), full.record, now + 1000);
+check(unchanged.changed.length === 0, 'duplicate capture does not notify again');
+const switched = mtObserve(JSON.stringify(envelope('OTHER_FAKE_ACCOUNT')), full.record, now + 1000);
+check(switched.accountChanged && switched.record.account === 'OTHER_FAKE_ACCOUNT', 'new account replaces prior snapshot');
+check(mtObserve(JSON.stringify([{...envelope()[0], uid: '0'}]), null, now).record === null, 'anonymous ignored');
+check(mtObserve('{invalid', full.record, now).record === full.record, 'invalid JSON preserves cache');
+check(mtObserve('x'.repeat(3 * 1024 * 1024 + 1), full.record, now).record === full.record, 'oversized body preserves cache');
+check(mtObserve(JSON.stringify([{...envelope()[0], package_tm: now - MT_TTL}]), null, now).record === null, 'late telemetry cannot create fresh links');
+const missingIos = envelope();
+const ev = JSON.parse(missingIos[0].evs);
+ev[0].val_lab.task_detail.task_url = {androidDeeplink: links.antManor};
+missingIos[0].evs = JSON.stringify(ev);
+check(Object.keys(mtObserve(JSON.stringify(missingIos), null, now).record.tasks).length === 6, 'does not substitute Android link');
+const excluded = envelope();
+const ex = JSON.parse(excluded[0].evs);
+ex.push({stm: now, val_lab: {title: '浏览趣头条可得8888', task_detail: {task_code: 'FAKE', task_url: 'https://h5ssl.1sapp.com/'}}});
+excluded[0].evs = JSON.stringify(ex);
+check(Object.keys(mtObserve(JSON.stringify(excluded), null, now).record.tasks).length === 7, 'Qutoutiao excluded');
+const expired = JSON.parse(JSON.stringify(full.record));
+Object.values(expired.tasks).forEach(x => { x.capturedAt = now - MT_TTL - 1; });
+check(mtPlan(expired, now).count === 0, 'expired links omitted');
+check(!mtValidLink(MT_TASKS[0], 'https://example.invalid/?token=FAKE'), 'unexpected destination rejected');
+check(!mtValidLink(MT_TASKS[0], links.antManor + '\n'), 'control characters rejected');
+check(!mtValidLink(MT_TASKS[0], links.antManor + '%ZZ'), 'broken URL escape rejected');
+function bridge(route, headers = {}, method = 'GET') {
+  return JSON.parse(mtBridge({url: MT_BASE + route, headers, method}, key + '|' + proof, full.record, now).response.body);
+}
+check(bridge('probe').proof === proof, 'probe returns local proof');
+const probeRequest = {url: MT_BASE + 'probe', method: 'GET', headers: {}};
+check(JSON.parse(mtBridge(probeRequest, {pairing: key + '|' + proof}, null, now).response.body).proof === proof, 'subscription object argument supported');
+check(JSON.parse(mtBridge(probeRequest, {pairing: key + '|' + proof + '\n'}, null, now).response.body).proof === proof, 'copied pairing tolerates trailing newline');
+check(JSON.parse(mtBridge(probeRequest, {pairing: ''}, null, now).response.body).code === 'NOT_PAIRED', 'empty subscription pairing refused');
+check(!JSON.stringify(bridge('probe')).includes('FAKE_ACCOUNT'), 'probe has no account identity');
+check(!bridge('probe').antManor, 'probe never returns task URLs');
+check(bridge('tasks').code === 'PAIRING_FAILED', 'unpaired read refused');
+check(bridge('tasks', {'X-Lazing-Export-Key': key}).count === 7, 'paired read returns plan');
+check(bridge('tasks', {origin: 'https://example.invalid', 'X-Lazing-Export-Key': key}).code === 'BROWSER_DENIED', 'browser read refused');
+check(bridge('tasks', {'X-Lazing-Export-Key': key, 'x-lazing-export-key': key}).code === 'PAIRING_FAILED', 'duplicate auth header refused');
+check(bridge('tasks', {}, 'POST').code === 'BAD_REQUEST', 'export route is GET only');
+check(bridge('other').code === 'BAD_REQUEST', 'unknown route refused');
+check(mtDecode('浏览蚂蚁庄园可得D7WWW') === '浏览蚂蚁庄园可得12888', 'decoded reward title');
+check(mtDecode('zQ|U0zzGh*0@hjOUH@0m@U|hGGhH') === 'PFM_APPLICATION_START_MILLIS', 'uppercase telemetry label');
+check(mtDecode('d9t?aA`C1v*vunt') === 'watchVideoCount', 'mixed case key');
+check(mtDecode('KhQh') === 'WIFI', 'network label independently decodes');
+check(mtDecode('C1f9u,tKvrCk') === 'defaultWords', 'uppercase W independently decodes');
+const source = fs.readFileSync(path.join(__dirname, '../Scripts/meituan-jump.js'), 'utf8');
+function run(request, record, arg) {
+  let done, written, notification;
+  vm.runInNewContext(source, {
+    $request: request, $argument: arg, $done: x => { done = x; }, console: {log() {}},
+    $persistentStore: {read: () => record ? JSON.stringify(record) : null, write: (v, k) => { written = {v, k}; return true; }},
+    $notification: {post: (...x) => { notification = x; }}
+  });
+  return {done, written, notification};
+}
+const passthrough = run({url: 'https://lx0.meituan.com/', method: 'POST', body: JSON.stringify(envelope()), headers: {original: 'kept'}});
+check(JSON.stringify(passthrough.done) === '{}', 'observer leaves request untouched');
+check(passthrough.written.k === MT_KEY, 'writes dedicated cache only');
+check(passthrough.notification && !JSON.stringify(passthrough.notification).includes('alipays:'), 'notification contains names only');
+const foreign = run({url: 'https://other.example/', method: 'POST', body: JSON.stringify(envelope())});
+check(JSON.stringify(foreign.done) === '{}' && !foreign.written, 'other destinations not captured');
+let harChecks = 0;
+for (const file of process.argv.slice(2)) {
+  const entries = JSON.parse(fs.readFileSync(file, 'utf8')).log.entries.slice().sort((a, b) => Date.parse(a.startedDateTime) - Date.parse(b.startedDateTime));
+  let record = null, parsed = 0;
+  for (const entry of entries) {
+    if (!/^https:\/\/lx\d*\.meituan\.com\//.test(entry.request.url)) continue;
+    const post = entry.request.postData || {};
+    const body = post.encoding === 'base64' ? Buffer.from(post.text || '', 'base64').toString('utf8') : post.text || '';
+    const result = mtObserve(body, record, Date.parse(entry.startedDateTime));
+    record = result.record;
+    parsed += result.parsed;
+  }
+  const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
+  const plan = mtPlan(record, current);
+  check(plan.count === 7, path.basename(file) + ': seven selected iOS links recovered');
+  check(Object.keys(record.tasks).length === 7, path.basename(file) + ': only requested tasks saved');
+  check(MT_TASKS.every(t => mtValidLink(t, plan[t.key])), path.basename(file) + ': every destination validated');
+  check(!JSON.stringify(record).includes('iosDeeplink'), path.basename(file) + ': no full telemetry saved');
+  console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; seven task links recovered (URLs withheld).');
+  harChecks += 1;
+}
+console.log(checks + ' functional checks passed; ' + harChecks + ' HAR files checked; no task opened or API called.');
+
+const publicPlugin = fs.readFileSync(path.join(__dirname, '../Plugins/meituan-jump.plugin'), 'utf8');
+check(publicPlugin.includes('pairing = input,""'), 'public pairing default empty');
+check(!/[a-f0-9]{64}/.test(publicPlugin), 'no private pairing values published');
+check((publicPlugin.match(/https:\/\/raw\.githubusercontent\.com\/[^"\s]+/g) || []).length === 3, 'all three entries use remote script');
+check(publicPlugin.includes('{${pairing}}'), 'paired route receives plugin argument');
+check(publicPlugin.includes('DOMAIN,example.com,DIRECT'), 'local bridge rule included');
+check(publicPlugin.includes('hostname = lx0.meituan.com'), 'telemetry MITM included');
+check(!publicPlugin.includes('cron '), 'no scheduled execution');
+console.log('Subscription checks passed; total ' + checks + ' checks.');
