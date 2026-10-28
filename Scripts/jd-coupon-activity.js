@@ -413,17 +413,30 @@ function jcBeans(d){
  const rows=d?.successRewards?.['3'];if(!Array.isArray(rows))return null;
  let n=0;for(const r of rows){const q=Number(r.quantity);if(Number(r.rewardType)!==3||r.rewardName!=='京豆'||!Number.isInteger(q)||q<0||q>100000)return null;n+=q;}return n;
 }
+function jcEggChances(d){
+ const reward=d?.successRewards?.['1'];if(!reward||typeof reward!=='object'||Array.isArray(reward)||!Array.isArray(reward.quantityDetails)||!reward.quantityDetails.length)return null;
+ let n=0;for(const r of reward.quantityDetails){const q=Number(r.quantity);if(r.rewardName!=='砸金蛋机会'||!Number.isInteger(q)||q<0||q>100000)return null;n+=q;}
+ return Number.isInteger(Number(reward.quantity))&&Number(reward.quantity)===n?n:null;
+}
+function jcBrowseUrl(url){
+ return typeof url==='string'&&url.length<=16384&&!/[\x00-\x20\x7f]/.test(url)&&/^https:\/\/(?:pro\.m\.jd\.com\/|jdread-api\.jd\.com\/h5\/book_fiction\/|ipay\.jd\.com\/pages\/bbf\/|u\.jr\.jd\.com\/uc-fe-wxgrowing\/|jdhm\.jd\.com\/jdhhome\/|eco\.jr\.jd\.com\/yifenh5(?:[/?#]|$)|laputa\.jd\.com\/JDHDownload\/pages\/index\/)/i.test(url);
+}
 function jcPlan(t){
  const name=String(t.assignmentName||'任务').slice(0,80),ext=t.ext||{};
  if(t.completionFlag===true)return {name,skip:'已完成'};
  if(Number(t.assignmentType)!==1||ext.extraType!=='shoppingActivity')return {name,skip:'需App操作'};
- if(/关注|订阅|进群|加群|分享|邀请|下单|购买|开通|授权|绑定|组件/.test(name))return {name,skip:'需App操作'};
- if(!/可获得京豆/.test(String(t.assignmentDesc||'')))return {name,skip:'奖励为机会或其他权益，跳过'};
+ // 443 capture proves this promotion title uses the ordinary countdown flow,
+ // with no group-join operation. Do not infer side effects from its wording.
+ const groupBrowse=name==='进群天天领4元叠加券'&&Array.isArray(ext.shoppingActivity)&&ext.shoppingActivity.length===1&&/^https:\/\/pro\.m\.jd\.com\/mall\/active\/emJhkDkUG4T8EAAmTeSz6vyVLzq\/index\.html(?:[?#]|$)/.test(ext.shoppingActivity[0]?.url||'');
+ if(/关注|订阅|进群|加群|分享|邀请|下单|购买|开通|授权|绑定|组件/.test(name)&&!groupBrowse)return {name,skip:'需App操作'};
  const limit=Number(t.assignmentTimesLimit),count=Number(t.completionCnt),wait=Number(ext.waitDuration);
- if(limit!==1||!Number.isInteger(count)||count!==0||!Number.isInteger(wait)||wait<1||wait>60||typeof t.encryptAssignmentId!=='string'||!t.encryptAssignmentId)return {name,skip:'任务参数变化，留待App'};
- const items=ext.shoppingActivity;if(!Array.isArray(items)||items.length!==1)return {name,skip:'浏览项目不明确，留待App'};
- const item=items[0];if(Number(item.status)!==1||typeof item.itemId!=='string'||!item.itemId||typeof item.url!=='string'||!/^https:\/\/pro\.m\.jd\.com\//.test(item.url))return {name,skip:'浏览项目变化，留待App'};
- return {name,item,wait,id:t.encryptAssignmentId};
+ if(!Number.isInteger(limit)||limit<1||limit>20||!Number.isInteger(count)||count<0||count>limit||!Number.isInteger(wait)||wait<1||wait>60||typeof t.encryptAssignmentId!=='string'||!t.encryptAssignmentId)return {name,skip:'任务参数变化，留待App'};
+ if(count===limit)return {name,skip:'已完成'};
+ const all=ext.shoppingActivity;if(!Array.isArray(all)||!all.length||all.length>20)return {name,skip:'浏览项目不明确，留待App'};
+ const ids=new Set();for(const item of all){if(!item||typeof item.itemId!=='string'||!item.itemId||ids.has(item.itemId))return {name,skip:'浏览项目变化，留待App'};ids.add(item.itemId);}
+ const pending=all.filter(item=>Number(item.status)===1),items=pending.filter(item=>jcBrowseUrl(item.url)).slice(0,limit-count);
+ if(!items.length)return {name,skip:pending.length?'浏览项目变化，留待App':'暂无可处理浏览项目'};
+ return {name,item:items[0],items,wait,id:t.encryptAssignmentId,limit,count};
 }
 function createCouponActivity(host,crypto){
  async function run(){
@@ -434,7 +447,7 @@ function createCouponActivity(host,crypto){
   const env=crypto.decodeEnvironment(profile.signing.environment);if(![pin,decodeURIComponent(pin)].includes(env.pp?.p1))throw Error('领券中心签名账号不一致');
   const lockKey='JD_COUPON_ACTIVITY_LOCK_V1',previous=host.read(lockKey,null);if(previous?.expires>host.now())throw Error('领券中心正在执行');
   const lock={id:host.now()+':'+host.random(),expires:host.now()+10*60*1000};host.write(lockKey,lock);
-  const report={date,results:[],beanQuantity:0,unknownRewards:0},snapshot=JSON.stringify(profile);
+  const report={date,results:[],beanQuantity:0,eggChances:0,unknownRewards:0},snapshot=JSON.stringify(profile);
   function guard(){
    if(host.day()!==date||jsLogin(host.read).pin!==pin||host.read(lockKey,null)?.id!==lock.id||host.now()>lock.expires)throw Error('日期或账号变化，执行停止');
    if(JSON.stringify(host.read(JC_KEY,null))!==snapshot)throw Error('页面凭据已更新，请重新手动执行');
@@ -453,33 +466,50 @@ function createCouponActivity(host,crypto){
    if(Number(r.status)!==200)throw Error('HTTP '+Number(r.status));const j=JSON.parse(r.body);jcData(j);return j;
   }
   const journal=()=>host.read(JC_JOURNAL,{});
-  const key=id=>date+':'+crypto.hash(pin).slice(0,24)+':'+crypto.hash(id).slice(0,24);
-  function mark(id,phase,extra={}){guard();const j=journal();j[key(id)]={phase,at:host.now(),...extra};for(const k of Object.keys(j))if(k.slice(0,10)<date)delete j[k];host.write(JC_JOURNAL,j);}
+  const key=(id,itemId)=>date+':'+crypto.hash(pin).slice(0,24)+':'+crypto.hash(id).slice(0,24)+(itemId?':'+crypto.hash(itemId).slice(0,24):'');
+  function mark(id,itemId,phase,extra={}){guard();const j=journal();j[key(id,itemId)]={phase,at:host.now(),...extra};for(const k of Object.keys(j))if(k.slice(0,10)<date)delete j[k];host.write(JC_JOURNAL,j);}
   try{
-   const tasks=jcList(await call('sh_c_query_task_list',{viewStage:'taskList'}));host.log('读取 '+tasks.length+' 项任务');
-   for(const t of tasks){
-    guard();const p=jcPlan(t),row={name:p.name};report.results.push(row);
-    if(p.skip){row.detail=p.skip;host.log(row.name+'：'+row.detail);continue;}
-    if(journal()[key(p.id)]){row.detail='今天已有提交记录，留待App核对';host.log(row.name+'：'+row.detail);continue;}
-    const body={jumpUrl:p.item.url,itemId:p.item.itemId,encryptAssignmentId:p.id};
+   const initial=jcList(await call('sh_c_query_task_list',{viewStage:'taskList'}));let latest=initial;host.log('读取 '+initial.length+' 项任务');
+   for(const original of initial){
+    guard();const t=latest.find(x=>x.encryptAssignmentId===original.encryptAssignmentId);
+    if(!t){report.results.push({name:String(original.assignmentName||'任务').slice(0,80),detail:'任务列表已变化，留待App'});continue;}
+    const p=jcPlan(t);
+    if(p.skip){report.results.push({name:p.name,detail:p.skip});host.log(p.name+'：'+p.skip);continue;}
+    for(const selected of p.items){
+    guard();const fresh=latest.find(x=>x.encryptAssignmentId===p.id),current=fresh&&jcPlan(fresh);
+    if(!current||current.skip)break;
+    const item=current.items.find(x=>x.itemId===selected.itemId);if(!item)continue;
+    const row={name:p.name+(p.limit>1?'（'+(current.count+1)+'/'+p.limit+'）':'')};report.results.push(row);
+    // Respect old assignment-wide journals as well as new per-item journals.
+    if(journal()[key(p.id)]||journal()[key(p.id,item.itemId)]){row.detail='今天已有提交记录，留待App核对';host.log(row.name+'：'+row.detail);continue;}
+    const body={jumpUrl:item.url,itemId:item.itemId,encryptAssignmentId:p.id};
     // Journal before sending the first action; uncertain actions are not replayed.
-    mark(p.id,'starting');row.detail='浏览尚未确认';
+    mark(p.id,item.itemId,'starting');row.detail='浏览尚未确认';
     const startReply=await call('sh_c_do_task',{actionType:1,...body}),start=jcData(startReply);
     if(String(start.subCode)!=='1'||typeof start.toUrl!=='string')throw jcProblem('领券中心开始浏览未通过',startReply);
     let timer;try{timer=JSON.parse(start.toUrl.slice(start.toUrl.indexOf('?params=')+8));}catch(_){throw Error('App倒计时参数变化');}
     if(!start.toUrl.startsWith('openapp.jdmobile://virtual?params=')||timer.des!=='countdown'||Number(timer.needSlide)!==0||!Number.isInteger(timer.second)||timer.second<1||timer.second>60)throw Error('该任务需要App操作');
     const seconds=Math.max(p.wait,timer.second)+1;host.log(row.name+'：浏览计时 '+seconds+' 秒');await host.sleep(seconds*1000);guard();
-    mark(p.id,'finishing');const doneReply=await call('sh_c_do_task',{actionType:0,...body}),done=jcData(doneReply);
+    mark(p.id,item.itemId,'finishing');const doneReply=await call('sh_c_do_task',{actionType:0,...body}),done=jcData(doneReply);
     if(String(done.subCode)!=='0'||Array.isArray(done.failRewards)&&done.failRewards.length)throw jcProblem('领券中心完成提交未通过',doneReply);
-    const beans=jcBeans(done);row.id=p.id;row.detail=beans===null?'提交完成，奖励数量待确认':'接口返回 '+beans+' 京豆';
-    if(beans===null)report.unknownRewards++;else report.beanQuantity+=beans;
-    mark(p.id,'accepted',{beanQuantity:beans});host.log(row.name+'：'+row.detail);
+    const beans=jcBeans(done),chances=jcEggChances(done),amounts=[];row.id=p.id;row.itemId=item.itemId;
+    if(beans!==null){report.beanQuantity+=beans;amounts.push(beans+' 京豆');}
+    if(chances!==null){report.eggChances+=chances;amounts.push(chances+' 次砸金蛋机会');}
+    row.detail=amounts.length?'接口返回 '+amounts.join('、'):'提交完成，奖励数量待确认';if(!amounts.length)report.unknownRewards++;
+    row.beanQuantity=beans;row.eggChances=chances;
+    mark(p.id,item.itemId,'accepted',{beanQuantity:beans,eggChances:chances});
+    latest=jcList(await call('sh_c_query_task_list',{viewStage:'taskList'}));
+    const after=latest.find(x=>x.encryptAssignmentId===p.id),afterItem=after?.ext?.shoppingActivity?.find(x=>x.itemId===item.itemId);
+    row.confirmed=after?.completionFlag===true||Number(afterItem?.status)===2;
+    if(!row.confirmed){row.detail+='，任务状态待确认';host.log(row.name+'：'+row.detail);break;}
+    host.log(row.name+'：'+row.detail);
+    }
    }
-   const after=jcList(await call('sh_c_query_task_list',{viewStage:'taskList'}));
-   for(const row of report.results)if(row.id){const t=after.find(t=>t.encryptAssignmentId===row.id);row.confirmed=t?.completionFlag===true;if(!row.confirmed)row.detail+='，任务状态待确认';}
+   if(!report.results.some(row=>row.id))await call('sh_c_query_task_list',{viewStage:'taskList'});
   }catch(e){report.stopped=true;report.error=/^HTTP \d+$|^领券中心|账号|日期|缺少|正在执行|凭据已更新/.test(String(e.message))?String(e.message):'活动接口或任务参数变化，已停止';host.log(report.error);}
   finally{if(host.read(lockKey,null)?.id===lock.id)host.rawWrite('',lockKey);}
-  const summary=report.beanQuantity>0?'接口返回 '+report.beanQuantity+' 京豆'+(report.unknownRewards?'；另有奖励待确认':''):report.unknownRewards?'奖励数量待确认':'本轮未取得已确认奖励';
+  const sums=[];if(report.beanQuantity>0)sums.push(report.beanQuantity+' 京豆');if(report.eggChances>0)sums.push(report.eggChances+' 次砸金蛋机会');
+  const summary=sums.length?'接口返回 '+sums.join('、')+(report.unknownRewards?'；另有奖励待确认':''):report.unknownRewards?'奖励数量待确认':'本轮未取得已确认奖励';
   report.message=report.results.map(r=>r.name+'：'+r.detail).join('\n')+'\n'+summary;
   host.write('JD_COUPON_ACTIVITY_LAST_V1',report);return report;
  }
@@ -504,7 +534,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   const log=s=>console.log('[领券中心] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};
   const host={rawRead,rawWrite,read,write,request,now:()=>Date.now(),day:jsDay,random:()=>Math.random(),setTimeout,clearTimeout:cancel,sleep:ms=>new Promise(r=>setTimeout(r,ms)),log};
   try{
-   log('版本 20261026-9；手动执行领券中心浏览任务');
+   log('版本 20261028-1；手动执行领券中心浏览任务，分别统计京豆和砸金蛋机会');
    const crypto=createSigninCrypto({...host,requestAlgo:o=>request('algo',o),progress:log});
    const r=await createCouponActivity(host,crypto).run();log(r.message);
    $notification.post('领券中心',r.stopped?'执行停止':'本次活动结果',(r.error?r.error+'\n':'')+r.message);
@@ -512,4 +542,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   finally{$done({});}
  })();
 }
-if(typeof module!=='undefined')module.exports={createCouponActivity,jsCouponCapture,jcPlan,jcBeans,jcList,JC_KEY,JC_JOURNAL,JC_ENCODING};
+if(typeof module!=='undefined')module.exports={createCouponActivity,jsCouponCapture,jcPlan,jcBeans,jcEggChances,jcBrowseUrl,jcList,JC_KEY,JC_JOURNAL,JC_ENCODING};
