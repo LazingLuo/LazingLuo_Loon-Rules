@@ -15,7 +15,11 @@ const links = {
   alipayFarm: 'alipays://platformapi/startapp?appId=68687299&fake=1',
   etao: 'https://market.m.taobao.com/app/etao/test?fake=1',
   cmcc: 'cn.10086.app://url=https%3A%2F%2Fwx.10086.cn%2Ffake',
-  weibo: 'sinaweibo://changegroup?groupid=FAKE'
+  weibo: 'sinaweibo://changegroup?groupid=FAKE',
+  xianyu: 'https://h5.m.goofish.com/wow/moyu/moyu-project/coin/pages/coinCallApp?taskCode=FAKE',
+  alipayMember: 'alipays://platformapi/startapp?appId=FAKE_MEMBER',
+  alipayGold: 'alipays://platformapi/startapp?appId=FAKE_GOLD',
+  mtContent: 'imeituan://www.meituan.com/mmp?appId=FAKE&targetPath=FAKE'
 };
 function envelope(account = 'FAKE_ACCOUNT') {
   return [{uid: account, package_tm: now, lx_dict: false, evs: JSON.stringify(MT_TASKS.map(t => ({stm: now,
@@ -23,9 +27,9 @@ function envelope(account = 'FAKE_ACCOUNT') {
       task_url: {iosDeeplink: links[t.key], androidDeeplink: 'intent://NOT_IOS'}}}})))}];
 }
 const full = mtObserve(JSON.stringify(envelope()), null, now);
-check(Object.keys(full.record.tasks).length === 7, 'all seven selected tasks captured');
-check(full.changed.length === 7, 'first capture reports seven changes');
-check(mtPlan(full.record, now).count === 7, 'seven valid plan fields');
+check(Object.keys(full.record.tasks).length === 11, 'all eleven selected tasks captured');
+check(full.changed.length === 11, 'first capture reports eleven changes');
+check(mtPlan(full.record, now).count === 11, 'eleven valid plan fields');
 const unchanged = mtObserve(JSON.stringify(envelope()), full.record, now + 1000);
 check(unchanged.changed.length === 0, 'duplicate capture does not notify again');
 const switched = mtObserve(JSON.stringify(envelope('OTHER_FAKE_ACCOUNT')), full.record, now + 1000);
@@ -38,12 +42,12 @@ const missingIos = envelope();
 const ev = JSON.parse(missingIos[0].evs);
 ev[0].val_lab.task_detail.task_url = {androidDeeplink: links.antManor};
 missingIos[0].evs = JSON.stringify(ev);
-check(Object.keys(mtObserve(JSON.stringify(missingIos), null, now).record.tasks).length === 6, 'does not substitute Android link');
+check(Object.keys(mtObserve(JSON.stringify(missingIos), null, now).record.tasks).length === 10, 'does not substitute Android link');
 const excluded = envelope();
 const ex = JSON.parse(excluded[0].evs);
 ex.push({stm: now, val_lab: {title: '浏览趣头条可得8888', task_detail: {task_code: 'FAKE', task_url: 'https://h5ssl.1sapp.com/'}}});
 excluded[0].evs = JSON.stringify(ex);
-check(Object.keys(mtObserve(JSON.stringify(excluded), null, now).record.tasks).length === 7, 'Qutoutiao excluded');
+check(Object.keys(mtObserve(JSON.stringify(excluded), null, now).record.tasks).length === 11, 'Qutoutiao excluded');
 const expired = JSON.parse(JSON.stringify(full.record));
 Object.values(expired.tasks).forEach(x => { x.capturedAt = now - MT_TTL - 1; });
 check(mtPlan(expired, now).count === 0, 'expired links omitted');
@@ -62,6 +66,13 @@ check(!JSON.stringify(bridge('probe')).includes('FAKE_ACCOUNT'), 'probe has no a
 check(!bridge('probe').antManor, 'probe never returns task URLs');
 check(bridge('tasks').code === 'PAIRING_FAILED', 'unpaired read refused');
 check(bridge('tasks', {'X-Lazing-Export-Key': key}).count === 7, 'paired read returns plan');
+const extended = bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v1'});
+check(extended.count === 11 && extended.xianyu && extended.alipayMember && extended.alipayGold && extended.mtContent, 'extended Shortcut receives all eleven entries');
+check(!bridge('tasks', {'X-Lazing-Export-Key': key}).xianyu, 'old Shortcut receives no extra task links or inflated count');
+check(bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'unknown'}).count === 7, 'unknown client preserves legacy plan');
+check(mtPlan(full.record, now).summary.includes('/11'), 'observer summary uses eleven-task denominator');
+check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), 'https://h5.m.goofish.com/other?taskCode=FAKE'), 'Xianyu route constrained to observed task landing path');
+check(!mtValidLink(MT_TASKS.find(t => t.key === 'mtContent'), 'imeituan://www.meituan.com/other?appId=FAKE'), 'Meituan content route constrained to observed mini-app path');
 check(bridge('tasks', {origin: 'https://example.invalid', 'X-Lazing-Export-Key': key}).code === 'BROWSER_DENIED', 'browser read refused');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'x-lazing-export-key': key}).code === 'PAIRING_FAILED', 'duplicate auth header refused');
 check(bridge('tasks', {}, 'POST').code === 'BAD_REQUEST', 'export route is GET only');
@@ -101,11 +112,12 @@ for (const file of process.argv.slice(2)) {
   }
   const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
   const plan = mtPlan(record, current);
-  check(plan.count === 7, path.basename(file) + ': seven selected iOS links recovered');
-  check(Object.keys(record.tasks).length === 7, path.basename(file) + ': only requested tasks saved');
-  check(MT_TASKS.every(t => mtValidLink(t, plan[t.key])), path.basename(file) + ': every destination validated');
+  const expected = path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent'];
+  check(plan.count === expected.length, path.basename(file) + ': selected iOS links recovered');
+  check(Object.keys(record.tasks).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
+  check(expected.every(k => mtValidLink(MT_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
   check(!JSON.stringify(record).includes('iosDeeplink'), path.basename(file) + ': no full telemetry saved');
-  console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; seven task links recovered (URLs withheld).');
+  console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; ' + plan.count + ' task links recovered (URLs withheld).');
   harChecks += 1;
 }
 console.log(checks + ' functional checks passed; ' + harChecks + ' HAR files checked; no task opened or API called.');

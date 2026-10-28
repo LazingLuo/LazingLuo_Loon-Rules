@@ -1,6 +1,6 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.1.1';
+const MT_VERSION = '0.2.0';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
@@ -11,7 +11,11 @@ const MT_TASKS = [
   {key: 'alipayFarm', name: '支付宝芭芭农场', prefix: '浏览支付宝芭芭农场', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'etao', name: '一淘', prefix: '浏览一淘', route: /^https:\/\/market\.m\.taobao\.com\//},
   {key: 'cmcc', name: '中国移动', prefix: '浏览中国移动', route: /^cn\.10086\.app:\/\/url=https(?:%3[aA]%2[fF]%2[fF]|:\/\/)wx\.10086\.cn(?:%2[fF]|\/)/},
-  {key: 'weibo', name: '微博', prefix: '浏览微博', route: /^sinaweibo:\/\/changegroup\?/}
+  {key: 'weibo', name: '微博', prefix: '浏览微博', route: /^sinaweibo:\/\/changegroup\?/},
+  {key: 'xianyu', name: '闲鱼', prefix: '浏览闲鱼', route: /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/},
+  {key: 'alipayMember', name: '支付宝会员', prefix: '浏览支付宝会员', route: /^alipays:\/\/platformapi\/startapp\?/},
+  {key: 'alipayGold', name: '支付宝金豆夺宝', prefix: '逛一逛支付宝金豆夺宝', route: /^alipays:\/\/platformapi\/startapp\?/},
+  {key: 'mtContent', name: '精彩内容', prefix: '浏览精彩内容', route: /^imeituan:\/\/www\.meituan\.com\/mmp\?/}
 ];
 // A character substitution in lx_dict telemetry; structural JSON is retained.
 // Complete ASCII letter/digit mapping recovered from independent field names,
@@ -100,10 +104,10 @@ function mtObserve(body, old, now) {
   result.changed = Array.from(changed);
   return result;
 }
-function mtPlan(record, now) {
+function mtPlan(record, now, tasks = MT_TASKS) {
   const plan = {schema: 'lazing-meituan-jump-plan-v1', count: 0, message: '', summary: ''};
   const missing = [], ready = [];
-  MT_TASKS.forEach(task => {
+  tasks.forEach(task => {
     plan[task.key] = '';
     const item = record && record.tasks && record.tasks[task.key];
     const age = item && now - Number(item.capturedAt);
@@ -113,7 +117,7 @@ function mtPlan(record, now) {
       ready.push(task.name);
     } else missing.push(task.name);
   });
-  plan.summary = '本次准备 ' + plan.count + '/7 项：' + ready.join('、') +
+  plan.summary = '本次准备 ' + plan.count + '/' + tasks.length + ' 项：' + ready.join('、') +
     (missing.length ? '。缺少：' + missing.join('、') : '');
   plan.message = plan.count ? plan.summary : '还没记录到任务链接。请打开美团金币任务列表，停留几秒后再运行。';
   return plan;
@@ -131,13 +135,16 @@ function mtBridge(request, argument, record, now) {
     'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff'
   }, body: JSON.stringify(Object.assign({schema: 'lazing-meituan-jump-plan-v1', version: MT_VERSION,
     connected: '', proof: '', code: '', message: '', count: 0, antManor: '', antForest: '',
-    taobaoFarm: '', alipayFarm: '', etao: '', cmcc: '', weibo: ''}, value))}});
+    taobaoFarm: '', alipayFarm: '', etao: '', cmcc: '', weibo: '', xianyu: '',
+    alipayMember: '', alipayGold: '', mtContent: ''}, value))}});
   if (!/^[a-f0-9]{64}$/.test(key || '') || !/^[a-f0-9]{64}$/.test(proof || '')) return reply({code: 'NOT_PAIRED', message: '请使用同一套插件和快捷指令'});
   if (!request || request.method !== 'GET' || ![MT_BASE + 'probe', MT_BASE + 'tasks'].includes(request.url)) return reply({code: 'BAD_REQUEST', message: '本机入口不匹配'});
   if (Object.keys(request.headers || {}).some(k => /^(origin|referer)$/i.test(k))) return reply({code: 'BROWSER_DENIED', message: '请通过配套快捷指令读取'});
   if (request.url === MT_BASE + 'probe') return reply({connected: 'yes', proof, code: 'CONNECTED'});
   if (mtHeader(request.headers, 'X-Lazing-Export-Key') !== key) return reply({code: 'PAIRING_FAILED', message: '插件与快捷指令未配对，请导入同一套文件'});
-  const plan = mtPlan(record, now);
+  // Older Shortcuts only contain seven branches. Keep their counts accurate.
+  const extended = mtHeader(request.headers, 'X-Lazing-Jump-Plan') === 'extended-v1';
+  const plan = mtPlan(record, now, extended ? MT_TASKS : MT_TASKS.slice(0, 7));
   return reply(Object.assign(plan, {code: plan.count ? 'READY' : 'NO_TASKS'}));
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = {MT_MAP, MT_TASKS, MT_KEY, MT_BASE, MT_TTL,
@@ -147,7 +154,7 @@ if (typeof $done === 'function') {
   const read = () => mtObject($persistentStore.read(MT_KEY));
   if (typeof $request === 'undefined') {
     const p = mtPlan(read(), now);
-    const content = p.message + '\n每项停留8秒；这里显示链接记录，不判断金币到账。';
+    const content = p.message + '\n配套v0.2.0快捷指令每项停留5秒；这里显示链接记录，不判断金币到账。';
     console.log('[美团任务] ' + content);
     $done({title: '美团任务链接记录', content});
   } else if (String($request.url).startsWith(MT_BASE)) {
@@ -164,8 +171,8 @@ if (typeof $done === 'function') {
       if (found.changed.length || found.accountChanged) {
         const names = found.changed.map(k => MT_TASKS.find(t => t.key === k).name);
         const p = mtPlan(found.record, now);
-        console.log('[美团任务] 已记录 ' + p.count + '/7 项：' + names.join('、'));
-        $notification.post('美团任务链接', '已记录 ' + p.count + '/7 项', names.join('、') || '账号已切换，请重新打开任务列表');
+        console.log('[美团任务] 已记录 ' + p.count + '/' + MT_TASKS.length + ' 项：' + names.join('、'));
+        $notification.post('美团任务链接', '已记录 ' + p.count + '/' + MT_TASKS.length + ' 项', names.join('、') || '账号已切换，请重新打开任务列表');
       }
       if (found.invalid) console.log('[美团任务] ' + found.invalid + ' 条地址未通过检查，已跳过');
     } catch (_) { console.log('[美团任务] 本次记录未完成，原请求继续'); }
