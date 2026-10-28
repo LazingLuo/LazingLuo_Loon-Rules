@@ -1,8 +1,9 @@
-// Exact release bundles; synthetic credentials and simulated HTTP only.
+// Current activity bundles; synthetic credentials and simulated HTTP only.
+// Shared wheel-core regression cases do not expose or restore a wheel entry in the plugin.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
-const root=__dirname,release=fs.existsSync(path.join(root,'jd-farm-tasks.js'));
-const mainPath=path.join(root,release?'jd-farm-tasks.js':'../Scripts/jd-farm-tasks.js');
-const capturePath=path.join(root,release?'jd-farm-tasks-capture.js':'../Scripts/jd-farm-tasks-capture.js');
+const root=__dirname,release=fs.existsSync(path.join(root,'jd-farm-activity.js'));
+const mainPath=path.join(root,release?'jd-farm-activity.js':'../Scripts/jd-farm-activity.js');
+const capturePath=path.join(root,release?'jd-activity-capture.js':'../Scripts/jd-activity-capture.js');
 const {farmTools,createFarmTaskClient,createFarmCrypto,farmReportText,farmResponseDiagnostic,farmDiagnosticText}=require(mainPath);
 const {farmCapture,farmDecodeEnvironment}=require(capturePath),T=farmTools(),clone=o=>JSON.parse(JSON.stringify(o));
 const encode=o=>{const n='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/',m='rqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_9876543210zyxwvuts';return [...Buffer.from(JSON.stringify(o)+'x').toString('base64').replace(/=+$/,'')].map(c=>m[n.indexOf(c)]).reverse().join('');};
@@ -175,7 +176,7 @@ async function simulate(options={}){
  const first=new Map(),h={read:(k,f)=>first.get(k)||f,write:(k,v)=>first.set(k,v),now:()=>100};
  farmCapture(h,captureRequest('wheel','wheelsHome',{linkId:T.WHEEL,inviterEncryptPin:'SHOULD_REMOVE'}),{status:200,body:'{"code":0,"data":{"lotteryChances":1}}'},farmDecodeEnvironment);
  const ready=farmCapture(h,captureRequest('wheel','apTaskList',queryBody('wheel')),{status:200,body:'{"code":0,"data":[]}'},farmDecodeEnvironment);assert(ready.firstReady);assert(!JSON.stringify(first.get(T.ACCOUNT)).includes('SHOULD_REMOVE'));n++;
- const plugin=fs.readFileSync(path.join(root,release?'jd-farm-tasks.plugin':'../Plugins/jd-farm-tasks.plugin'),'utf8');assert.equal((plugin.match(/^generic /gm)||[]).length,7);assert(!/^cron /m.test(plugin));assert(!T.ALLOWED.has('farm_water'));assert(!T.ALLOWED.has('farm_one_key_plant_settle'));n++;
+ const plugin=fs.readFileSync(path.join(root,release?'jd-activities.plugin':'../Plugins/jd-activities.plugin'),'utf8');assert.equal((plugin.match(/^generic /gm)||[]).length,3);assert(!/^cron /m.test(plugin));assert(!T.ALLOWED.has('farm_water'));assert(!T.ALLOWED.has('farm_one_key_plant_settle'));n++;
  // Loon entry: full exact bundle, no network allowed for status or missing profile.
  for(const mode of ['status','farm-query']){
   let done=false;const notes=[],writes=[];const context={console:{log:()=>{}},$argument:mode,$persistentStore:{read:()=>'',write:(v,k)=>{writes.push(k);return true;}},$notification:{post:(...a)=>notes.push(a)},$httpClient:{post:()=>{throw Error('unexpected network');}},$done:()=>{done=true;},setTimeout,clearTimeout};vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await new Promise(r=>setImmediate(r));assert(done);assert(notes.length);assert(writes.every(k=>k.startsWith(T.PREFIX)));n++;

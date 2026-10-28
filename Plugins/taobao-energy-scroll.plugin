@@ -1,9 +1,0 @@
-#!name = 淘宝攒能量自动滚动（试用版）
-#!desc = 配合自动滚动版快捷指令，仅在带专用标记的搜索和惊喜好物页尝试实际滚动。等待官方计时，未确认时提示手动处理。需保持淘宝前台、屏幕解锁。
-#!date = 2026-10-20
-
-[Script]
-http-response ^https:\/\/mo\.m\.taobao\.com\/union2\/(?:page_1728378489402|page_1697972915627)\?(?=(?:[^&#]*&)*loon_energy_scroll=1(?:&|$)) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/taobao-energy-scroll.js?v=20261020-1,requires-body=true,timeout=10,tag=攒能量页面自动滚动,enable=true
-
-[MITM]
-hostname = mo.m.taobao.com
