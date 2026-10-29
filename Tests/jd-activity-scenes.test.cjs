@@ -60,7 +60,7 @@ test('home client completes, claims, verifies and does not call sign-in',async()
  if(p.functionId==='jxzy_active_task_rewardTask'){assert.equal(p.h5st.split(';')[2],'573fe');status=20;return postReply({code:0,data:{prizeInfos:[{prizeType:2,discount:1}]}});}
  return postReply({code:0,data:{taskInfoList:[houseTask(status)]}});
  };
- const r=await home.createJxTaskClient(h,homeCrypto).makeRunner(houseProfile()).run('all');assert(!r.stopped,r.message);assert.equal(r.confirmedBeans,1);assert.equal(r.claimedBeans,1);assert.deepEqual(h.waits,[11000]);
+ const r=await home.createJxTaskClient(h,homeCrypto).makeRunner(houseProfile()).run('all');assert(!r.stopped,r.message);assert.equal(r.confirmedBeans,1);assert.equal(r.claimedBeans,1);assert.deepEqual(h.waits,[4000,11000,4000,4000,4000,4000]);
 });
 test('home and Jingxi profiles stay separate',()=>{const p=houseProfile();p.query.body=JSON.stringify({...houseBase,craftId:'6824629a7c46584759d39b78'});assert.throws(()=>home.createJxTaskClient(host(),homeCrypto).makeRunner(p),/活动不符/);assert(!homeSource.includes('JXZY_TASKS_V1.'));assert(homeSource.includes('JD_HOME_TASKS_V1.'));});
 test('home skips invitations and already claimed tasks',async()=>{const h=host();h.reply=async()=>postReply({code:0,data:{taskInfoList:[houseTask(20),{showTask:1,taskType:1,taskName:'分享好友助力'}]}});const r=await home.createJxTaskClient(h,homeCrypto).makeRunner(houseProfile()).run('all');assert.equal(r.skipped,1);assert(h.calls.every(a=>Object.fromEntries(new URLSearchParams(a[0].body)).functionId==='jxzy_active_task_queryTaskList'));});

@@ -1,3 +1,31 @@
+// Activity execution revision 20261029-2
+// BEGIN JD activity request pacing: business requests only, before signing.
+function createJdActivityPacer(host) {
+  let completedAt = null, gapMs = 0;
+  async function beforeRequest() {
+    if (typeof host.guard === 'function') host.guard();
+    if (completedAt !== null) {
+      const remaining = Math.max(0, completedAt + gapMs - host.now());
+      if (remaining > 0) {
+        if (typeof host.log === 'function') host.log('请求间隔：等待 ' + (remaining / 1000).toFixed(1) + ' 秒');
+        await host.sleep(remaining);
+      }
+    }
+    if (typeof host.guard === 'function') host.guard();
+  }
+  async function request(...args) {
+    try { return await host.request(...args); }
+    finally {
+      completedAt = host.now();
+      const value = typeof host.random === 'function' ? host.random() : Math.random();
+      const random = Number.isFinite(value) ? Math.min(0.999999999, Math.max(0, value)) : 0.5;
+      gapMs = (2 + Math.floor(random * 4)) * 1000;
+    }
+  }
+  return { beforeRequest, request };
+}
+// END JD activity request pacing.
+
 // 东东农场与幸运转盘，Loon手动版 2026-10-23.2
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
@@ -381,8 +409,8 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
   const T=farmTools(),day=host.day(),journalKey='actions.'+crypto.hash(account?.pin||'').slice(0,24);
   const saved=host.read(journalKey,{day,actions:{}}),journal=saved.day===day?saved:{day,actions:{}};
   const report={day,rows:[],initial:[],final:[],waterReceived:0,waterConfirmed:0,draws:[],drawsConfirmed:0,stopped:false};
-  const latestTasks={};
-  let requestCount=0,lastResponseAt=null,sessionRisk=null,signLink=null;
+  const latestTasks={},pacing=createJdActivityPacer(host);
+  let requestCount=0,sessionRisk=null,signLink=null;
   // JD's observed response header is "set;1800;<sdtoken>". Keep it only for
   // this run, across request templates; never overwrite captured credentials.
   function updateSession(response){
@@ -417,9 +445,7 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     guard();if(!T.ALLOWED.has(fn)||scope==='farm'&&fn.startsWith('wheels')||scope==='wheel'&&(['farm_home','apTaskListBatch','apTaskDrawAward'].includes(fn)||fn.startsWith('weGame')))throw Error('农场操作范围不符');
     if(fn.startsWith('weGame')&&(!signLink||body.linkId!==signLink))throw Error('农场签到入口不符');
     if(T.MUTATE.has(fn)&&!key)throw Error('农场操作缺少提交记录');
-    // Pace successive requests, including the list refreshes before a mutation.
-    // This is preventive; an HTTP rejection alone does not prove rate limiting.
-    if(lastResponseAt!==null){const rest=900-(host.now()-lastResponseAt);if(rest>0){await host.pause(rest);host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');}}
+    await pacing.beforeRequest();host.guard();if(host.day()!==day)throw Error('农场执行跨过零点，请重新运行');
     const {t,headers,signing,environment}=profile(scope,fn),p={...t.params};
     p.functionId=fn;p.body=JSON.stringify(body);p.t=String(host.now());delete p.h5st;
     p.appid=fn.startsWith('weGame')?'wegame-hub':fn==='farm_home'?'signed_wh5':fn==='apStartTaskTime'?'activity_platform_se':'activities_platform';
@@ -436,8 +462,8 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     const diagnose=parsed=>{detail.response=farmResponseDiagnostic(r,parsed);host.progress('响应诊断：'+farmDiagnosticText(detail));};
     host.progress(detail.stage+'（'+fn+'）');
     if(T.MUTATE.has(fn))mark(key);
-    let r;try{r=await host.request({url:t.endpoint+'?functionId='+fn,headers:{...headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Farm-Run':'1'},body:T.encode(p)});}catch(_){detail.networkError=true;throw Error('农场'+detail.stage+'网络结果未确认（'+fn+'），已停止');}
-    lastResponseAt=host.now();detail.status=Number.isInteger(Number(r.status))&&Number(r.status)>=100&&Number(r.status)<=599?Number(r.status):0;
+    let r;try{r=await pacing.request({url:t.endpoint+'?functionId='+fn,headers:{...headers,'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Farm-Run':'1'},body:T.encode(p)});}catch(_){detail.networkError=true;throw Error('农场'+detail.stage+'网络结果未确认（'+fn+'），已停止');}
+    detail.status=Number.isInteger(Number(r.status))&&Number(r.status)>=100&&Number(r.status)<=599?Number(r.status):0;
     const http=detail.status?'HTTP '+detail.status:'HTTP状态未知';
     host.progress(detail.stage+'返回 '+http+'（'+fn+'）');
     if(Number(r.status)!==200){diagnose();throw Error('农场'+detail.stage+'失败：'+http+'（'+fn+'），已停止');}

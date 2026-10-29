@@ -1,3 +1,31 @@
+// Activity execution revision 20261029-3
+// BEGIN JD activity request pacing: business requests only, before signing.
+function createJdActivityPacer(host) {
+  let completedAt = null, gapMs = 0;
+  async function beforeRequest() {
+    if (typeof host.guard === 'function') host.guard();
+    if (completedAt !== null) {
+      const remaining = Math.max(0, completedAt + gapMs - host.now());
+      if (remaining > 0) {
+        if (typeof host.log === 'function') host.log('请求间隔：等待 ' + (remaining / 1000).toFixed(1) + ' 秒');
+        await host.sleep(remaining);
+      }
+    }
+    if (typeof host.guard === 'function') host.guard();
+  }
+  async function request(...args) {
+    try { return await host.request(...args); }
+    finally {
+      completedAt = host.now();
+      const value = typeof host.random === 'function' ? host.random() : Math.random();
+      const random = Number.isFinite(value) ? Math.min(0.999999999, Math.max(0, value)) : 0.5;
+      gapMs = (2 + Math.floor(random * 4)) * 1000;
+    }
+  }
+  return { beforeRequest, request };
+}
+// END JD activity request pacing.
+
 // 京东合并签到 2026-10-26.2; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
 const JS_VERSION='2026-10-26.2';
@@ -388,7 +416,7 @@ function createAar(userAgent) {
 }
 // Independent JR coinQuest client. Protocol observed in HAR453 and public jumpmission-v2.
 // No harvested signatures, device constants or personal account data are embedded.
-const JRB_VERSION='20261029-2',JRB_KEY='JD_JR_BEANS_ACCOUNT_V1';
+const JRB_VERSION='20261029-3',JRB_KEY='JD_JR_BEANS_ACCOUNT_V1';
 const JRB_ORIGIN='https://ms.jr.jd.com';
 const JRB_API={page:JRB_ORIGIN+'/gw2/generic/legogw/h5/m/getPageInfoSafetyTranslate',receive:JRB_ORIGIN+'/gw2/generic/mission/newh5/m/receiveMissionForNa',jump:JRB_ORIGIN+'/gw2/generic/Mission/h5/m/getJumpInfoV3'};
 const jrbObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -466,27 +494,30 @@ function jrbCapture(host,req,res,decode){
 }
 function jrbUuid(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:(r&3)|8).toString(16);});}
 function createJrBeansClient(host,crypto,profile){
+ const pacing=createJdActivityPacer(host);
  const report={version:JRB_VERSION,rows:[],confirmed:0,submitted:0,pageBeansDelta:null,stopped:false,message:''},recordKey='attempts.'+encodeURIComponent(profile.pin),stored=host.read(recordKey,null),journal=stored?.day===host.day()?stored:{day:host.day(),items:{}};
  const set=(id,v)=>{journal.items[id]=v;host.write(recordKey,journal);};
  let signer,firstCoins=null,lastCoins=null;
  async function signed(data){if(!signer)signer=await host.aar(profile.headers['User-Agent']);const nonce=signer.nonce(),signature=signer.sign(JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融赚京豆签名准备失败');return {nonce,signature};}
  async function page(){
-  host.guard();const q=jrbClone(profile.query),ep=q.extParams;Object.assign(ep,await signed(ep.signData||{sdkToken:ep.sdkToken}));
+  host.guard();await pacing.beforeRequest();host.guard();const q=jrbClone(profile.query),ep=q.extParams;Object.assign(ep,await signed(ep.signData||{sdkToken:ep.sdkToken}));
   const input={};for(const k of profile.cco._stk.split(',')){if(q[k]===undefined)throw Error('金融赚京豆签名参数不完整');input[k]=q[k];}
   const cco={...profile.cco,t:host.now()};cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},crypto.decodeEnvironment(profile.signing.environment),input);
-  const j=host.json(await host.request({url:JRB_API.page+'?pageType=11189',method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})}));jrbBusiness(j,false,'查询任务');const rows=jrbList(j);lastCoins=jrbCoins(j);if(firstCoins===null&&lastCoins!==null)firstCoins=lastCoins;report.pageBeansDelta=firstCoins!==null&&lastCoins!==null&&lastCoins>=firstCoins?lastCoins-firstCoins:null;return rows;
+  const j=host.json(await pacing.request({url:JRB_API.page+'?pageType=11189',method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})}));jrbBusiness(j,false,'查询任务');const rows=jrbList(j);lastCoins=jrbCoins(j);if(firstCoins===null&&lastCoins!==null)firstCoins=lastCoins;report.pageBeansDelta=firstCoins!==null&&lastCoins!==null&&lastCoins>=firstCoins?lastCoins-firstCoins:null;return rows;
  }
  async function receive(t){
   if(Number(t.receivingStatus)!==1)return;
+  await pacing.beforeRequest();host.guard();
   const sdk=profile.query.extParams.sdkToken,device=profile.deviceInfo||{sdkToken:sdk};
   const identity=decodeURIComponent(profile.pin),sig=await signed({channelCode:t.channelCode,PIN:identity,missionId:Number(t.missionId)});
   const q={environment:profile.receiveMeta?.environment||'2',missionId:String(t.missionId),channelCode:t.channelCode,...sig,deviceInfo1:device,clientType:profile.receiveMeta?.clientType||'h5',clientVersion:profile.receiveMeta?.clientVersion||profile.query.clientVersion};
-  jrbBusiness(host.json(await host.request({url:JRB_API.receive,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q)})})),true,'接取任务');
+  jrbBusiness(host.json(await pacing.request({url:JRB_API.receive,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q)})})),true,'接取任务');
  }
  async function jump(t){
   const juid=jrbJump(t);if(!juid)throw Error('金融赚京豆跳转标识缺失');const aksSignId=host.uuid?host.uuid():jrbUuid(),jumpSignId=juid+'_'+(host.uuid?host.uuid():jrbUuid());
+  await pacing.beforeRequest();host.guard();
   const sig=await signed({juid,aksSignId}),q={juid,signature:sig.signature,nonce:sig.nonce,aksSignId,jumpSignId,source:'missionJumpPage',token:'cxilwAoZKI',jrAppVersion:profile.jumpMeta?.jrAppVersion||profile.query.clientVersion,systemEnv:profile.jumpMeta?.systemEnv||'IOS',finishFlag:'1'};
-  return jrbBusiness(host.json(await host.request({url:JRB_API.jump+'?'+jrbEncode(q),method:'get',headers:{...profile.headers}})),true,'提交跳转');
+  return jrbBusiness(host.json(await pacing.request({url:JRB_API.jump+'?'+jrbEncode(q),method:'get',headers:{...profile.headers}})),true,'提交跳转');
  }
  async function run(){
   try{
@@ -516,7 +547,7 @@ function createJrBeansClient(host,crypto,profile){
      if(!after||Number(after.status)===1||p.limit&&p.done>=p.limit)break;
      // Continue only after an explicit counter increase or the exact declared bean award.
      if((before.done===undefined||p.done===undefined)&&!credited())break;
-     task=after;await host.sleep(1500);
+     task=after;
     }
    }
   }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='执行中断：'+report.message;}

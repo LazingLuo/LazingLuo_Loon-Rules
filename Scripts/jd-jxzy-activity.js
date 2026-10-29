@@ -1,3 +1,31 @@
+// Activity execution revision 20261029-2
+// BEGIN JD activity request pacing: business requests only, before signing.
+function createJdActivityPacer(host) {
+  let completedAt = null, gapMs = 0;
+  async function beforeRequest() {
+    if (typeof host.guard === 'function') host.guard();
+    if (completedAt !== null) {
+      const remaining = Math.max(0, completedAt + gapMs - host.now());
+      if (remaining > 0) {
+        if (typeof host.log === 'function') host.log('请求间隔：等待 ' + (remaining / 1000).toFixed(1) + ' 秒');
+        await host.sleep(remaining);
+      }
+    }
+    if (typeof host.guard === 'function') host.guard();
+  }
+  async function request(...args) {
+    try { return await host.request(...args); }
+    finally {
+      completedAt = host.now();
+      const value = typeof host.random === 'function' ? host.random() : Math.random();
+      const random = Number.isFinite(value) ? Math.min(0.999999999, Math.max(0, value)) : 0.5;
+      gapMs = (2 + Math.floor(random * 4)) * 1000;
+    }
+  }
+  return { beforeRequest, request };
+}
+// END JD activity request pacing.
+
 // Shared login and Jingxi adapters only. No retired activity clients.
 const actClone=x=>JSON.parse(JSON.stringify(x));
 const actObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -410,6 +438,7 @@ function createJxTaskClient(host, crypto) {
     return tasks;
   }
   function makeRunner(profile) {
+    const pacing=createJdActivityPacer(host);
     const env=checkProfile(profile),day=host.day(),storeKey='attempts.'+crypto.hash(profile.pin).slice(0,24);
     const attempts=host.read(storeKey,{date:day,actions:{}});
     if(attempts.date!==day){attempts.date=day;attempts.actions={};}
@@ -421,7 +450,7 @@ function createJxTaskClient(host, crypto) {
       attempts.actions[key]={time:host.now(),phase:kind};host.write(storeKey,attempts);
     }
     async function request(fn,task) {
-      withinDay();const p={...profile.query,functionId:fn},base=JSON.parse(profile.query.body);
+      withinDay();await pacing.beforeRequest();withinDay();const p={...profile.query,functionId:fn},base=JSON.parse(profile.query.body);
       const b=fn===QUERY?base:{craftId:CRAFT,taskId:task.id,itemId:task.itemId,taskType:3,sceneval:base.sceneval,buid:base.buid,appCode:base.appCode};
       delete b.signStr;b.time=host.now();b.signStr=crypto.bodySign(b);p.body=JSON.stringify(b);p.t=String(host.now());delete p.h5st;
       if(APPS[fn]) {
@@ -435,7 +464,7 @@ function createJxTaskClient(host, crypto) {
       }
       if(fn===COMPLETE)mark(task,'complete');
       if(fn===CLAIM)mark(task,'claim');
-      const r=await host.request({url:'https://api.m.jd.com/api?functionId='+fn,headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:form(p)});
+      const r=await pacing.request({url:'https://api.m.jd.com/api?functionId='+fn,headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:form(p)});
       if(Number(r.status)!==200)throw Error('接口HTTP异常，本次停止：'+String(r.status));
       let j;try{j=JSON.parse(r.body);}catch(_){throw Error('接口返回无法解析，本次停止');}
       if(String(j.code)!=='0'||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('京喜接口未接受请求，错误码 '+String(j.code));
@@ -559,7 +588,7 @@ function jxTaskSharedProfile(shared) {
     snapshot=rawRead(ACCOUNT);let shared;
     try{shared=JSON.parse(snapshot||'null');}catch(_){throw Error('京喜共享凭据无法读取，请重新进入京喜自营首页获取');}
     const profile=jxTaskSharedProfile(actJxProfile((k,f)=>{const s=rawRead(k);watched[k]=s;return s?JSON.parse(s):f;},createJxTaskCrypto({read,write,setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment));
-    console.log('[京喜任务] 版本 20261026-9；使用同账号共享资料');
+    console.log('[京喜任务] 版本 20261029-2；使用同账号共享资料');
     const host={now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),read,write,setTimeout,
       clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
       progress:(index,total,title)=>update('开始处理',{index,total,title}),

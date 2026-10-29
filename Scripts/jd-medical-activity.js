@@ -1,3 +1,31 @@
+// Activity execution revision 20261029-2
+// BEGIN JD activity request pacing: business requests only, before signing.
+function createJdActivityPacer(host) {
+  let completedAt = null, gapMs = 0;
+  async function beforeRequest() {
+    if (typeof host.guard === 'function') host.guard();
+    if (completedAt !== null) {
+      const remaining = Math.max(0, completedAt + gapMs - host.now());
+      if (remaining > 0) {
+        if (typeof host.log === 'function') host.log('请求间隔：等待 ' + (remaining / 1000).toFixed(1) + ' 秒');
+        await host.sleep(remaining);
+      }
+    }
+    if (typeof host.guard === 'function') host.guard();
+  }
+  async function request(...args) {
+    try { return await host.request(...args); }
+    finally {
+      completedAt = host.now();
+      const value = typeof host.random === 'function' ? host.random() : Math.random();
+      const random = Number.isFinite(value) ? Math.min(0.999999999, Math.max(0, value)) : 0.5;
+      gapMs = (2 + Math.floor(random * 4)) * 1000;
+    }
+  }
+  return { beforeRequest, request };
+}
+// END JD activity request pacing.
+
 // 京东合并签到 2026-10-26.2; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
 const JS_VERSION='2026-10-26.2';
@@ -379,7 +407,7 @@ return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,signOnline:farmO
 }
 
 // JD Health daily activity. Protocol: user HAR456 and public ifloor 00041674.
-const MDA_VERSION='20261029-1',MDA_KEY='JD_MEDICAL_ACTIVITY_ACCOUNT_V1';
+const MDA_VERSION='20261029-2',MDA_KEY='JD_MEDICAL_ACTIVITY_ACCOUNT_V1';
 const MDA_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
 const MDA_FUNCTIONS=['market_daily_pageIndex','market_daily_doCompleteTask','jdh_bm_balanceBeans'];
 const mdaObject=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -432,16 +460,18 @@ function mdaCapture(host,request,response,decode){
  host.write(MDA_KEY,profile);return {updated:[MDA_KEY],first:!old};
 }
 function createMedicalClient(host,crypto,profile){
+ const pacing=createJdActivityPacer(host);
  const report={version:MDA_VERSION,rows:[],submitted:0,confirmed:0,returnedBeans:0,rewardResponses:0,balanceDelta:null,stopped:false,message:''};
  const key='attempts.'+encodeURIComponent(profile.pin),old=host.read(key,null),journal=old?.day===host.day()?old:{day:host.day(),items:{}};
  const save=(k,v)=>{journal.items[k]=v;host.write(key,journal);};
  async function request(f,body,stage){
   host.guard();if(!MDA_FUNCTIONS.includes(f))throw Error('医药活动请求范围不符');
+  await pacing.beforeRequest();host.guard();
   const params={functionId:f,appid:'jdh-middle',body:JSON.stringify(body)};
   params.h5st=await crypto.signOnline('4b818',profile,crypto.decodeEnvironment(profile.environment),{appid:params.appid,body:crypto.hash(params.body),functionId:f});
   const sig=String(params.h5st).split(';');if(sig.length!==10||sig[2]!=='4b818'||sig[5]!=='5.3')throw Error('医药活动签名输出异常');
   params['x-api-eid-token']=profile.eidToken;host.log(stage);
-  const response=await host.request({url:'https://api.m.jd.com/api?functionId='+f,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:mdaEncode(params)});
+  const response=await pacing.request({url:'https://api.m.jd.com/api?functionId='+f,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:mdaEncode(params)});
   if(Number(response.status)!==200)throw Error('医药活动'+stage+' HTTP '+String(Number(response.status)||0)+'，已停止');
   let data;try{data=JSON.parse(response.body);}catch(_){throw Error('医药活动返回内容无法读取');}
   mdaBusiness(data,stage,f==='jdh_bm_balanceBeans');return data;
@@ -477,7 +507,6 @@ function createMedicalClient(host,crypto,profile){
      if(Number(after.canReceiveTimes)>0)row.result+='；奖励待App领取';
     }else{save(k,{id:crypto.hash(id),state:'submitted',at:host.now()});row.result='已提交，进度待App确认';}
     if(beans===null&&task.rewardsList?.some(r=>Number(r.rewardType)===3&&Number(r.reachUpperLimit)===1))row.result+='；奖励标记已达上限';
-    await host.sleep(2000);
    }
    const afterBalance=await balance();if(beforeBalance!==null&&afterBalance!==null)report.balanceDelta=afterBalance-beforeBalance;
   }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='执行中断：'+report.message;}

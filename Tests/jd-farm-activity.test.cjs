@@ -1,3 +1,5 @@
+// Virtual wall time: keep real production waits out of offline tests.
+function virtualClock(){let now=Date.now();class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}return {Date:Clock,setTimeout:(f,ms,...args)=>setTimeout(()=>{now+=ms;f(...args);},0),clearTimeout};}
 // Current activity bundles; synthetic credentials and simulated HTTP only.
 // Shared wheel-core regression cases do not expose or restore a wheel entry in the plugin.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
@@ -31,7 +33,7 @@ function task(id,type='BROWSE_CHANNEL',more={}){return {id:-9999,taskShowTitle:'
 async function simulate(options={}){
  const store=options.store||new Map(),calls=[],algoCalls=[],waits=[],pauses=[],notes=[],profile=options.profile===undefined?account(options.sdk).profile:options.profile;
  let current=clone(options.tasks||[task('a'),task('b','CUMULATIVE_TIMES',{taskLimitTimes:20,taskItemList:null}),task('c','ORDER_MARK',{taskItemList:null})]),extra=clone(options.extra||[]),clock=100000,water=900,chances=options.chances??2,timer=null,afterAward=false,signClaimed=options.sign?.state===3;
- const host={read:(k,f)=>store.has(k)?clone(store.get(k)):f,write:(k,v)=>{if(options.failWrite?.(k))throw Error('农场本地记录保存失败');store.set(k,clone(v));},now:()=>clock,day:()=>options.crossDay&&waits.length?'2026-10-23':'2026-10-22',guard:()=>{if(options.changed&&waits.length)throw Error('农场凭据已更新，请重新运行');},setTimeout:(...a)=>setTimeout(...a),clearTimeout,progress:s=>notes.push(s),pause:async ms=>{clock+=ms;pauses.push(ms);},sleep:async ms=>{clock+=ms;waits.push(ms);},
+ const host={read:(k,f)=>store.has(k)?clone(store.get(k)):f,write:(k,v)=>{if(options.failWrite?.(k))throw Error('农场本地记录保存失败');store.set(k,clone(v));},random:()=>0.5,random:()=>0.5,random:()=>0.5,now:()=>clock,day:()=>options.crossDay&&waits.length?'2026-10-23':'2026-10-22',guard:()=>{if(options.changed&&waits.length)throw Error('农场凭据已更新，请重新运行');},setTimeout:(...a)=>setTimeout(...a),clearTimeout,progress:s=>notes.push(s),pause:async ms=>{clock+=ms;pauses.push(ms);},sleep:async ms=>{clock+=ms;(ms<=5000?pauses:waits).push(ms);},
   requestAlgo:async o=>{
    assert.equal(o.url,'https://cactus.jd.com/request_algo');assert(!Object.keys(o.headers).some(k=>k.toLowerCase()==='cookie'));assert(!JSON.stringify(o).includes('FAKE_PRIVATE_COOKIE'));assert(!JSON.stringify(o).includes('FAKE_PRIVATE_EID'));
    const b=JSON.parse(o.body);assert.equal(b.fp.length,16);assert(T.APPS&&Object.values(T.APPS).includes(b.appId));algoCalls.push(b.appId);
@@ -163,7 +165,7 @@ async function simulate(options={}){
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:200,body:'<html><body>Bad Gateway SECRET_BODY</body></html>'}:null});assert(r.result.stopped);assert.equal(r.result.lastRequest.response.kind,'html');assert.deepEqual(r.result.lastRequest.response.clues,['网关错误']);assert(!farmReportText(r.result).includes('SECRET_BODY'));n++;
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apStartTaskTime'?{status:200,body:'{"code":1002,"success":false,"errMsg":"login required SECRET_BODY"}'}:null});assert.equal(r.result.lastRequest.response.codes.code,'1002');assert.deepEqual(r.result.lastRequest.response.clues,['登录']);assert(!farmReportText(r.result).includes('SECRET_BODY'));n++;
  const diagRetry=await simulate({store:r.store,tasks:[task('a')]});assert(!diagRetry.calls.some(c=>c.p.functionId==='apStartTaskTime'));n++;
- r=await simulate({tasks:[task('a')]});assert(r.pauses.length>0);for(let i=1;i<r.calls.length;i++)assert(r.calls[i].time-r.calls[i-1].time>=900);n++;
+ r=await simulate({tasks:[task('a')]});assert(r.pauses.length>0);for(let i=1;i<r.calls.length;i++)assert(r.calls[i].time-r.calls[i-1].time>=4000);n++;
  r=await simulate({tasks:[task('a','ORDER_MARK'),task('b','CUMULATIVE_TIMES')]});assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskList').length,2);assert.equal(r.result.rows.length,2);n++;
  r=await simulate({failWrite:k=>k.startsWith('actions.')});assert(r.result.stopped);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
  r=await simulate({tasks:[task('a')],onRequest:({fn})=>fn==='apDoLimitTimeTask'?{status:200,body:'{"code":2031,"success":false,"errMsg":"PRIVATE_TOKEN"}'}:null});assert(!r.result.stopped);assert.equal(r.result.waterConfirmed,0);assert(!JSON.stringify(r.result).includes('PRIVATE_TOKEN'));n++;
@@ -176,10 +178,10 @@ async function simulate(options={}){
  const first=new Map(),h={read:(k,f)=>first.get(k)||f,write:(k,v)=>first.set(k,v),now:()=>100};
  farmCapture(h,captureRequest('wheel','wheelsHome',{linkId:T.WHEEL,inviterEncryptPin:'SHOULD_REMOVE'}),{status:200,body:'{"code":0,"data":{"lotteryChances":1}}'},farmDecodeEnvironment);
  const ready=farmCapture(h,captureRequest('wheel','apTaskList',queryBody('wheel')),{status:200,body:'{"code":0,"data":[]}'},farmDecodeEnvironment);assert(ready.firstReady);assert(!JSON.stringify(first.get(T.ACCOUNT)).includes('SHOULD_REMOVE'));n++;
- const plugin=fs.readFileSync(path.join(root,release?'jd-activities.plugin':'../Plugins/jd-activities.plugin'),'utf8');assert.equal((plugin.match(/^generic /gm)||[]).length,3);assert(!/^cron /m.test(plugin));assert(!T.ALLOWED.has('farm_water'));assert(!T.ALLOWED.has('farm_one_key_plant_settle'));n++;
+ const plugin=fs.readFileSync(path.join(root,release?'jd-activities.plugin':'../Plugins/jd-activities.plugin'),'utf8');assert.equal((plugin.match(/^generic /gm)||[]).length,6);assert(!/^cron /m.test(plugin));assert(!T.ALLOWED.has('farm_water'));assert(!T.ALLOWED.has('farm_one_key_plant_settle'));n++;
  // Loon entry: full exact bundle, no network allowed for status or missing profile.
  for(const mode of ['status','farm-query']){
-  let done=false;const notes=[],writes=[];const context={console:{log:()=>{}},$argument:mode,$persistentStore:{read:()=>'',write:(v,k)=>{writes.push(k);return true;}},$notification:{post:(...a)=>notes.push(a)},$httpClient:{post:()=>{throw Error('unexpected network');}},$done:()=>{done=true;},setTimeout,clearTimeout};vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await new Promise(r=>setImmediate(r));assert(done);assert(notes.length);assert(writes.every(k=>k.startsWith(T.PREFIX)));n++;
+  let done=false;const notes=[],writes=[];const context={console:{log:()=>{}},$argument:mode,$persistentStore:{read:()=>'',write:(v,k)=>{writes.push(k);return true;}},$notification:{post:(...a)=>notes.push(a)},$httpClient:{post:()=>{throw Error('unexpected network');}},$done:()=>{done=true;},setTimeout,clearTimeout};Object.assign(context,virtualClock());vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await new Promise(r=>setImmediate(r));assert(done);assert(notes.length);assert(writes.every(k=>k.startsWith(T.PREFIX)));n++;
  }
  // Full Loon entry with its real persistent-store lock and transport adapter.
  for(const mode of ['farm-query','farm-all','wheel-query','wheel-draw']){
@@ -187,7 +189,7 @@ async function simulate(options={}){
   const done=new Promise(r=>finish=r),context={console:{log:()=>{}},$argument:mode,setTimeout:(f,ms)=>{const t=setTimeout(f,ms);timers.push(t);return t;},clearTimeout,
    $persistentStore:{read:k=>store.get(k)||'',write:(v,k)=>{assert(k.startsWith(T.PREFIX));store.set(k,v);return true;}},$notification:{post:(...a)=>notes.push(a)},$done:()=>finish(),
    $httpClient:{post:(o,cb)=>{const p=T.form(o.body);calls.push(p.functionId);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);assert.equal(o.insecure,false);assert.equal(o.alpn,'h2');const d=p.functionId==='apTaskList'?[]:p.functionId==='apTaskListBatch'?{modules:[]}:p.functionId==='farm_home'?{bizCode:0,result:{bottleWater:800}}:{lotteryChances:0,payLotteryFlag:false};cb(null,{status:200},JSON.stringify({code:0,success:true,data:d}));}}};
-  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);
+  Object.assign(context,virtualClock());vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);
   const result=JSON.parse(store.get(T.PREFIX+'last'));assert.equal(result.stopped,false);assert.equal(store.get(T.PREFIX+'lock'),'');assert(calls.length>=(mode==='wheel-draw'?2:3));assert(notes.length);assert(!JSON.stringify(result).includes('PRIVATE'));n++;
  }
  // Full Loon request_algo adapter followed by a real-SDK task and reward.
@@ -197,7 +199,7 @@ async function simulate(options={}){
   const done=new Promise(r=>finish=r),context={console:{log:s=>notes.push(s)},$argument:'farm-query',setTimeout,clearTimeout,
    $persistentStore:{read:k=>store.get(k)||'',write:(v,k)=>{store.set(k,v);return true;}},$notification:{post:(...s)=>notes.push(s.join(' '))},$done:()=>finish(),
    $httpClient:{post:(o,cb)=>cb(null,{status:403,headers:{'CONTENT-TYPE':'text/html; charset=utf-8','set-cookie':'PRIVATE_SET_COOKIE'}},'<html><body>Access Denied PRIVATE_HTML_VALUE</body></html>')}};
-  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;
+  Object.assign(context,virtualClock());vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;
   const r=JSON.parse(store.get(T.PREFIX+'last'));assert(r.stopped);assert.equal(r.lastRequest.response.mime,'text/html');assert.equal(r.lastRequest.response.kind,'html');assert(notes.join('').includes('响应诊断'));assert(!notes.join('').includes('PRIVATE_'));assert(!store.get(T.PREFIX+'last').includes('PRIVATE_'));n++;
  }
  {
@@ -221,7 +223,7 @@ async function simulate(options={}){
     else throw Error('unexpected integration request');
     cb(null,{status:200},JSON.stringify({code:0,success:true,data}));
    }}};
-  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);const r=JSON.parse(store.get(T.PREFIX+'last'));assert(!r.stopped,r.message);assert.equal(r.waterConfirmed,10);assert.deepEqual(algoCalls,['54ed7','f0f3f']);n++;
+  Object.assign(context,virtualClock());vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:15000});await done;timers.forEach(clearTimeout);const r=JSON.parse(store.get(T.PREFIX+'last'));assert(!r.stopped,r.message);assert.equal(r.waterConfirmed,10);assert.deepEqual(algoCalls,['54ed7','f0f3f']);n++;
  }
  console.log(n+' offline checks passed: current lists/modules, duplicate -9999 identities, timed tasks, repeat rounds, claims, daily sign rewards, free draws, no watering/payment, capture and both official SDKs. No live requests.');
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});
