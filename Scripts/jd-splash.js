@@ -1,3 +1,4 @@
+// Medical daily capture integration 20261029-5.
 // Same passive capture as the activities plugin, so first-match does not swallow credentials.
 function jdSplashCapture(request,response){return new Promise(resolve=>{
  const context={$request:{...request,headers:{...request.headers}},$response:response,$persistentStore,$notification,$script:typeof $script==='undefined'?{}:$script,$done:resolve,console,$argument:{capture:true}};
@@ -1010,7 +1011,116 @@ function farmCapture(host,request,response,decodeEnvironment) {
   return {scope,complete,firstReady:!wasReady&&complete};
 }
 // One dispatcher owns capture; all imported parsers receive a private request copy.
+// JD Health daily activity. Protocol: user HAR456 and public ifloor 00041674.
+const MDA_VERSION='20261029-1',MDA_KEY='JD_MEDICAL_ACTIVITY_ACCOUNT_V1';
+const MDA_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
+const MDA_FUNCTIONS=['market_daily_pageIndex','market_daily_doCompleteTask','jdh_bm_balanceBeans'];
+const mdaObject=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+const mdaClone=v=>JSON.parse(JSON.stringify(v));
+const mdaHeader=(h,k)=>{const key=Object.keys(h||{}).find(x=>x.toLowerCase()===k.toLowerCase());return key?String(h[key]):'';};
+function mdaForm(s){const out={};for(const p of String(s||'').split('&')){if(!p)continue;const n=p.indexOf('='),d=v=>decodeURIComponent(v.replace(/\+/g,' ')),k=d(n<0?p:p.slice(0,n));if(Object.prototype.hasOwnProperty.call(out,k))throw Error('医药活动参数重复');out[k]=d(n<0?'':p.slice(n+1));}return out;}
+const mdaEncode=p=>Object.keys(p).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(String(p[k]))).join('&');
+function mdaParams(r){const q=mdaForm(String(r.url||'').split('?')[1]||''),p=mdaForm(r.body);for(const k of Object.keys(q))if(p[k]!==undefined&&p[k]!==q[k])throw Error('医药活动参数冲突');return {...q,...p};}
+function mdaRoute(r){if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(r?.url||''))return false;try{return MDA_FUNCTIONS.includes(mdaParams(r).functionId);}catch(_){return false;}}
+function mdaPair(cookie){const p=String(cookie||'').split(';').map(v=>v.trim()),keys=p.filter(x=>x.startsWith('pt_key=')),pins=p.filter(x=>x.startsWith('pt_pin='));if(keys.length!==1||pins.length!==1||!keys[0].slice(7)||!pins[0].slice(7)||/[\r\n\s]/.test(keys[0]+pins[0]))return null;return {pin:pins[0].slice(7),cookie:keys[0]+';'+pins[0]+';'};}
+function mdaLogin(read){const bound=read('JD_SIGNIN_ACCOUNT_V1',null)?.pin;return ['JD_SIGNIN_LOGIN_V1','QL_BRIDGE_CREDENTIAL_V1'].map(k=>read(k,null)).filter(Boolean).map(x=>({...x,pair:mdaPair(x.cookie||mdaHeader(x.headers,'Cookie'))})).filter(x=>x.pair&&(!bound||bound===x.pair.pin)).sort((a,b)=>Number(b.capturedAt||0)-Number(a.capturedAt||0))[0]?.pair||null;}
+function mdaMergeCookie(pair,...cookies){const extra=new Map();for(const c of cookies)for(const p of String(c||'').split(';')){const s=p.trim(),i=s.indexOf('=');if(i>0&&!/^pt_(?:key|pin)$/.test(s.slice(0,i))&&!/[\r\n]/.test(s))extra.set(s.slice(0,i),s.slice(i+1));}return pair.cookie+[...extra].map(([k,v])=>k+'='+v+';').join('');}
+const mdaCode=v=>/^[A-Za-z0-9_-]{1,32}$/.test(String(v??''))?String(v):'unknown';
+function mdaBusiness(j,stage='查询任务',balance=false){if(!mdaObject(j)||j.success!==true||String(j.code)!==(balance?'0':'0000'))throw Error('医药活动'+stage+'拒绝（code='+mdaCode(j?.code)+'）');if(balance)return j.data;if(!mdaObject(j.data))throw Error('医药活动返回结构变化');return j.data;}
+const mdaTitle=t=>String(t?.assignmentName||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
+const mdaId=t=>String(t?.encryptAssignmentId||'');
+function mdaList(j){const d=mdaBusiness(j),a=d.assignmentList;if(!Array.isArray(a)||a.length>150)throw Error('医药活动任务列表结构变化');const seen=new Set();for(const t of a){const id=mdaId(t);if(!mdaObject(t)||!id||id.length>256||!/^[-_A-Za-z0-9]+$/.test(id)||seen.has(id))throw Error('医药活动任务标识异常');seen.add(id);}return a;}
+function mdaDone(t){return t?.completionFlag===true||Number.isInteger(t?.completionCnt)&&Number.isInteger(t?.assignmentTimesLimit)&&t.assignmentTimesLimit>0&&t.completionCnt>=t.assignmentTimesLimit;}
+function mdaSeconds(t){const m=/^浏览\s*(\d{1,2})\s*(?:s|秒)(?:得)?$/i.exec(String(t?.assignmentDesc||'').trim());return m&&Number(m[1])>0&&Number(m[1])<=60?Number(m[1]):null;}
+function mdaClassify(t){
+ if(mdaDone(t))return 'done';
+ if(Number(t.timeStatus)!==1)return 'inactive';
+ const rewards=t.rewardsList;
+ if(!Array.isArray(rewards)||!rewards.some(r=>Number(r?.rewardType)===3))return 'other-reward';
+ if(Number(t.assignmentType)===5&&String(t.assignmentDesc||'')==='每日签到')return 'sign';
+ // Only the simple timed visit protocol, never order, cart, contact or app-install tasks.
+ if(Number(t.assignmentType)!==1||mdaSeconds(t)===null||!/^\d{1,24}$/.test(String(t.itemId||'')))return 'app';
+ if(/下单|支付|购买|充值|开通|授权|添加|加营养师|关注|邀请|订阅|分享/.test(mdaTitle(t)))return 'app';
+ if(!/^https:\/\/(?:[a-z0-9-]+\.)*jd\.com(?:[/:?#]|$)/i.test(String(t.url||'')))return 'app';
+ return 'visit';
+}
+function mdaRewards(data){const rows=data?.successRewards;if(!Array.isArray(rows))return null;let sum=0;for(const r of rows){if(Number(r?.rewardType)!==3)continue;const n=Number(r.rewardValue);if(!Number.isSafeInteger(n)||n<0||n>10000)return null;sum+=n;}return sum;}
+const mdaDeviceKeys=['platform','osVersion','screen','eid','client','clientVersion','model','brand','uuid','networkType'];
+function mdaCapture(host,request,response,decode){
+ if(request?.method!=='POST'||Number(response?.status)!==200||!mdaRoute(request)||['X-Lazing-Activity-Run','X-Lazing-Signin-Run'].some(k=>mdaHeader(request.headers,k)==='1'))return null;
+ const p=mdaParams(request),body=JSON.parse(p.body||'{}');if(p.appid!=='jdh-middle'||body.channel!=='daily'||!['market_daily_pageIndex','market_daily_doCompleteTask'].includes(p.functionId))return null;
+ const page=mdaHeader(request.headers,'x-referer-page')||mdaHeader(request.headers,'Referer');if(!new RegExp('^'+MDA_PAGE.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?:\\?|$)').test(page))return null;
+ const j=JSON.parse(response.body||'{}');if(p.functionId==='market_daily_pageIndex'){if(Number(body.taskVersion)!==1)return null;mdaList(j);}else{mdaBusiness(j,'提交任务');if(![1,5].includes(Number(body.assignmentType))||![0,1].includes(Number(body.actionType)))return null;}
+ const login=mdaLogin(host.read),direct=mdaPair(mdaHeader(request.headers,'Cookie')),identity=direct||login,bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)?.pin,old=host.read(MDA_KEY,null);
+ if(!identity||bound&&bound!==identity.pin||login&&login.pin!==identity.pin||old?.pin&&old.pin!==identity.pin)return null;
+ const sig=String(p.h5st||'').split(';');if(sig.length!==10||sig[2]!=='4b818'||sig[5]!=='5.3'||!p['x-api-eid-token'])return null;
+ const env=decode(sig[7]);if(![identity.pin,decodeURIComponent(identity.pin)].includes(env?.pp?.p1))return null;
+ const headers={};for(const k of ['User-Agent','Origin','Referer','x-referer-page','x-rp-client','x-babel-ihub']){const v=mdaHeader(request.headers,k);if(v)headers[k]=v;}
+ if(!headers['User-Agent'])return null;headers.Cookie=mdaMergeCookie(identity,old?.headers?.Cookie,mdaHeader(request.headers,'Cookie'));
+ const at=host.observedAt||Date.now();if(at<Number(old?.capturedAt||0))return null;
+ const profile=old?mdaClone(old):{version:1,pin:identity.pin};
+ profile.headers=headers;profile.environment=sig[7];profile.eidToken=p['x-api-eid-token'];profile.capturedAt=at;
+ const device={};for(const k of mdaDeviceKeys)if(['string','number'].includes(typeof body[k])&&String(body[k]).length<16384)device[k]=body[k];
+ if(Object.keys(device).length){profile.device=device;profile.deviceAt=at;}
+ host.write(MDA_KEY,profile);return {updated:[MDA_KEY],first:!old};
+}
+function createMedicalClient(host,crypto,profile){
+ const report={version:MDA_VERSION,rows:[],submitted:0,confirmed:0,returnedBeans:0,rewardResponses:0,balanceDelta:null,stopped:false,message:''};
+ const key='attempts.'+encodeURIComponent(profile.pin),old=host.read(key,null),journal=old?.day===host.day()?old:{day:host.day(),items:{}};
+ const save=(k,v)=>{journal.items[k]=v;host.write(key,journal);};
+ async function request(f,body,stage){
+  host.guard();if(!MDA_FUNCTIONS.includes(f))throw Error('医药活动请求范围不符');
+  const params={functionId:f,appid:'jdh-middle',body:JSON.stringify(body)};
+  params.h5st=await crypto.signOnline('4b818',profile,crypto.decodeEnvironment(profile.environment),{appid:params.appid,body:crypto.hash(params.body),functionId:f});
+  const sig=String(params.h5st).split(';');if(sig.length!==10||sig[2]!=='4b818'||sig[5]!=='5.3')throw Error('医药活动签名输出异常');
+  params['x-api-eid-token']=profile.eidToken;host.log(stage);
+  const response=await host.request({url:'https://api.m.jd.com/api?functionId='+f,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:mdaEncode(params)});
+  if(Number(response.status)!==200)throw Error('医药活动'+stage+' HTTP '+String(Number(response.status)||0)+'，已停止');
+  let data;try{data=JSON.parse(response.body);}catch(_){throw Error('医药活动返回内容无法读取');}
+  mdaBusiness(data,stage,f==='jdh_bm_balanceBeans');return data;
+ }
+ const page=async()=>mdaList(await request('market_daily_pageIndex',{...profile.device,taskVersion:1,channel:'daily'},'查询任务'));
+ async function balance(){const j=await request('jdh_bm_balanceBeans',{},'查询京豆余额');return Number.isSafeInteger(j.data)&&j.data>=0?j.data:null;}
+ async function run(){
+  try{
+   let tasks=await page();const initial=tasks.slice(),beforeBalance=await balance();host.log('读取 '+tasks.length+' 项任务');
+   for(const entry of initial){
+    host.guard();const id=mdaId(entry),task=tasks.find(t=>mdaId(t)===id),row={title:mdaTitle(entry),result:'',confirmed:0};report.rows.push(row);
+    if(!task){row.result='任务已从列表移除';continue;}
+    const type=mdaClassify(task),labels={done:'已完成',inactive:'当前不可做','other-reward':'奖励不是京豆',app:'需App操作'};
+    if(!['visit','sign'].includes(type)){row.result=labels[type]||'需App操作';continue;}
+    const count=Number.isInteger(task.completionCnt)?task.completionCnt:0,k=crypto.hash(id)+':'+count;
+    // Any unresolved submission for this task prevents resubmission, even after
+    // a changed item ID or an unrelated balance increase.
+    if(Object.values(journal.items).some(x=>x.id===crypto.hash(id)&&x.state!=='confirmed')){row.result='上次已提交，待App确认';continue;}
+    if(journal.items[k]){row.result='本次进度已处理';continue;}
+    if(report.submitted>=25){row.result='达到本轮处理上限';break;}
+    host.log(row.title);
+    const body={assignmentType:Number(task.assignmentType),encryptAssignmentId:id,actionType:type==='sign'?0:1,...(type==='visit'?{itemId:String(task.itemId)}:{}),...profile.device,channel:'daily'};
+    save(k,{id:crypto.hash(id),state:'pending',at:host.now()});
+    const result=await request('market_daily_doCompleteTask',body,type==='sign'?'签到':'提交浏览');report.submitted++;
+    const beans=mdaRewards(result.data);if(beans!==null){report.returnedBeans+=beans;report.rewardResponses++;}
+    const seconds=type==='visit'?mdaSeconds(task):0;if(seconds){host.log('等待 '+seconds+' 秒');await host.sleep((seconds+1)*1000);}
+    tasks=await page();let after=tasks.find(t=>mdaId(t)===id);
+    const changed=()=>!!after&&(mdaDone(after)||Number.isInteger(after.completionCnt)&&after.completionCnt>count);
+    if(!changed()){await host.sleep(3000);tasks=await page();after=tasks.find(t=>mdaId(t)===id);}
+    if(changed()){
+     report.confirmed++;row.confirmed=1;save(k,{id:crypto.hash(id),state:'confirmed',at:host.now()});
+     row.result='任务已完成'+(beans!==null?'；接口发放 '+beans+' 京豆':'；接口未返回发奖数量');
+     if(Number(after.canReceiveTimes)>0)row.result+='；奖励待App领取';
+    }else{save(k,{id:crypto.hash(id),state:'submitted',at:host.now()});row.result='已提交，进度待App确认';}
+    if(beans===null&&task.rewardsList?.some(r=>Number(r.rewardType)===3&&Number(r.reachUpperLimit)===1))row.result+='；奖励标记已达上限';
+    await host.sleep(2000);
+   }
+   const afterBalance=await balance();if(beforeBalance!==null&&afterBalance!==null)report.balanceDelta=afterBalance-beforeBalance;
+  }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='执行中断：'+report.message;}
+  return report;
+ }
+ return {run,page,balance};
+}
+
 async function jsCapture(host,request,response,parsers,decode){
+ if(mdaRoute(request))return mdaCapture(host,request,response,decode);
  if(request?.method!=='POST'||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
@@ -1090,7 +1200,7 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
   const read=(k,f)=>{const v=$persistentStore.read(k);if(!v)return f;return JSON.parse(v);};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('本地记录保存失败');};
   try{
-   const names={'JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
+   const names={[MDA_KEY]:'医药活动','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment);
    if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
@@ -1099,7 +1209,7 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={mdaCapture,MDA_KEY,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
 
 })(context);
 });}
@@ -1241,3 +1351,4 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
   }catch(_){console.log('[京东开屏] 诊断未完成，原处理结果保留');}
   finally{if(!deferred)$done(result);}
 })();
+
