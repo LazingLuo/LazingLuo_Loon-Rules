@@ -1,6 +1,6 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.2.0';
+const MT_VERSION = '0.3.0';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
@@ -15,7 +15,9 @@ const MT_TASKS = [
   {key: 'xianyu', name: '闲鱼', prefix: '浏览闲鱼', route: /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/},
   {key: 'alipayMember', name: '支付宝会员', prefix: '浏览支付宝会员', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'alipayGold', name: '支付宝金豆夺宝', prefix: '逛一逛支付宝金豆夺宝', route: /^alipays:\/\/platformapi\/startapp\?/},
-  {key: 'mtContent', name: '精彩内容', prefix: '浏览精彩内容', route: /^imeituan:\/\/www\.meituan\.com\/mmp\?/}
+  {key: 'mtContent', name: '精彩内容', prefix: '浏览精彩内容', route: /^imeituan:\/\/www\.meituan\.com\/mmp\?/},
+  {key: 'mtPig', name: '金猪', prefix: '砸金猪得美团币', route: /^imeituan:\/\/www\.meituan\.com\/mrn\?(?=[^#]*\bmrn_biz=game(?:&|$))(?=[^#]*\bmrn_entry=mtb-home(?:&|$))(?=[^#]*\bmrn_component=mtb-home(?:&|$))/},
+  {key: 'mtOrchard', name: '小美果园', prefix: '玩小美果园', route: /^imeituan:\/\/www\.meituan\.com\/mgc\?(?=[^#]*\bmgc_id=mgckmf3q8yx9d72b(?:&|$))/}
 ];
 // A character substitution in lx_dict telemetry; structural JSON is retained.
 // Complete ASCII letter/digit mapping recovered from independent field names,
@@ -67,9 +69,9 @@ function mtObserve(body, old, now) {
       changed.clear();
     }
     record.lastPackageTime = Math.max(Number(record.lastPackageTime) || 0, packageTime);
-    function walk(value, depth) {
+    function walk(value, depth, eventTime) {
       if (depth > 18 || !value || typeof value !== 'object') return;
-      if (Array.isArray(value)) { value.forEach(x => walk(x, depth + 1)); return; }
+      if (Array.isArray(value)) { value.forEach(x => walk(x, depth + 1, eventTime)); return; }
       const title = typeof value.title === 'string' ? value.title : '';
       const task = MT_TASKS.find(x => title.startsWith(x.prefix));
       const detail = value.task_detail;
@@ -77,7 +79,7 @@ function mtObserve(body, old, now) {
         const source = detail.task_url;
         // Object form: only iOS, never substitute Android when iOS is missing.
         const url = typeof source === 'string' ? source : source && source.iosDeeplink;
-        const stamp = Number(value.stm) || packageTime;
+        const stamp = Number(value.stm) || eventTime || packageTime;
         if (mtValidLink(task, url) && typeof detail.task_code === 'string' && detail.task_code) {
           const prior = record.tasks[task.key];
           if (!prior || stamp >= Number(prior.sourceTime || 0)) {
@@ -88,7 +90,7 @@ function mtObserve(body, old, now) {
         } else if (source) result.invalid += 1;
       }
       Object.keys(value).forEach(key => {
-        if (key !== 'task_detail') walk(value[key], depth + 1);
+        if (key !== 'task_detail') walk(value[key], depth + 1, eventTime);
       });
     }
     events.forEach(ev => {
@@ -96,7 +98,12 @@ function mtObserve(body, old, now) {
       const lab = ev && ev.val_lab;
       if (lab && typeof lab === 'object') {
         const copy = Object.assign({}, lab, {stm: ev.stm});
-        walk(copy, 0);
+        walk(copy, 0, Number(ev.stm) || packageTime);
+      }
+      // Native mini-app transitions put the same task object under tag.game.
+      // Only inspect this observed task context, not arbitrary page URLs.
+      if (ev && ev.tag && ev.tag.game && typeof ev.tag.game === 'object') {
+        walk(ev.tag.game, 0, Number(ev.stm) || packageTime);
       }
     });
   });
@@ -136,15 +143,16 @@ function mtBridge(request, argument, record, now) {
   }, body: JSON.stringify(Object.assign({schema: 'lazing-meituan-jump-plan-v1', version: MT_VERSION,
     connected: '', proof: '', code: '', message: '', count: 0, antManor: '', antForest: '',
     taobaoFarm: '', alipayFarm: '', etao: '', cmcc: '', weibo: '', xianyu: '',
-    alipayMember: '', alipayGold: '', mtContent: ''}, value))}});
+    alipayMember: '', alipayGold: '', mtContent: '', mtPig: '', mtOrchard: ''}, value))}});
   if (!/^[a-f0-9]{64}$/.test(key || '') || !/^[a-f0-9]{64}$/.test(proof || '')) return reply({code: 'NOT_PAIRED', message: '请使用同一套插件和快捷指令'});
   if (!request || request.method !== 'GET' || ![MT_BASE + 'probe', MT_BASE + 'tasks'].includes(request.url)) return reply({code: 'BAD_REQUEST', message: '本机入口不匹配'});
   if (Object.keys(request.headers || {}).some(k => /^(origin|referer)$/i.test(k))) return reply({code: 'BROWSER_DENIED', message: '请通过配套快捷指令读取'});
   if (request.url === MT_BASE + 'probe') return reply({connected: 'yes', proof, code: 'CONNECTED'});
   if (mtHeader(request.headers, 'X-Lazing-Export-Key') !== key) return reply({code: 'PAIRING_FAILED', message: '插件与快捷指令未配对，请导入同一套文件'});
   // Older Shortcuts only contain seven branches. Keep their counts accurate.
-  const extended = mtHeader(request.headers, 'X-Lazing-Jump-Plan') === 'extended-v1';
-  const plan = mtPlan(record, now, extended ? MT_TASKS : MT_TASKS.slice(0, 7));
+  const client = mtHeader(request.headers, 'X-Lazing-Jump-Plan');
+  const tasks = client === 'extended-v2' ? MT_TASKS : client === 'extended-v1' ? MT_TASKS.slice(0, 11) : MT_TASKS.slice(0, 7);
+  const plan = mtPlan(record, now, tasks);
   return reply(Object.assign(plan, {code: plan.count ? 'READY' : 'NO_TASKS'}));
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = {MT_MAP, MT_TASKS, MT_KEY, MT_BASE, MT_TTL,
@@ -154,7 +162,7 @@ if (typeof $done === 'function') {
   const read = () => mtObject($persistentStore.read(MT_KEY));
   if (typeof $request === 'undefined') {
     const p = mtPlan(read(), now);
-    const content = p.message + '\n配套v0.2.0快捷指令每项停留5秒；这里显示链接记录，不判断金币到账。';
+    const content = p.message + '\n配套v0.3.0快捷指令一淘、中国移动停留10秒，其余5秒；这里只显示链接记录，不判断金币到账。';
     console.log('[美团任务] ' + content);
     $done({title: '美团任务链接记录', content});
   } else if (String($request.url).startsWith(MT_BASE)) {
