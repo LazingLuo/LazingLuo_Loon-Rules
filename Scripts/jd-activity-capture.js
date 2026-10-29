@@ -1,3 +1,4 @@
+// Shared capture update 20261029-3: add independently scoped JR coinQuest.
 // Shared credential capture 20261026-9; Jingxi and farm activities.
 // Shared login and Jingxi adapters only. No retired activity clients.
 const actClone=x=>JSON.parse(JSON.stringify(x));
@@ -1004,7 +1005,146 @@ function farmCapture(host,request,response,decodeEnvironment) {
   return {scope,complete,firstReady:!wasReady&&complete};
 }
 // One dispatcher owns capture; all imported parsers receive a private request copy.
+// Independent JR coinQuest client. Protocol observed in HAR453 and public jumpmission-v2.
+// No harvested signatures, device constants or personal account data are embedded.
+const JRB_VERSION='20261029-1',JRB_KEY='JD_JR_BEANS_ACCOUNT_V1';
+const JRB_ORIGIN='https://ms.jr.jd.com';
+const JRB_API={page:JRB_ORIGIN+'/gw2/generic/legogw/h5/m/getPageInfoSafetyTranslate',receive:JRB_ORIGIN+'/gw2/generic/mission/newh5/m/receiveMissionForNa',jump:JRB_ORIGIN+'/gw2/generic/Mission/h5/m/getJumpInfoV3'};
+const jrbObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+const jrbClone=x=>JSON.parse(JSON.stringify(x));
+function jrbHeader(h,name){const k=Object.keys(h||{}).find(k=>k.toLowerCase()===name.toLowerCase());return k?String(h[k]):'';}
+function jrbForm(raw){const out={};for(const part of String(raw||'').split('&')){if(!part)continue;const p=part.indexOf('='),decode=x=>decodeURIComponent(x.replace(/\+/g,' ')),k=decode(p<0?part:part.slice(0,p)),v=decode(p<0?'':part.slice(p+1));if(Object.prototype.hasOwnProperty.call(out,k))throw Error('金融赚京豆参数重复');out[k]=v;}return out;}
+const jrbEncode=o=>Object.keys(o).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(String(o[k]))).join('&');
+const jrbEndpoint=u=>String(u||'').split('?')[0];
+function jrbParams(req){const q=jrbForm(String(req.url||'').split('?')[1]||''),b=jrbForm(req.body);for(const k of Object.keys(b))if(q[k]!==undefined&&q[k]!==b[k])throw Error('金融赚京豆参数冲突');return {...q,...b};}
+function jrbPair(cookie){const a=String(cookie||'').split(';').map(x=>x.trim()),k=a.filter(x=>x.startsWith('pt_key=')),p=a.filter(x=>x.startsWith('pt_pin='));if(k.length!==1||p.length!==1||!k[0].slice(7)||!p[0].slice(7)||/[\s\r\n]/.test(k[0]+p[0]))return null;return {pin:p[0].slice(7),cookie:k[0]+';'+p[0]+';'};}
+function jrbMergeCookie(pair,...cookies){const extra=new Map();for(const cookie of cookies)for(const item of String(cookie||'').split(';')){const s=item.trim(),p=s.indexOf('=');if(p>0&&!/^pt_(?:pin|key)$/.test(s.slice(0,p))&&!/[\r\n]/.test(s))extra.set(s.slice(0,p),s.slice(p+1));}return pair.cookie+[...extra].map(([k,v])=>k+'='+v+';').join('');}
+function jrbLogin(read){
+ const bound=read('JD_SIGNIN_ACCOUNT_V1',null)?.pin;
+ const rows=['JD_SIGNIN_LOGIN_V1','QL_BRIDGE_CREDENTIAL_V1','JD_JR_CHECKIN_ACCOUNT_V1'].map(k=>read(k,null)).filter(Boolean).map(x=>({...x,pair:jrbPair(x.cookie||jrbHeader(x.headers,'Cookie'))})).filter(x=>x.pair&&(!bound||x.pair.pin===bound)).sort((a,b)=>Number(b.capturedAt||b.updatedAt||0)-Number(a.capturedAt||a.updatedAt||0));
+ if(!rows.length)return null;const row=rows[0];return {...row.pair,finance:rows.find(x=>x.headers)?.headers};
+}
+function jrbCode(v){return /^[A-Za-z0-9_-]{1,32}$/.test(String(v??''))?String(v):'unknown';}
+function jrbBusiness(j,inner=false){
+ if(!jrbObject(j)||j.success!==true||String(j.resultCode)!=='0'||!jrbObject(j.resultData))throw Error('金融赚京豆接口拒绝（code='+jrbCode(j?.resultCode??j?.code)+'）');
+ const d=j.resultData;if(inner&&(d.success===false||String(d.code)!=='0000'))throw Error('金融赚京豆任务拒绝（code='+jrbCode(d.code)+'）');return d;
+}
+function jrbList(j){const d=jrbBusiness(j),out=[];if(Number(d.pageId)!==11189||!Array.isArray(d.resultList)||d.resultList.length>100)throw Error('金融赚京豆任务页结构变化');for(const f of d.resultList)if(Array.isArray(f?.templateData?.taskList))out.push(...f.templateData.taskList);if(out.length>150)throw Error('金融赚京豆任务数量异常');const ids=new Set();for(const t of out){if(!/^\d{1,12}$/.test(String(t?.missionId||''))||ids.has(String(t.missionId)))throw Error('金融赚京豆任务标识异常');ids.add(String(t.missionId));}return out;}
+function jrbCoins(j){const top=j?.resultData?.topData;if(!jrbObject(top))return null;const values=Object.values(top).filter(jrbObject).map(x=>x.coinNumber?.text).filter(x=>(typeof x==='number'||typeof x==='string')&&/^\d{1,12}$/.test(String(x))).map(Number);return values.length===1&&Number.isSafeInteger(values[0])?values[0]:null;}
+function jrbExpectedBeans(t){const label=String(t?.awardNumber?.text||'').trim(),m=/^\+(\d{1,3})$/.exec(label);if(m&&Number(m[1])>0)return Number(m[1]);const n=/(?:可得|获得|任务得)(\d{1,3})京豆/.exec(String(t?.subTitle?.text||'').replace(/\s/g,''));return n&&Number(n[1])>0?Number(n[1]):null;}
+const jrbTitle=t=>String(t?.title?.text||t?.name||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
+function jrbJump(t){const u=String(t?.button?.jumpData?.jumpUrl||'');if(!/^https:\/\/show\.jd\.com\/static-page\/mission\/forever\/jumpmission-v2\/index\.html\?[^#]*$/.test(u))return null;const p=jrbForm(u.split('?')[1]);return /^[a-f0-9]{32}$/i.test(p.juid||'')?p.juid:null;}
+function jrbProgress(t){
+ if(!t)return {absent:true};
+ const text=[t?.title?.text,t?.button?.text].filter(Boolean).join(' '),m=/[（(](\d+)\s*\/\s*(\d+)[）)]/.exec(text);
+ if(m&&Number(m[1])<=Number(m[2])&&Number(m[2])<=100)return {done:Number(m[1]),limit:Number(m[2])};
+ // Only explicit named progress fields are accepted; opaque report IDs are never parsed.
+ if(Number.isInteger(t.finishNum)&&Number.isInteger(t.finishLimitNum)&&t.finishNum>=0&&t.finishLimitNum>0&&t.finishNum<=t.finishLimitNum&&t.finishLimitNum<=100)return {done:t.finishNum,limit:t.finishLimitNum};
+ return {status:t.status};
+}
+function jrbClassify(t){
+ const title=jrbTitle(t),sub=String(t?.subTitle?.text||''),text=title+' '+sub,p=jrbProgress(t);
+ if(Number(t.status)===1||p.limit&&p.done>=p.limit)return 'done';
+ if(/下单|支付|购买|充值|订阅|关注|邀请|助力|分享|开户|联名卡|理财|保险|预约|兑换|组件|通知|喂猪|浇水|捕鱼|消耗/.test(text))return 'app';
+ if(Number(t.missionType)!==3||!jrbJump(t))return 'app';
+ if(!/逛|浏览|看看|看一看/.test(title)||/视频|游戏|直播/.test(title))return 'app';
+ return 'jump';
+}
+function jrbCapture(host,req,res,decode){
+ const endpoint=jrbEndpoint(req?.url);if(!Object.values(JRB_API).includes(endpoint)||Number(res?.status)!==200||jrbHeader(req.headers,'X-Lazing-Activity-Run')==='1')return null;
+ if(endpoint===JRB_API.jump?req.method!=='GET':req.method!=='POST')return null;
+ const j=JSON.parse(res.body||'{}'),p=jrbParams(req),old=host.read(JRB_KEY,null),login=jrbLogin(host.read),headers={};
+ for(const k of ['Cookie','User-Agent','Origin','Referer','x-rp-client','x-referer-page','wg-sdk-token']){const v=jrbHeader(req.headers,k);if(v)headers[k]=v;}
+ if(!headers['User-Agent'])return null;
+ const pageUrl=jrbHeader(headers,'x-referer-page')||headers.Referer||'';
+ if(!/^https:\/\/member\.jr\.jd\.com\/(?:member\/coinQuest\/coin\/(?:\?[^#]*)?)?$/.test(pageUrl))return null;
+ const direct=jrbPair(headers.Cookie),identity=direct||login;
+ if(!identity||login&&identity.pin!==login.pin||old?.pin&&old.pin!==identity.pin)return null;
+ const now=host.observedAt||Date.now();
+ const profile=old?jrbClone(old):{version:1,pin:identity.pin};let kind='';
+ if(endpoint===JRB_API.page){
+  if(Number(profile.pageAt)>now)return null;
+  const q=JSON.parse(p.reqData||'{}');if(Number(q.pageId)!==11189||Number(q.pageType)!==11189)return null;jrbList(j);
+  const c=JSON.parse(p.cco||'{}'),sig=String(c.h5st||'').split(';');if(sig.length!==10||sig[2]!=='73fdb'||sig[5]!=='5.3')return null;
+  const env=decode(sig[7]);if(![identity.pin,decodeURIComponent(identity.pin)].includes(env?.pp?.p1))return null;
+  if(!jrbObject(q.extParams)||typeof q.extParams.sdkToken!=='string'||!q.extParams.sdkToken||q.extParams.sdkToken.length>16384)return null;
+  delete q.extParams.nonce;delete q.extParams.signature;
+  const fields=String(c._stk||'').split(',');if(fields.length!==6||fields.some(k=>!['clientType','clientVersion','ctp','pageId','pageNum','pageType'].includes(k))||new Set(fields).size!==6)return null;
+  profile.query=q;profile.cco={client:c.client,clientVersion:c.clientVersion,_stk:c._stk,_ste:c._ste};profile.eid=p.eid||'';
+  profile.signing={environment:sig[7],encoding:sig[9]};profile.pageAt=now;kind='任务页';
+ }else if(endpoint===JRB_API.receive){
+  if(Number(profile.deviceAt)>now)return null;
+  jrbBusiness(j,true);const q=JSON.parse(p.reqData||'{}');if(!/^\d{1,12}$/.test(String(q.missionId||''))||!jrbObject(q.deviceInfo1))return null;
+  profile.deviceInfo={};for(const k of ['jsToken','fp','sdkToken','eid','token'])if(typeof q.deviceInfo1[k]==='string'&&q.deviceInfo1[k].length<=16384)profile.deviceInfo[k]=q.deviceInfo1[k];
+  profile.receiveMeta={environment:q.environment,clientType:q.clientType,clientVersion:q.clientVersion};profile.deviceAt=now;kind='任务设备资料';
+ }else{if(Number(profile.jumpAt)>now)return null;jrbBusiness(j,true);if(!/^[a-f0-9]{32}$/i.test(p.juid||'')||p.source!=='missionJumpPage'||p.finishFlag!=='1')return null;profile.jumpMeta={jrAppVersion:p.jrAppVersion,systemEnv:p.systemEnv};profile.jumpAt=now;kind='跳转版本';}
+ const pair={pin:identity.pin,cookie:identity.cookie};const cookie=jrbMergeCookie(pair,jrbHeader(login?.finance,'Cookie'),profile.headers?.Cookie,headers.Cookie);
+ if(now>=Number(profile.headerAt||0)){profile.headers={...profile.headers,...headers,Cookie:cookie};profile.headerAt=now;}
+ profile.updatedAt=Math.max(Number(profile.updatedAt||0),now);host.write(JRB_KEY,profile);
+ return {updated:[JRB_KEY],first:!old,kind};
+}
+function jrbUuid(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:(r&3)|8).toString(16);});}
+function createJrBeansClient(host,crypto,profile){
+ const report={version:JRB_VERSION,rows:[],confirmed:0,submitted:0,pageBeansDelta:null,stopped:false,message:''},recordKey='attempts.'+encodeURIComponent(profile.pin),stored=host.read(recordKey,null),journal=stored?.day===host.day()?stored:{day:host.day(),items:{}};
+ const set=(id,v)=>{journal.items[id]=v;host.write(recordKey,journal);};
+ let signer,firstCoins=null,lastCoins=null;
+ async function signed(data){if(!signer)signer=await host.aar(profile.headers['User-Agent']);const nonce=signer.nonce(),signature=signer.sign(JSON.stringify(data),nonce);if(typeof nonce!=='string'||!/^\d{20}$/.test(nonce)||typeof signature!=='string'||!/^[a-f0-9]{64,66}$/i.test(signature))throw Error('金融赚京豆签名准备失败');return {nonce,signature};}
+ async function page(){
+  host.guard();const q=jrbClone(profile.query),ep=q.extParams;Object.assign(ep,await signed(ep.signData||{sdkToken:ep.sdkToken}));
+  const input={};for(const k of profile.cco._stk.split(',')){if(q[k]===undefined)throw Error('金融赚京豆签名参数不完整');input[k]=q[k];}
+  const cco={...profile.cco,t:host.now()};cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},crypto.decodeEnvironment(profile.signing.environment),input);
+  const j=host.json(await host.request({url:JRB_API.page+'?pageType=11189',method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})}));const rows=jrbList(j);lastCoins=jrbCoins(j);if(firstCoins===null&&lastCoins!==null)firstCoins=lastCoins;report.pageBeansDelta=firstCoins!==null&&lastCoins!==null&&lastCoins>=firstCoins?lastCoins-firstCoins:null;return rows;
+ }
+ async function receive(t){
+  if(Number(t.receivingStatus)!==1)return;
+  const sdk=profile.query.extParams.sdkToken,device=profile.deviceInfo||{sdkToken:sdk};
+  const identity=decodeURIComponent(profile.pin),sig=await signed({channelCode:t.channelCode,PIN:identity,missionId:Number(t.missionId)});
+  const q={environment:profile.receiveMeta?.environment||'2',missionId:String(t.missionId),channelCode:t.channelCode,...sig,deviceInfo1:device,clientType:profile.receiveMeta?.clientType||'h5',clientVersion:profile.receiveMeta?.clientVersion||profile.query.clientVersion};
+  jrbBusiness(host.json(await host.request({url:JRB_API.receive,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q)})})),true);
+ }
+ async function jump(t){
+  const juid=jrbJump(t);if(!juid)throw Error('金融赚京豆跳转标识缺失');const aksSignId=host.uuid?host.uuid():jrbUuid(),jumpSignId=juid+'_'+(host.uuid?host.uuid():jrbUuid());
+  const sig=await signed({juid,aksSignId}),q={juid,signature:sig.signature,nonce:sig.nonce,aksSignId,jumpSignId,source:'missionJumpPage',token:'cxilwAoZKI',jrAppVersion:profile.jumpMeta?.jrAppVersion||profile.query.clientVersion,systemEnv:profile.jumpMeta?.systemEnv||'IOS',finishFlag:'1'};
+  return jrbBusiness(host.json(await host.request({url:JRB_API.jump+'?'+jrbEncode(q),method:'get',headers:{...profile.headers}})),true);
+ }
+ async function run(){
+  try{
+   let tasks=await page();host.log('读取 '+tasks.length+' 项任务');
+   const order=tasks.slice().sort((a,b)=>(/超值爆款好物/.test(jrbTitle(b))?1:0)-(/超值爆款好物/.test(jrbTitle(a))?1:0));
+   for(const first of order){
+    host.guard();const id=String(first.missionId),row={title:jrbTitle(first),result:'',confirmed:0};report.rows.push(row);
+    let task=tasks.find(t=>String(t.missionId)===id);if(!task){row.result='任务已从待办移除';continue;}
+    const type=jrbClassify(task);if(type!=='jump'){row.result=type==='done'?'已完成':'需App操作';continue;}
+    host.log(row.title);
+    const max=/超值爆款好物/.test(row.title)?29:1;
+    for(let n=0;n<max;n++){
+     host.guard();if(report.submitted>=40){row.result='达到本轮处理上限';return report;}
+     if(!task||jrbClassify(task)==='done'){if(!row.result)row.result='已完成';break;}
+     const before=jrbProgress(task),beforeCoins=lastCoins,expected=jrbExpectedBeans(task),token=crypto.hash(jrbJump(task)),key=id+':'+(before.done===undefined?(beforeCoins===null?'single':'coin-'+crypto.hash(String(beforeCoins))):before.done);
+     const past=journal.items[key];if(Object.values(journal.items).some(x=>x.task===id&&x.state!=='confirmed')||past&&past.state!=='confirmed'){row.result='上次已提交，进度待App确认';break;}if(past?.state==='confirmed'&&past.token===token){row.result='该次任务已处理';break;}
+     // Save before either mutation; a timeout is never automatically retried.
+     set(key,{task:id,state:'pending',token,at:host.now()});await receive(task);await host.sleep(1200);await jump(task);report.submitted++;
+     await host.sleep(3000);tasks=await page();let after=tasks.find(t=>String(t.missionId)===id),p=jrbProgress(after);
+     const credited=()=>beforeCoins!==null&&lastCoins!==null&&expected!==null&&lastCoins-beforeCoins===expected;
+     const changed=()=>!after||Number(after.status)===1||before.done!==undefined&&p.done!==undefined&&p.done>before.done||credited();
+     if(!changed()){await host.sleep(3000);tasks=await page();after=tasks.find(t=>String(t.missionId)===id);p=jrbProgress(after);}
+     if(!changed()){set(key,{task:id,state:'submitted',token,at:host.now()});row.result='已提交，任务次数待App确认';break;}
+     const delta=before.done!==undefined&&p.done!==undefined?Math.max(1,p.done-before.done):1;
+     row.confirmed+=delta;report.confirmed+=delta;set(key,{task:id,state:'confirmed',token,at:host.now()});row.result='已确认完成 '+row.confirmed+' 次';
+     if(!after||Number(after.status)===1||p.limit&&p.done>=p.limit)break;
+     // Continue only after an explicit counter increase or the exact declared bean award.
+     if((before.done===undefined||p.done===undefined)&&!credited())break;
+     task=after;await host.sleep(1500);
+    }
+   }
+  }catch(e){report.stopped=true;report.message=host.error(e);const row=report.rows[report.rows.length-1];if(row&&!row.result)row.result='执行中断：'+report.message;}
+  return report;
+ }
+ return {run,page,receive,jump};
+}
+
 async function jsCapture(host,request,response,parsers,decode){
+ if(Object.values(JRB_API).includes(jrbEndpoint(request?.url)))return jrbCapture(host,request,response,decode);
  if(request?.method!=='POST'||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
@@ -1084,7 +1224,7 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
   const read=(k,f)=>{const v=$persistentStore.read(k);if(!v)return f;return JSON.parse(v);};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('本地记录保存失败');};
   try{
-   const names={'JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
+   const names={[JRB_KEY]:'金融赚京豆','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment);
    if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
@@ -1093,4 +1233,5 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture,jrbCapture,JRB_KEY};
+
