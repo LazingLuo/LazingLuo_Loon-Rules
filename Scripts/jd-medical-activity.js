@@ -1,4 +1,4 @@
-// Activity execution revision 20261029-2
+// Activity execution revision 20261030-1
 // BEGIN JD activity request pacing: business requests only, before signing.
 function createJdActivityPacer(host) {
   let completedAt = null, gapMs = 0;
@@ -407,7 +407,7 @@ return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,signOnline:farmO
 }
 
 // JD Health daily activity. Protocol: user HAR456 and public ifloor 00041674.
-const MDA_VERSION='20261029-2',MDA_KEY='JD_MEDICAL_ACTIVITY_ACCOUNT_V1';
+const MDA_VERSION='20261030-1',MDA_KEY='JD_MEDICAL_ACTIVITY_ACCOUNT_V1';
 const MDA_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
 const MDA_FUNCTIONS=['market_daily_pageIndex','market_daily_doCompleteTask','jdh_bm_balanceBeans'];
 const mdaObject=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -514,22 +514,42 @@ function createMedicalClient(host,crypto,profile){
  }
  return {run,page,balance};
 }
-if(typeof module!=='undefined')module.exports={MDA_VERSION,MDA_KEY,MDA_PAGE,MDA_FUNCTIONS,mdaForm,mdaEncode,mdaParams,mdaRoute,mdaPair,mdaLogin,mdaMergeCookie,mdaBusiness,mdaTitle,mdaId,mdaList,mdaDone,mdaSeconds,mdaClassify,mdaRewards,mdaCapture,createMedicalClient};
+// Session updates observed in HAR456: set;1800;<token>, carried as sdtoken.
+function mdaResponseSession(headers){
+ const values=Object.entries(headers||{}).filter(([k])=>k.toLowerCase()==='x-rp-sdtoken').flatMap(([,v])=>Array.isArray(v)?v:[v]);
+ if(!values.length)return null;
+ if(values.some(v=>typeof v!=='string')||new Set(values).size!==1)throw Error('医药活动会话参数异常，已停止');
+ const match=/^set;(\d{1,5});([A-Za-z0-9_-]{16,2048})$/.exec(values[0]);
+ if(!match||Number(match[1])<1||Number(match[1])>86400)throw Error('医药活动会话参数异常，已停止');
+ return {token:match[2],ttl:Number(match[1])};
+}
+
+if(typeof module!=='undefined')module.exports={mdaResponseSession,MDA_VERSION,MDA_KEY,MDA_PAGE,MDA_FUNCTIONS,mdaForm,mdaEncode,mdaParams,mdaRoute,mdaPair,mdaLogin,mdaMergeCookie,mdaBusiness,mdaTitle,mdaId,mdaList,mdaDone,mdaSeconds,mdaClassify,mdaRewards,mdaCapture,createMedicalClient};
 
 if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  (async function(){
   const NAME='医药赚京豆',PREFIX='JD_MEDICAL_ACTIVITY_MANUAL_V1.',LOCK='JD_ACTIVITY_MANUAL_V1.lock',started=Date.now(),until=started+540000,runId=String(started)+'-'+Math.random().toString(16).slice(2),day=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),runDay=day();
-  let owned=false,profileRaw='',loginRaw='',activeCookie='';
+  let owned=false,profileRaw='',loginRaw='',activeCookie='',sessionUntil=0,sessionRefreshes=0;
   const raw=k=>$persistentStore.read(k)||'',read=(k,f)=>{const s=raw(k);if(!s)return f;try{return JSON.parse(s);}catch(_){throw Error('医药活动本地记录无法读取');}},write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('医药活动记录保存失败');};
   const log=s=>console.log('['+NAME+'] '+s),notify=(s,b)=>{try{$notification.post(NAME,s,b);}catch(_){}};
   const error=e=>{const s=String(e?.message||'');return /^(医药活动|活动接近|活动执行|本轮|农场服务端|原始签名|签名初始化)/.test(s)&&!/[\r\n]|https?:|pt_key|pt_pin/.test(s)?s.slice(0,150):'医药活动执行中断，未自动重试';};
   function guard(){if(Date.now()+25000>=until)throw Error('活动接近本轮时限，请下次手动执行');if(read(LOCK,null)?.runId!==runId)throw Error('活动执行锁已变化');if(day()!==runDay)throw Error('活动执行日期已变化');if(raw(MDA_KEY)!==profileRaw||raw('JD_SIGNIN_LOGIN_V1')!==loginRaw)throw Error('医药活动凭据已更新，请重新运行');}
   function request(o){
-   guard();const p=mdaParams(o);if(o.url!=='https://api.m.jd.com/api?functionId='+p.functionId||!MDA_FUNCTIONS.includes(p.functionId)||p.appid!=='jdh-middle')throw Error('医药活动请求地址不符');
+   guard();if(sessionUntil&&Date.now()>=sessionUntil)throw Error('医药活动会话已过期，请下次手动执行');const p=mdaParams(o);if(o.url!=='https://api.m.jd.com/api?functionId='+p.functionId||!MDA_FUNCTIONS.includes(p.functionId)||p.appid!=='jdh-middle')throw Error('医药活动请求地址不符');
    return new Promise((resolve,reject)=>$httpClient.post({...o,headers:{...o.headers,Cookie:activeCookie,'X-Lazing-Activity-Run':'1'},timeout:20000,'auto-redirect':false,'auto-cookie':false,insecure:false,alpn:'h2'},(e,r,b)=>{
     if(e)return reject(Error('医药活动网络请求失败，未自动重试'));
-    const values=Object.entries(r?.headers||{}).filter(([k])=>k.toLowerCase()==='set-cookie').flatMap(([,v])=>Array.isArray(v)?v:[v]);
-    for(const value of values){const m=/(?:^|,\s*)(sdtoken|qid_uid)=([^;,\r\n]+)/.exec(String(value));if(m){const pair=mdaPair(activeCookie);if(pair)activeCookie=mdaMergeCookie(pair,activeCookie,m[1]+'='+m[2]+';');}}
+    if(Number(r?.status)===200){
+     try{
+      const values=Object.entries(r?.headers||{}).filter(([k])=>k.toLowerCase()==='set-cookie').flatMap(([,v])=>Array.isArray(v)?v:[v]);
+      for(const value of values){const m=/(?:^|,\s*)(sdtoken|qid_uid)=([^;,\r\n]+)/.exec(String(value));if(m){const pair=mdaPair(activeCookie);if(pair)activeCookie=mdaMergeCookie(pair,activeCookie,m[1]+'='+m[2]+';');}}
+      const session=mdaResponseSession(r?.headers);
+      if(session){
+       const pair=mdaPair(activeCookie);if(!pair)throw Error('医药活动Cookie不完整');
+       activeCookie=mdaMergeCookie(pair,activeCookie,'sdtoken='+session.token+';');
+       sessionUntil=Date.now()+session.ttl*1000;sessionRefreshes++;
+      }
+     }catch(error){reject(error);return;}
+    }
     resolve({status:r?.status,body:b});
    }));
   }
@@ -546,7 +566,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
     sleep:async ms=>{guard();if(ms<0||ms>65000||Date.now()+ms+25000>=until)throw Error('本轮剩余时间不足');await new Promise(resolve=>setTimeout(resolve,ms));guard();},
     requestAlgo:o=>{guard();if(o.url!=='https://cactus.jd.com/request_algo'||Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('签名初始化地址不符');return new Promise((resolve,reject)=>$httpClient.post({...o,timeout:12000,'auto-cookie':false,'auto-redirect':false,insecure:false},(e,r,b)=>e?reject(Error('签名初始化连接失败')):resolve({status:r?.status,body:b})));}};
    const crypto=createSigninCrypto(host),env=crypto.decodeEnvironment(profile.environment);if(![profile.pin,decodeURIComponent(profile.pin)].includes(env?.pp?.p1))throw Error('医药活动签名账号不一致');
-   const report=await createMedicalClient(host,crypto,profile).run();write(PREFIX+'last',{...report,at:Date.now()});
+   const report=await createMedicalClient(host,crypto,profile).run();report.sessionRefreshes=sessionRefreshes;write(PREFIX+'last',{...report,at:Date.now()});log('本轮会话更新 '+sessionRefreshes+' 次');
    const reward=report.rewardResponses?'接口明确发放 '+report.returnedBeans+' 京豆':'接口未返回发奖数量';
    const balance=report.balanceDelta===null?'':'\n京豆余额变化 '+(report.balanceDelta>=0?'+':'')+report.balanceDelta+'（含其他来源变化）';
    const summary='已确认完成 '+report.confirmed+' 项；提交 '+report.submitted+' 项。\n'+reward+balance;
