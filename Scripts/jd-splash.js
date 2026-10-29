@@ -1090,7 +1090,7 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
 (function () {
   'use strict';
   const KEY='LAZING_JD_SPLASH_DIAG_V1', APIS=['start','basicConfig','welcomeHome','searchBoxWord'];
-  const MAX_BODY=2*1024*1024,MAX_STORE=192*1024,SIZES=['1125x2436','1125x1602'];
+  const MAX_BODY=2*1024*1024,MAX_STORE=192*1024;
   const sensitive=/cookie|token|secret|authorization|password|session|uuid|openudid|deviceid|latitude|longitude|traceid|requestid|userid|^(?:pin|pt_pin|pt_key|phone|mobile|address|sign|h5st)$/i;
   const flagNames=['degradeSplashAD','homePageSplashAd','requestStartMins','showStartMins','showTimesDaily','maxShowTimes'];
   const action=typeof $argument==='undefined'?undefined:$argument;
@@ -1194,40 +1194,13 @@ if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,r
     while(stack.length){const {a,d}=stack.pop();for(const v of a){if(++n>500)return 0;if(Array.isArray(v)){if(d>=3)return 0;stack.push({a:v,d:d+1});continue;}if(!obj(v))continue;const begin=dateValue(v.onlineTime),end=dateValue(v.referralsTime);if(begin===null||end===null||begin>end)continue;if(v.onlineTime!=='2000-01-01 00:00:00'||v.referralsTime!=='2000-01-02 00:00:00')pending.push(v);}}
     for(const v of pending){v.onlineTime='2000-01-01 00:00:00';v.referralsTime='2000-01-02 00:00:00';}return pending.length;
   }
-  function recordAsset(s,a,action,reason,size,groupId){
-    const r={at:Date.now(),action,reason,size:size||'',groupId:id(groupId),...a};s.assets.recorded=Math.min(s.assets.recorded+1,1000000);if(action==='blocked')s.assets.blocked=Math.min(s.assets.blocked+1,1000000);
-    s.assets.records=s.assets.records.filter(x=>x.url!==r.url||x.action!==r.action);s.assets.records.push(r);s.assets.records=s.assets.records.slice(-30);
-    const ok=save(s);
-    console.log('[京东素材] 已拒绝 '+(size||'')+' '+a.url+(ok?'':'；记录保存失败'));
-  }
-  function getImageSize(b){
-    const ascii=(o,n)=>{let s='';for(let i=0;i<n;i++)s+=String.fromCharCode(b[o+i]);return s;};
-    const u16=o=>b[o]|b[o+1]<<8,u24=o=>b[o]|b[o+1]<<8|b[o+2]<<16,u32=o=>(b[o]*0x1000000+(b[o+1]<<16)+(b[o+2]<<8)+b[o+3])>>>0;
-    const valid=(w,h)=>Number.isInteger(w)&&Number.isInteger(h)&&w>0&&h>0&&w<=32768&&h<=32768?{width:w,height:h}:null;
-    if(b.length>=24&&ascii(0,8)==='\x89PNG\r\n\x1a\n'&&ascii(12,4)==='IHDR')return valid(u32(16),u32(20));
-    if(b.length>=10&&['GIF87a','GIF89a'].includes(ascii(0,6)))return valid(u16(6),u16(8));
-    if(b.length>=4&&b[0]===255&&b[1]===216){let o=2;while(o+8<b.length){while(o<b.length&&b[o]!==255)o++;while(o<b.length&&b[o]===255)o++;const m=b[o++];if(m===217||m===218)break;if(m===1||m>=208&&m<=215)continue;if(o+1>=b.length)break;const n=b[o]*256+b[o+1];if(n<2||o+n>b.length)break;if((m>=192&&m<=195||m>=197&&m<=199||m>=201&&m<=203||m>=205&&m<=207)&&n>=7)return valid(b[o+5]*256+b[o+6],b[o+3]*256+b[o+4]);o+=n;}}
-    if(b.length>=30&&ascii(0,4)==='RIFF'&&ascii(8,4)==='WEBP'){const k=ascii(12,4);if(k==='VP8X')return valid(1+u24(24),1+u24(27));if(k==='VP8L'&&b[20]===47)return valid(1+(b[21]|(b[22]&63)<<8),1+(b[22]>>6|b[23]<<2|(b[24]&15)<<10));if(k==='VP8 ')for(let i=20;i<=Math.min(b.length-7,64);i++)if(b[i]===157&&b[i+1]===1&&b[i+2]===42)return valid(u16(i+3)&16383,u16(i+5)&16383);}
-    if(b.length>=32&&ascii(4,4)==='ftyp'&&['heic','heix','hevc','hevx','mif1','msf1','avif','avis'].includes(ascii(8,4))){let best=null;for(let i=4;i<=Math.min(b.length-16,1024*1024);i++)if(ascii(i,4)==='ispe'&&u32(i-4)>=20){const x=valid(u32(i+8),u32(i+12));if(x&&(!best||x.width*x.height>best.width*best.height))best=x;}return best;}
-    return null;
-  }
-  function resources(req,res){
-    // Only the original mobilecms path may reach the binary dimension reader.
-    // No global CDN learning/matching on the request path.
-    if(req.method!=='GET'||!/^https?:\/\/m\.360buyimg\.com(?::(?:443|80))?\/mobilecms\//i.test(String(req.url||'')))return;
-    const a=asset(String(req.url||''));if(!a||!res)return;
-    const b=res.body;if(Number(res.status||res.statusCode)!==200||!/^image\//i.test(header(res.headers,'content-type'))||Object.prototype.toString.call(b)!=='[object Uint8Array]'||b.length>12*1024*1024)return;
-    const x=getImageSize(b);if(!x)return;const size=x.width+'x'+x.height;
-    if(!SIZES.includes(size))return;
-    result={status:404,headers:{'Content-Type':'text/plain','Cache-Control':'no-store'},body:new Uint8Array(0)};
-    recordAsset(load(),a,'blocked','size',size);
-  }
   try{
     if(typeof $request==='undefined'){
       if(action==='reset'){notice(save(empty())?'诊断记录已清空':'清空失败','');}
       else{const s=load();console.log('京东开屏诊断记录（分享本次运行日志即可）');console.log(JSON.stringify(s,null,2));notice('诊断记录已导出到日志',APIS.map(f=>f+'：请求 '+(s.apis[f]?.requests||0)+'，响应 '+(s.apis[f]?.hits||0)).join('\n')+'\n素材已处理 '+s.assets.blocked+' 次；分享本次运行日志即可');}return;
     }
-    if(action==='assets'){resources($request,typeof $response==='undefined'?null:$response);return;}
+    // Old cached image-script entries pass through without reading the response.
+    if(action==='assets')return;
     const f=apiFrom($request);
     if(!f){
       if(typeof $response!=='undefined'&&$request.method==='POST'&&Number($response.status||$response.statusCode)===200&&/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/.test(String($request.url||''))){

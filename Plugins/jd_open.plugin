@@ -1,17 +1,16 @@
 #!name = 京东开屏处理与诊断
-#!desc = 保留start日期过期处理；只检查m.360buyimg.com/mobilecms/内1125×2436、1125×1602图片；素材图片和视频静默拒绝。定向诊断保留，start命中或配置修改时通知。内置统一凭据获取，放在签到和活动插件前面。
+#!desc = 保留start日期过期处理；只按m.360buyimg.com/mobilecms/内带尺寸的图片URL拒绝，不读取图片实际尺寸；素材图片和视频静默拒绝。定向诊断保留，start命中或配置修改时通知。内置统一凭据获取，放在签到和活动插件前面。
 #!loon_version = 3.5.1(983)
-#!date = 2026-10-26
+#!date = 2026-10-29
 
 [Script]
-request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-5") with tag="京东开屏请求观察", requires_body=true, timeout=10
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-5") with tag="京东开屏配置处理与凭据获取", requires_body=true, timeout=20
-response if ${url} ~= /^https?:\/\/m\.360buyimg\.com(?::(?:443|80))?\/mobilecms\//i && ${request.method} == "GET" && ${response.status} == 200 && ${response.header['Content-Type']} ~= /^image\//i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-5", "assets") with tag="京东mobilecms图片尺寸检查", requires_body=true, binary_body_mode=true, timeout=10
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-5", "export") with tag="导出京东开屏诊断记录", timeout=10
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261026-5", "reset") with tag="清空京东开屏诊断记录", timeout=5
+request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-1") with tag="京东开屏请求观察", requires_body=true, timeout=10
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-1") with tag="京东开屏配置处理与凭据获取", requires_body=true, timeout=20
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-1", "export") with tag="导出京东开屏诊断记录", timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-1", "reset") with tag="清空京东开屏诊断记录", timeout=5
 
 [Rewrite]
-# URL 已带旧尺寸时直接拒绝，不运行尺寸脚本；所有扩展名均适用。
+# 仅匹配URL中的尺寸路径并直接拒绝；不读取图片正文，所有扩展名均适用。
 ^https?:\/\/m\.360buyimg\.com(?::(?:443|80))?\/mobilecms\/s(?:1125x2436|1125x1602)_jfs\/ reject
 # 原视频目录规则：不解析视频尺寸、不运行脚本、不通知。
 ^https?:\/\/storage\.360buyimg\.com(?::(?:443|80))?\/material-video\/video\/[^/?#]+\.mp4(?:[?#].*)?$ reject
