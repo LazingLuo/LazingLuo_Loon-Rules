@@ -1,6 +1,6 @@
-// 京东合并签到 2026-10-26.2; fixed check-in scope, local credentials.
+// 京东合并签到 2026-10-30.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-26.2';
+const JS_VERSION='2026-10-30.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
@@ -2242,36 +2242,51 @@ function jsLine(r){
  return name+'：'+detail+(r.doubleSign?'\n'+jsLine(r.doubleSign):'');
 }
 function createSignins(host,legacy,crypto){
- const read=host.read,write=host.write;let pin,date,login,lockToken,owned=false;
+ const read=host.read,write=host.write;let pin,date,login,lockToken,owned=false,heartbeatTimer=null,leaseError=null;
+ const LEASE_MS=120000,HEARTBEAT_MS=30000,RUN_LIMIT_MS=2700000;
  function guard(){
+  if(leaseError)throw leaseError;
   if(host.day()!==date)throw Error('日期已变化，执行停止');
   if(read(JS_KEYS.bound,null)?.pin!==pin)throw Error('账号已变化，执行停止');
-  if(owned&&read(JS_KEYS.lock,null)?.id!==lockToken.id)throw Error('执行锁已变化');
-  if(host.now()>lockToken.expires)throw Error('执行已超时');
+  const current=read(JS_KEYS.lock,null),now=host.now();
+  if(owned&&current?.id!==lockToken.id)throw Error('执行锁已变化');
+  if(now>=lockToken.deadline)throw Error('执行已超时');
+  if(now>=lockToken.expires||now>=current.expires)throw Error('执行锁已过期，请重新手动执行');
+  if(now-lockToken.heartbeatAt>=HEARTBEAT_MS){
+   const renewed={...lockToken,heartbeatAt:now,expires:Math.min(now+LEASE_MS,lockToken.deadline)};
+   write(JS_KEYS.lock,renewed);lockToken=renewed;
+  }
+ }
+ function heartbeat(){
+  heartbeatTimer=null;if(!owned)return;
+  try{guard();heartbeatTimer=host.setTimeout(heartbeat,HEARTBEAT_MS);}catch(e){leaseError=e;}
  }
  function refresh(){guard();const state=jsLogin(read);if(state.pin!==pin)throw Error('账号已变化，执行停止');login=state.login;return login;}
- async function native(task,options){guard();jsTarget(task,options);const r=await host.request(task,{...options,headers:{...options.headers,'X-Lazing-Signin-Run':'1'},'auto-redirect':false,'auto-cookie':false,insecure:false});return r;}
+ async function native(task,options){guard();jsTarget(task,options);const r=await host.request(task,{...options,headers:{...options.headers,'X-Lazing-Signin-Run':'1'},'auto-redirect':false,'auto-cookie':false,insecure:false});guard();return r;}
  async function runLegacy(task){
   const entry=JS_LEGACY[task],source=jsLegacyAccount(task,pin,read,refresh());
   if(!source.value)return {task,status:'missing',detail:task==='finance'?'缺少金融凭据，请打开金融签到页':'缺少凭据，请打开对应签到页'};
   const began=host.now();let newResult=null;
   return new Promise(resolve=>{
    let active=true;const timers=new Set();
-   const done=()=>{
+   const done=(timedOut=false)=>{
     if(!active)return;active=false;for(const t of timers)host.clearTimeout(t);timers.clear();
     // Require a fresh result written by this invocation. An old LAST is not evidence.
-    resolve(newResult&&newResult.date===date&&newResult.time>=began?jsResult(task,newResult):{task,status:'stopped',detail:'正在执行或没有新结果'});
+    resolve(timedOut?{task,status:'stopped',detail:'本项执行超时，已停止等待'}:newResult&&newResult.date===date&&newResult.time>=began?jsResult(task,newResult):{task,status:'stopped',detail:'正在执行或没有新结果'});
    };
+   // A missing legacy callback must not keep the entire queue occupied forever.
+   timers.add(host.setTimeout(()=>done(true),210000));
    const context={
     $argument:entry.fn==='retail'?task:'manual',$script:{startTime:new Date(began).toISOString()},$request:undefined,$response:undefined,
     $persistentStore:{read:key=>key===source.key?JSON.stringify(source.value):host.rawRead(key),write:(value,key)=>{
      if(!active)return false;guard();const ok=host.rawWrite(value,key);if(ok&&key===entry.last){try{newResult=JSON.parse(value);}catch(_){}}return ok;
     }},
-    $notification:{post:()=>{}},$done:done,console:{log:()=>{},warn:()=>{},error:()=>{},info:()=>{},debug:()=>{}},
+    $notification:{post:()=>{}},$done:()=>done(),console:{log:()=>{},warn:()=>{},error:()=>{},info:()=>{},debug:()=>{}},
     setTimeout:(fn,ms,...args)=>{const t=host.setTimeout(()=>{timers.delete(t);if(active)fn(...args);},ms);timers.add(t);return t;},clearTimeout:t=>{timers.delete(t);host.clearTimeout(t);},
     $httpClient:Object.fromEntries(['get','post'].map(method=>[method,(options,callback)=>{
      if(!active){callback('执行已结束',{status:0},'');return;}
-     native(task,{...options,method}).then(r=>callback(null,{status:r.status,headers:r.headers||{}},r.body),()=>callback('请求失败',{status:0},''));
+     const deliver=(...args)=>{if(active){try{callback(...args);}catch(_){done();}}};
+     native(task,{...options,method}).then(r=>deliver(null,{status:r.status,headers:r.headers||{}},r.body),()=>deliver('请求失败',{status:0},''));
     }]))
    };
    try{legacy[entry.fn](context);}catch(_){done();}
@@ -2279,19 +2294,22 @@ function createSignins(host,legacy,crypto){
  }
  async function run(options){
   const settings=jsSettings(options),results=[],pauses=[];
-  const existing=read(JS_KEYS.lock,null);if(existing?.expires>host.now())return {busy:true};
+  const existing=read(JS_KEYS.lock,null);if(existing?.expires>host.now())return {busy:true,remainingSeconds:Math.ceil((existing.expires-host.now())/1000),legacyLock:existing.version!==2};
   const state=jsLogin(read);pin=state.pin;login=state.login;date=host.day();
   if(!pin)throw Error('缺少京东登录凭据');
-  lockToken={id:host.now()+':'+host.random(),expires:host.now()+2700000};
+  const startedAt=host.now();
+  lockToken={version:2,id:startedAt+':'+host.random(),startedAt,heartbeatAt:startedAt,expires:startedAt+LEASE_MS,deadline:startedAt+RUN_LIMIT_MS};
   write(JS_KEYS.lock,lockToken);owned=true;
-  if(!read(JS_KEYS.bound,null))write(JS_KEYS.bound,{pin});
-  const extra=createExtraSignins({read,write,pin,day:host.day,guard,login:refresh,request:native,log:host.log},crypto);
-  let stopped=false;
+  let stopped=false,mayPublish=false;
   try{
+   if(!read(JS_KEYS.bound,null))write(JS_KEYS.bound,{pin});
+   heartbeatTimer=host.setTimeout(heartbeat,HEARTBEAT_MS);
+   const extra=createExtraSignins({read,write,pin,day:host.day,guard,login:refresh,request:native,log:host.log},crypto);
    for(let i=0;i<JS_TASKS.length;i++){
     guard();const [task,name]=JS_TASKS[i];
     host.log('第 '+(i+1)+'/'+JS_TASKS.length+' 项：'+name);
     let row;try{row=JS_LEGACY[task]?await runLegacy(task):{task,...await extra.run(task)};}catch(e){row={task,status:'stopped',detail:jsError(e)};}
+    guard();
     results.push(row);host.log(jsLine(row));
     // Save incremental results before waiting or moving on to the next task.
     write(JS_KEYS.last,{version:JS_VERSION,date,finished:false,results,pauses});
@@ -2302,9 +2320,14 @@ function createSignins(host,legacy,crypto){
     }
    }
   }catch(e){stopped=true;host.log(jsError(e));}
-  finally{if(owned&&read(JS_KEYS.lock,null)?.id===lockToken.id)host.rawWrite('',JS_KEYS.lock);}
+  finally{
+   if(heartbeatTimer!==null)host.clearTimeout(heartbeatTimer);heartbeatTimer=null;
+   mayPublish=owned&&read(JS_KEYS.lock,null)?.id===lockToken.id;
+   if(mayPublish&&!host.rawWrite('',JS_KEYS.lock))host.log('执行锁清理失败，停止续期后2分钟内释放');
+   owned=false;
+  }
   const report={version:JS_VERSION,date,finished:!stopped,results,pauses,message:results.map(jsLine).join('\n')};
-  write(JS_KEYS.last,report);const h=read(JS_KEYS.history,[]);write(JS_KEYS.history,(Array.isArray(h)?h:[]).concat(report).slice(-20));return report;
+  if(mayPublish){write(JS_KEYS.last,report);const h=read(JS_KEYS.history,[]);write(JS_KEYS.history,(Array.isArray(h)?h:[]).concat(report).slice(-20));}return report;
  }
  return {run};
 }
@@ -2327,7 +2350,10 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    const crypto=createSigninCrypto({...host,requestAlgo:o=>{jsTarget('game',o);return host.request('game',o);},progress:()=>{}});
    const runner=createSignins(host,{retail:runRetailSignin,plant:runPlantSignin,jxzy:runJxSignin,home:runHomeSignin,finance:runFinanceSignin},crypto);
    const r=await runner.run(typeof $argument==='undefined'?{}:$argument);
-   if(r.busy){host.log('全部签到正在执行');$notification.post('京东签到','正在执行','请稍后查看结果');}
+   if(r.busy){
+    const text=(r.legacyLock?'上次签到占用尚未到期，剩余约 '+Math.ceil(r.remainingSeconds/60)+' 分钟。':'签到仍被占用；若上次已停止，约 '+r.remainingSeconds+' 秒后可重试。');
+    host.log(text);$notification.post('京东签到','暂未执行',text);
+   }
    else $notification.post('京东签到',r.finished?'本次签到结果':'执行停止',r.message);
   }catch(e){host.log(jsError(e));$notification.post('京东签到','执行停止',jsError(e));}
   finally{$done({});}

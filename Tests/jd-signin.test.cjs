@@ -198,7 +198,76 @@ function seedLegacy(h){
   }}};
   try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,11);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
  });
+ // Virtual timers test interruption recovery without live network or real waits.
+ function leaseHost(){
+  const h=host(),timers=new Map();let now=Date.now(),counter=0;
+  h.read=(k,f)=>{const raw=h.rawRead(k);return raw?JSON.parse(raw):f;};
+  h.now=()=>now;h.random=()=>0.25;
+  h.setTimeout=(fn,ms)=>{const id=++counter;timers.set(id,{fn,at:now+ms});return id;};
+  h.clearTimeout=id=>timers.delete(id);
+  h.advance=async(ms,{fire=true}={})=>{const end=now+ms;let limit=0;while(fire){const entries=[...timers].filter(([,v])=>v.at<=end).sort((a,b)=>a[1].at-b[1].at);if(!entries.length)break;assert(++limit<1000);const [id,t]=entries[0];now=t.at;timers.delete(id);t.fn();await Promise.resolve();await Promise.resolve();}now=end;};
+  h.sleep=ms=>h.advance(ms);h.timers=timers;return h;
+ }
+ function holdFirst(h){const legacy=basicLegacy(h);let first=true,context;const normal=legacy.retail;legacy.retail=c=>{if(first){first=false;context=c;}else normal(c);};return {legacy,get context(){return context;}};}
+ await test('fresh sign-in lock has a 2-minute lease, separate from queue deadline',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
+  const lock=h.read(K.lock);assert.equal(lock.version,2);assert.equal(lock.expires-lock.startedAt,120000);assert.equal(lock.deadline-lock.startedAt,2700000);
+  held.context.$done();await pending;assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
+ });
+ await test('heartbeat renews a live queue during a long callback wait',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0}),initial=h.read(K.lock);
+  await h.advance(90000);const lock=h.read(K.lock);assert.equal(lock.id,initial.id);assert.equal(lock.heartbeatAt,initial.startedAt+90000);assert.equal(lock.expires,h.now()+120000);
+  held.context.$done();await pending;assert.equal(h.timers.size,0);
+ });
+ await test('duplicate manual launches do not extend an existing lease',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0}),raw=h.rawRead(K.lock);
+  const result=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert(result.busy);assert.equal(result.remainingSeconds,120);assert.equal(result.legacyLock,false);assert.equal(h.rawRead(K.lock),raw);
+  held.context.$done();await pending;
+ });
+ await test('restarting the process leaves at most a 2-minute inactive lease',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),old=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
+  h.timers.clear();await h.advance(120001,{fire:false});const fresh=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert(!fresh.busy);const last=h.rawRead(K.last);
+  held.context.$done();const late=await old;assert.equal(late.finished,false);assert.equal(h.rawRead(K.last),last);assert.equal(h.rawRead(K.lock),'');
+ });
+ await test('a paused old queue cannot renew its own expired lease',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
+  await h.advance(120001,{fire:false});held.context.$done();const r=await pending;assert.equal(r.finished,false);assert.equal(h.calls.length,0);assert.equal(h.timers.size,0);
+ });
+ await test('legacy 45-minute locks are respected and return remaining time',async()=>{
+  const h=leaseHost();seedLegacy(h);h.write(K.lock,{id:'OLD',expires:h.now()+2700000});const before=h.rawRead(K.lock);
+  const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert(r.busy);assert(r.legacyLock);assert.equal(r.remainingSeconds,2700);assert.equal(h.rawRead(K.lock),before);assert.equal(h.calls.length,0);
+ });
+ await test('expired legacy lock no longer blocks the queue',async()=>{
+  const h=leaseHost();seedLegacy(h);h.write(K.lock,{id:'OLD',expires:h.now()-1});assert(!(await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0})).busy);assert.equal(h.rawRead(K.lock),'');
+ });
+ await test('missing child completion callback has a bounded wait and no retry',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
+  await h.advance(210000);const r=await pending;assert.equal(r.results[0].detail,'本项执行超时，已停止等待');assert.equal(r.results.length,11);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
+ });
+ await test('initialization write failure releases the newly acquired lock',async()=>{
+  const h=leaseHost();seedLegacy(h);h.map.delete(K.bound);const write=h.write;h.write=(k,v)=>{if(k===K.bound)throw Error('本地记录保存失败');write(k,v);};const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.equal(r.finished,false);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
+ });
+ await test('failed lock cleanup stops heartbeat and allows expiry recovery',async()=>{
+  const h=leaseHost();seedLegacy(h);const rawWrite=h.rawWrite;h.rawWrite=(v,k)=>k===K.lock&&v===''?false:rawWrite(v,k);
+  await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});const left=h.read(K.lock);assert(left.expires-h.now()<=120000);assert.equal(h.timers.size,0);
+  h.rawWrite=rawWrite;await h.advance(120001);assert(!(await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0})).busy);
+ });
+ await test('heartbeat storage failure prevents further business requests',async()=>{
+  const h=leaseHost();seedLegacy(h);let fail=false;const write=h.write;h.write=(k,v)=>{if(fail&&k===K.lock)throw Error('本地记录保存失败');write(k,v);};const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});fail=true;
+  await h.advance(30000);held.context.$done();const r=await pending;assert.equal(r.finished,false);assert.equal(h.calls.length,0);assert.equal(h.timers.size,0);
+ });
+ await test('ownership loss cannot erase a replacement lock or overwrite its summary',async()=>{
+  const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
+  h.write(K.lock,{id:'REPLACEMENT',expires:h.now()+90000});h.write(K.last,{owner:'REPLACEMENT'});held.context.$done();const r=await pending;assert.equal(r.finished,false);assert.equal(h.read(K.lock).id,'REPLACEMENT');assert.equal(h.read(K.last).owner,'REPLACEMENT');assert.equal(h.timers.size,0);
+ });
+ await test('busy Loon notification shows legacy lock time without altering it',async()=>{
+  const h=host(),notes=[],logs=[];h.write(K.lock,{id:'OLD',expires:Date.now()+2700000});const before=h.rawRead(K.lock);let finish,doneCount=0;const complete=new Promise(r=>finish=r);
+  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),{$argument:{gapSeconds:0},$persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:(...a)=>notes.push(a)},$done:()=>{doneCount++;finish();},console:{log:s=>logs.push(s)},setTimeout,clearTimeout,$httpClient:{post:()=>{throw Error('unexpected request');}}},{timeout:10000});
+  await complete;assert.equal(doneCount,1);assert.equal(notes.length,1);assert(notes[0][2].includes('45 分钟'));assert(logs.some(s=>s.includes('上次签到占用尚未到期')));assert.equal(h.rawRead(K.lock),before);
+ });
+
  // Verify generated artifacts parse in a native-like context without Node globals.
  await test('generated Loon scripts parse without Node APIs',()=>{for(const p of [mainPath,capturePath])new vm.Script(fs.readFileSync(p,'utf8'));});
  console.log('Passed '+total+' offline checks. No live account requests.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
+
