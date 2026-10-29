@@ -1,5 +1,5 @@
 #!name = 京东活动（手动）
-#!desc = 京喜自营、东东农场、领券中心、家电家居。各一个手动入口，无定时。农场不自动浇水；领券中心跟随最近访问入口，不自动砸蛋。
+#!desc = 京喜自营、东东农场、领券中心、家电家居。各一个手动入口，无定时。农场不自动浇水；领券中心使用jinquan3入口，不自动砸蛋。
 #!loon_version = 3.5.1(983)
 #!date = 2026-10-29
 
@@ -8,7 +8,7 @@ response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?![^#]
 response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-activity-capture.js?v=20261029-1") with tag="京东金融活动凭据获取", requires_body=true, timeout=20
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-jxzy-activity.js?v=20261026-9") with tag="京喜自营", timeout=600
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-farm-activity.js?v=20261026-6") with tag="东东农场", timeout=600
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-coupon-activity.js?v=20261029-1") with tag="领券中心赚京豆", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-coupon-activity.js?v=20261029-2") with tag="领券中心赚京豆", timeout=600
 
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-home-activity.js?v=20261029-1") with tag="家电家居", timeout=600
 

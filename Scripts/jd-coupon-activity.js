@@ -439,17 +439,23 @@ function jcPlan(t){
  if(!items.length)return {name,skip:pending.length?'浏览项目变化，留待App':'暂无可处理浏览项目'};
  return {name,item:items[0],items,wait,id:t.encryptAssignmentId,limit,count};
 }
-function createCouponActivity(host,crypto){
+function createCouponActivity(host,crypto,options={}){
  async function run(){
-  const state=jsLogin(host.read),profile=host.read(JC_KEY,null),pin=state.pin,date=host.day();
-  if(!profile||!profile.signing||!profile.params||!profile.common)throw Error('缺少领券中心凭据，请打开领券中心任务列表');
+  const state=jsLogin(host.read),source=host.read(JC_KEY,null),pin=state.pin,date=host.day();
+  if(!source||!source.signing||!source.params||!source.common)throw Error('缺少领券中心凭据，请打开领券中心任务列表');
+  if(!Object.prototype.hasOwnProperty.call(JC_SCENES,source.common.scene)||options.scene!==undefined&&!Object.prototype.hasOwnProperty.call(JC_SCENES,options.scene))throw Error('领券中心入口不符');
+  // Scene/page are public routing constants. Reuse validated account/device
+  // material, then sign fresh requests for the selected scene. Never reuse IDs,
+  // timers, signatures or completion state from the captured scene.
+  const scene=options.scene||source.common.scene;
+  const profile=options.scene?{...source,headers:{...source.headers,Referer:'https://pro.m.jd.com/mall/active/'+JC_SCENES[scene]+'/index.html'},common:{...source.common,scene}}:source;
   if(profile.pin!==pin||!state.login)throw Error('领券中心账号不一致');
   if(profile.params.appid!=='hourly-m'||!Object.prototype.hasOwnProperty.call(JC_SCENES,profile.common.scene)||profile.signing.encoding!==JC_ENCODING)throw Error('领券中心凭据不完整');
   const env=crypto.decodeEnvironment(profile.signing.environment);if(![pin,decodeURIComponent(pin)].includes(env.pp?.p1))throw Error('领券中心签名账号不一致');
   const lockKey='JD_COUPON_ACTIVITY_LOCK_V1',previous=host.read(lockKey,null);if(previous?.expires>host.now())throw Error('领券中心正在执行');
   const lock={id:host.now()+':'+host.random(),expires:host.now()+10*60*1000};host.write(lockKey,lock);
-  const scene=profile.common.scene,report={date,scene,results:[],beanQuantity:0,eggChances:0,unknownRewards:0,eggBefore:null,eggAfter:null,eggsSmashed:0},snapshot=JSON.stringify(profile);
-  host.log('当前入口 '+scene+'；按最近访问的任务列表执行');
+  const report={date,scene,results:[],beanQuantity:0,eggChances:0,unknownRewards:0,eggBefore:null,eggAfter:null,eggsSmashed:0},snapshot=JSON.stringify(source);
+  host.log('当前入口 '+scene+(options.scene?'；使用共享登录和设备资料，重新读取此入口任务':'；按最近访问的任务列表执行'));
   function guard(){
    if(host.day()!==date||jsLogin(host.read).pin!==pin||host.read(lockKey,null)?.id!==lock.id||host.now()>lock.expires)throw Error('日期或账号变化，执行停止');
    if(JSON.stringify(host.read(JC_KEY,null))!==snapshot)throw Error('页面凭据已更新，请重新手动执行');
@@ -543,9 +549,9 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   const log=s=>console.log('[领券中心] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};
   const host={rawRead,rawWrite,read,write,request,now:()=>Date.now(),day:jsDay,random:()=>Math.random(),setTimeout,clearTimeout:cancel,sleep:ms=>new Promise(r=>setTimeout(r,ms)),log};
   try{
-   log('版本 20261029-1；跟随最近访问的领券中心入口，统计京豆与剩余金蛋次数');
+   log('版本 20261029-2；执行当前领券中心 jinquan3，统计京豆与剩余金蛋次数');
    const crypto=createSigninCrypto({...host,requestAlgo:o=>request('algo',o),progress:log});
-   const r=await createCouponActivity(host,crypto).run();log(r.message);
+   const r=await createCouponActivity(host,crypto,{scene:'jinquan3'}).run();log(r.message);
    $notification.post('领券中心',r.stopped?'执行停止':'本次活动结果',(r.error?r.error+'\n':'')+r.message);
   }catch(e){const m=/缺少|账号|凭据|正在执行/.test(String(e.message))?String(e.message):'执行未完成，请查看活动页面';log(m);$notification.post('领券中心','执行停止',m);}
   finally{$done({});}

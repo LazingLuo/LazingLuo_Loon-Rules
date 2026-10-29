@@ -35,7 +35,17 @@ test('new scene executes separately and reports egg balance without drawing',asy
  };
  const r=await coupon.createCouponActivity(h,crypto).run();assert(!r.stopped,r.error);assert.equal(r.scene,'jinquan3');assert.equal(r.eggBefore,0);assert.equal(r.eggAfter,1);assert.equal(r.eggsSmashed,0);assert.equal(r.eggChances,1);assert(r.message.includes('0 → 1'));assert(r.results[0].confirmed);
 });
-test('unsupported scene is rejected before network',async()=>{const h=host();h.write(coupon.JC_KEY,{pin:'offline',params:{appid:'hourly-m'},common:{scene:'other'},signing:{encoding:coupon.JC_ENCODING}});await assert.rejects(()=>coupon.createCouponActivity(h,crypto).run(),/凭据不完整/);assert.equal(h.calls.length,0);});
+test('unsupported scene is rejected before network',async()=>{const h=host();h.write(coupon.JC_KEY,{pin:'offline',params:{appid:'hourly-m'},common:{scene:'other'},signing:{encoding:coupon.JC_ENCODING}});await assert.rejects(()=>coupon.createCouponActivity(h,crypto).run(),/入口不符/);assert.equal(h.calls.length,0);});
+test('explicit new entry works with old-scene material and never queries the old scene',async()=>{
+ const h=host();await cap.jsCapture(h,queryRequest('jinquan'),postReply(taskReply()),parsers,cap.farmDecodeEnvironment);const before=clone(h.read(coupon.JC_KEY));
+ h.reply=async(t,o)=>{const p=Object.fromEntries(new URLSearchParams(o.body)),b=JSON.parse(p.body);assert.equal(b.scene,'jinquan3');assert.equal(o.headers.Referer,'https://pro.m.jd.com/mall/active/'+pages.jinquan3+'/index.html');assert.equal(p.functionId,'sh_c_query_task_list');return postReply(taskReply({...seed,completionFlag:true,completionCnt:1},14));};
+ const r=await coupon.createCouponActivity(h,crypto,{scene:'jinquan3'}).run();assert(!r.stopped,r.error);assert.equal(r.scene,'jinquan3');assert.deepEqual(h.read(coupon.JC_KEY),before);assert.equal(r.eggBefore,14);assert.equal(r.eggAfter,14);
+});
+test('selected entry still stops if account material changes during a run',async()=>{
+ const h=host();await cap.jsCapture(h,queryRequest('jinquan'),postReply(taskReply()),parsers,cap.farmDecodeEnvironment);
+ h.reply=async()=>{const p=h.read(coupon.JC_KEY);p.capturedAt++;h.write(coupon.JC_KEY,p);return postReply(taskReply());};
+ const r=await coupon.createCouponActivity(h,crypto,{scene:'jinquan3'}).run();assert(r.stopped);assert.equal(h.calls.length,1);assert(r.error.includes('凭据已更新'));
+});
 const houseBase={source:'jxzy',craftId:craft,sceneval:2,buid:325,appCode:'ms1888ebbf'};
 const houseHeaders={...headers,Referer:'https://pro.m.jd.com/mall/active/'+housePage+'/index.html'};
 const houseTask=(status=1)=>({showTask:1,taskName:'跟着指数买好价',taskId:'FAKE_TASK',taskType:3,taskStatus:status,taskProgress:{total:1,current:status===1?0:1,itemId:'FAKE_ITEM'},taskAmount:1,extInfo:{browseTask:{browseTime:10,completionFlag:status!==1,shoppingActivityList:[{itemId:'FAKE_ITEM',status:status===1?1:2,url:'https://pro.m.jd.com/mall/active/offline/index.html'}]}}});
