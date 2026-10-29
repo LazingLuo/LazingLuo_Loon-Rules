@@ -1,4 +1,4 @@
-// Shared capture update 20261029-3: add independently scoped JR coinQuest.
+// Shared capture update 20261029-4: add independently scoped JR coinQuest.
 // Shared credential capture 20261026-9; Jingxi and farm activities.
 // Shared login and Jingxi adapters only. No retired activity clients.
 const actClone=x=>JSON.parse(JSON.stringify(x));
@@ -1007,7 +1007,7 @@ function farmCapture(host,request,response,decodeEnvironment) {
 // One dispatcher owns capture; all imported parsers receive a private request copy.
 // Independent JR coinQuest client. Protocol observed in HAR453 and public jumpmission-v2.
 // No harvested signatures, device constants or personal account data are embedded.
-const JRB_VERSION='20261029-1',JRB_KEY='JD_JR_BEANS_ACCOUNT_V1';
+const JRB_VERSION='20261029-2',JRB_KEY='JD_JR_BEANS_ACCOUNT_V1';
 const JRB_ORIGIN='https://ms.jr.jd.com';
 const JRB_API={page:JRB_ORIGIN+'/gw2/generic/legogw/h5/m/getPageInfoSafetyTranslate',receive:JRB_ORIGIN+'/gw2/generic/mission/newh5/m/receiveMissionForNa',jump:JRB_ORIGIN+'/gw2/generic/Mission/h5/m/getJumpInfoV3'};
 const jrbObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -1025,9 +1025,9 @@ function jrbLogin(read){
  if(!rows.length)return null;const row=rows[0];return {...row.pair,finance:rows.find(x=>x.headers)?.headers};
 }
 function jrbCode(v){return /^[A-Za-z0-9_-]{1,32}$/.test(String(v??''))?String(v):'unknown';}
-function jrbBusiness(j,inner=false){
- if(!jrbObject(j)||j.success!==true||String(j.resultCode)!=='0'||!jrbObject(j.resultData))throw Error('金融赚京豆接口拒绝（code='+jrbCode(j?.resultCode??j?.code)+'）');
- const d=j.resultData;if(inner&&(d.success===false||String(d.code)!=='0000'))throw Error('金融赚京豆任务拒绝（code='+jrbCode(d.code)+'）');return d;
+function jrbBusiness(j,inner=false,stage='接口'){
+ if(!jrbObject(j)||j.success!==true||String(j.resultCode)!=='0'||!jrbObject(j.resultData))throw Error('金融赚京豆'+stage+'拒绝（code='+jrbCode(j?.resultCode??j?.code)+'）');
+ const d=j.resultData;if(inner&&(d.success===false||String(d.code)!=='0000'))throw Error('金融赚京豆'+stage+'拒绝（code='+jrbCode(d.code)+'）');return d;
 }
 function jrbList(j){const d=jrbBusiness(j),out=[];if(Number(d.pageId)!==11189||!Array.isArray(d.resultList)||d.resultList.length>100)throw Error('金融赚京豆任务页结构变化');for(const f of d.resultList)if(Array.isArray(f?.templateData?.taskList))out.push(...f.templateData.taskList);if(out.length>150)throw Error('金融赚京豆任务数量异常');const ids=new Set();for(const t of out){if(!/^\d{1,12}$/.test(String(t?.missionId||''))||ids.has(String(t.missionId)))throw Error('金融赚京豆任务标识异常');ids.add(String(t.missionId));}return out;}
 function jrbCoins(j){const top=j?.resultData?.topData;if(!jrbObject(top))return null;const values=Object.values(top).filter(jrbObject).map(x=>x.coinNumber?.text).filter(x=>(typeof x==='number'||typeof x==='string')&&/^\d{1,12}$/.test(String(x))).map(Number);return values.length===1&&Number.isSafeInteger(values[0])?values[0]:null;}
@@ -1036,7 +1036,7 @@ const jrbTitle=t=>String(t?.title?.text||t?.name||'未命名任务').replace(/[\
 function jrbJump(t){const u=String(t?.button?.jumpData?.jumpUrl||'');if(!/^https:\/\/show\.jd\.com\/static-page\/mission\/forever\/jumpmission-v2\/index\.html\?[^#]*$/.test(u))return null;const p=jrbForm(u.split('?')[1]);return /^[a-f0-9]{32}$/i.test(p.juid||'')?p.juid:null;}
 function jrbProgress(t){
  if(!t)return {absent:true};
- const text=[t?.title?.text,t?.button?.text].filter(Boolean).join(' '),m=/[（(](\d+)\s*\/\s*(\d+)[）)]/.exec(text);
+ const text=[t?.title?.text,t?.title1?.text,t?.button?.text].filter(Boolean).join(' '),m=/[（(](\d+)\s*\/\s*(\d+)[）)]/.exec(text);
  if(m&&Number(m[1])<=Number(m[2])&&Number(m[2])<=100)return {done:Number(m[1]),limit:Number(m[2])};
  // Only explicit named progress fields are accepted; opaque report IDs are never parsed.
  if(Number.isInteger(t.finishNum)&&Number.isInteger(t.finishLimitNum)&&t.finishNum>=0&&t.finishLimitNum>0&&t.finishNum<=t.finishLimitNum&&t.finishLimitNum<=100)return {done:t.finishNum,limit:t.finishLimitNum};
@@ -1093,19 +1093,19 @@ function createJrBeansClient(host,crypto,profile){
   host.guard();const q=jrbClone(profile.query),ep=q.extParams;Object.assign(ep,await signed(ep.signData||{sdkToken:ep.sdkToken}));
   const input={};for(const k of profile.cco._stk.split(',')){if(q[k]===undefined)throw Error('金融赚京豆签名参数不完整');input[k]=q[k];}
   const cco={...profile.cco,t:host.now()};cco.h5st=await crypto.signOnline('73fdb',{pin:profile.pin,headers:profile.headers},crypto.decodeEnvironment(profile.signing.environment),input);
-  const j=host.json(await host.request({url:JRB_API.page+'?pageType=11189',method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})}));const rows=jrbList(j);lastCoins=jrbCoins(j);if(firstCoins===null&&lastCoins!==null)firstCoins=lastCoins;report.pageBeansDelta=firstCoins!==null&&lastCoins!==null&&lastCoins>=firstCoins?lastCoins-firstCoins:null;return rows;
+  const j=host.json(await host.request({url:JRB_API.page+'?pageType=11189',method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q),cco:JSON.stringify(cco),eid:profile.eid||''})}));jrbBusiness(j,false,'查询任务');const rows=jrbList(j);lastCoins=jrbCoins(j);if(firstCoins===null&&lastCoins!==null)firstCoins=lastCoins;report.pageBeansDelta=firstCoins!==null&&lastCoins!==null&&lastCoins>=firstCoins?lastCoins-firstCoins:null;return rows;
  }
  async function receive(t){
   if(Number(t.receivingStatus)!==1)return;
   const sdk=profile.query.extParams.sdkToken,device=profile.deviceInfo||{sdkToken:sdk};
   const identity=decodeURIComponent(profile.pin),sig=await signed({channelCode:t.channelCode,PIN:identity,missionId:Number(t.missionId)});
   const q={environment:profile.receiveMeta?.environment||'2',missionId:String(t.missionId),channelCode:t.channelCode,...sig,deviceInfo1:device,clientType:profile.receiveMeta?.clientType||'h5',clientVersion:profile.receiveMeta?.clientVersion||profile.query.clientVersion};
-  jrbBusiness(host.json(await host.request({url:JRB_API.receive,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q)})})),true);
+  jrbBusiness(host.json(await host.request({url:JRB_API.receive,method:'post',headers:{...profile.headers,'Content-Type':'application/x-www-form-urlencoded'},body:jrbEncode({reqData:JSON.stringify(q)})})),true,'接取任务');
  }
  async function jump(t){
   const juid=jrbJump(t);if(!juid)throw Error('金融赚京豆跳转标识缺失');const aksSignId=host.uuid?host.uuid():jrbUuid(),jumpSignId=juid+'_'+(host.uuid?host.uuid():jrbUuid());
   const sig=await signed({juid,aksSignId}),q={juid,signature:sig.signature,nonce:sig.nonce,aksSignId,jumpSignId,source:'missionJumpPage',token:'cxilwAoZKI',jrAppVersion:profile.jumpMeta?.jrAppVersion||profile.query.clientVersion,systemEnv:profile.jumpMeta?.systemEnv||'IOS',finishFlag:'1'};
-  return jrbBusiness(host.json(await host.request({url:JRB_API.jump+'?'+jrbEncode(q),method:'get',headers:{...profile.headers}})),true);
+  return jrbBusiness(host.json(await host.request({url:JRB_API.jump+'?'+jrbEncode(q),method:'get',headers:{...profile.headers}})),true,'提交跳转');
  }
  async function run(){
   try{
@@ -1121,6 +1121,7 @@ function createJrBeansClient(host,crypto,profile){
      host.guard();if(report.submitted>=40){row.result='达到本轮处理上限';return report;}
      if(!task||jrbClassify(task)==='done'){if(!row.result)row.result='已完成';break;}
      const before=jrbProgress(task),beforeCoins=lastCoins,expected=jrbExpectedBeans(task),token=crypto.hash(jrbJump(task)),key=id+':'+(before.done===undefined?(beforeCoins===null?'single':'coin-'+crypto.hash(String(beforeCoins))):before.done);
+     if(before.done!==undefined)host.log('当前次数 '+before.done+'/'+before.limit);
      const past=journal.items[key];if(Object.values(journal.items).some(x=>x.task===id&&x.state!=='confirmed')||past&&past.state!=='confirmed'){row.result='上次已提交，进度待App确认';break;}if(past?.state==='confirmed'&&past.token===token){row.result='该次任务已处理';break;}
      // Save before either mutation; a timeout is never automatically retried.
      set(key,{task:id,state:'pending',token,at:host.now()});await receive(task);await host.sleep(1200);await jump(task);report.submitted++;
