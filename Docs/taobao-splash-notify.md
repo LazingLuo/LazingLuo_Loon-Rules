@@ -1,41 +1,12 @@
-# 淘宝开屏拦截与命中通知
+# 淘宝开屏
 
-从 [FFDNS / Thelongdarkorg 的淘宝规则](https://github.com/Thelongdarkorg/loon-plugins/blob/main/taobao_splash_ad_block.plugin) 中提取开屏部分，改成 Loon 本地请求脚本，在返回空字典的同时通知命中时间、次数和间隔。
+自用，版本 20261029-1。更新原插件后保存、断开重连 Loon；已安装旧的“淘宝开屏时间改写”试验插件时关闭旧版，避免抢先处理。同类规则冲突时把本插件排前面。
 
-2026年10月21日核对：该仓库最近推送为10月19日，淘宝文件自述更新时间为9月18日。本次下载 SHA-256 为 `11bfac77622eb370b1295cdf7bad12af0ec0e5b85d28a82da621685c15c5e70d`，与10月19日下载的版本相同。另核对了 ishowshu/loon 与 aoomee/Loon-Adblock-Plugins 的淘宝文件，两者内容一致；没有将新近转载当作规则更新。本版增加的是通知和本地统计，不声称发现了已验证的新开屏接口。
+- 专用 splash 接口和带 tao_splash 的旧接口返回空字典。
+- 首页 home 系列响应仅检查 topViewSplashSection.sections 中同时带素材地址及 gmtStartMs/gmtEndMs 的条目，开始/结束时间设为 2099/2100 年；保留其他首页内容。专用接口在请求阶段已拦截，不再等待它的响应。
+- 图片只按 heic.alicdn.com、gw.alicdn.com 的指定路径及 URL 尺寸特征处理，不读取实际图片尺寸；仍是候选特征，可关闭“开屏素材规则”。HEIC选用720×1280、1080×1920、1125×1602、1125×1950、1242×2208；WebP不含1125×1950。
+- 通知分别显示接口拦截、实际时间改写、素材特征拦截。普通首页响应只记数。手动运行“淘宝开屏命中统计”可看各项次数、时间及最近连接主机。
 
-## 安装
+保留 App 自带 DNS，不添加全局 UDP、证书验证或 IP 拒绝规则。4 个 MitM 候选为 106.11.226.222、59.82.9.242、203.119.238.85、203.119.238.234，来自一次 AMDC 结果，TTL 300 秒。它们承载多种业务，可能变化；加入不保证能解密特殊传输，也不能清除 App 已有缓存。
 
-将[插件链接](https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Plugins/taobao-splash-notify.plugin?v=20261021-1)导入 Loon，并开启插件。配套脚本为 `Scripts/taobao-splash-notify.js`。要求已启用 MITM、安装并信任 Loon 证书；插件列出四个需要解密的域名。
-
-观察期间，请关闭其他插件中重复的淘宝开屏拦截条目或“淘宝去广告”开关，让这份插件独立处理这些请求。已有 Rewrite / REJECT 如果提前拦截，本脚本可能无法运行，也不会补发通知。专门用于 HTTPDNS 的现有设置可继续保留，本插件不会增加或修改 DNS、QUIC 或 IP 拦截规则。原闲鱼开屏插件可继续使用。
-
-## 命中通知和统计
-
-默认每条命中的请求都发通知，不设置去重或冷却：
-
-- **开屏接口已拦截**：匹配选中的社区开屏接口规则，并返回空字典。
-- **素材规则已拦截（待核实）**：匹配社区图片 URL 特征并返回空字典，尚不能据此确认素材就是本次展示的开屏。部分图形规则可能匹配普通图片；可在插件参数关闭“开屏素材规则”，保留两个接口规则。
-
-通知同时显示北京时间、距上次**同一规则**命中的间隔、今日总次数和累计总次数。数字按请求计算，同一次启动可能触发多条通知，不能当成启动次数或被拦广告的展示次数。
-
-在 Loon 手动脚本入口执行 **“淘宝开屏命中统计”**，查看各规则累计次数和最近命中时间，以及最近10条记录。底层最多保存50条历史，仅保存在本机；并发请求或系统中断时计数可能有遗漏。
-
-“命中通知”开关关闭时仍拦截并记录。统计保存或系统通知失败时，已生成的空响应仍保留。脚本不保存完整 URL、图片文件名、查询参数、Cookie、账号或设备标识，也不发起网络请求。
-
-## 提取范围
-
-- `acs.m.taobao.com`：`mtop.etao.noah.query`，且 URL 带 `tao_splash`。
-- `guide-acs.m.taobao.com`：`mtop.taobao.wireless.home.splash.awesome.get`。
-- `heic.alicdn.com`：上游3条 HEIC 图片特征。
-- `gw.alicdn.com`：上游1条指定竖屏规格 WebP 特征。
-
-增加显式默认端口识别，并为首页开屏接口增加名称／版本边界；其余图片路径选择保留上游规则。未提取通用广告下发、统计、HTTPDNS、其他 App、闲鱼、首页二楼、poplayer 或通用视频接口。
-
-未出现通知可能是没有发出匹配请求、使用已预加载素材、未解密、连接没有可识别域名、系统通知关闭或被其他规则提前处理。插件无法主动清理 App 已缓存的广告，也不会自动学习或扩大规则范围。
-
-## 验证
-
-运行 `node Tests/taobao-splash-notify.test.cjs`（本地工作目录为 `node test.cjs`），离线验证六类匹配、非目标请求放行、通知、计数、跨日、历史上限和隐私边界。没有执行真实淘宝账号请求；实际 iPhone 命中频率和去开屏效果有待观察。
-
-规则来源作者：FFDNS / Thelongdarkorg。通知、统计和 Loon 请求脚本适配为本次独立实现。本脚本内置本次选中的规则，不自动拉取或执行上游代码。
+参考 [FFDNS](https://github.com/Thelongdarkorg/loon-plugins/blob/main/taobao_splash_ad_block.plugin)、[ishowshu](https://github.com/ishowshu/loon/blob/main/plugin/taobao.lpx) 的接口和图片规则；结合本地 10.68.0 静态分析收窄。没有照搬 HTTPDNS、埋点或整个首页的屏蔽规则。只存规则编号、时间、计数及连接主机，不保存 Cookie、请求参数、素材地址或响应正文。
