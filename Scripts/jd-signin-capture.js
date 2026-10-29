@@ -620,6 +620,7 @@ function jxDecodeEnvironment(encoded) {
 // 434 capture: native coupon-centre scene. Independent of the retired Faker clients.
 const JC_KEY='JD_COUPON_ACTIVITY_ACCOUNT_V1',JC_JOURNAL='JD_COUPON_ACTIVITY_ATTEMPTS_V1';
 const JC_PAGE='2BGmkjr2mbi81R4ozsAR1ragZcyh';
+const JC_SCENES={jinquan:JC_PAGE,jinquan3:'2BuMtujoMx1EPnFvUrUpsrYucqUK'};
 const JC_APIS=['sh_c_query_task_list','sh_c_query_reward_list','sh_c_do_task'];
 const JC_ENCODING='of7rHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT';
 function jcProblem(label,j){const parts=[];for(const [k,v]of [['code',j?.code],['subCode',j?.data?.subCode]])if(/^-?\d{1,10}$/.test(String(v)))parts.push(k+'='+v);return Error(label+(parts.length?'（'+parts.join('，')+'）':''));}
@@ -632,11 +633,11 @@ function jsCouponCapture(host,req,res,decode){
  if(req.method!=='POST'||Number(res.status)!==200||jsHeader(req.headers,'X-Lazing-Activity-Run')==='1'||jsHeader(req.headers,'X-Lazing-Signin-Run')==='1')return false;
  const p=jsParams(req);if(p.functionId!=='sh_c_query_task_list'||p.appid!=='hourly-m'||!['apple','ios'].includes(p.client))return false;
  if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/.test(String(req.url)))return false;
- const b=JSON.parse(p.body||'{}');if(b.scene!=='jinquan'||b.viewStage!=='taskList')return false;
+ const b=JSON.parse(p.body||'{}');if(!Object.prototype.hasOwnProperty.call(JC_SCENES,b.scene)||b.viewStage!=='taskList')return false;
  jcList(JSON.parse(res.body||'{}'));
  const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token']){const v=jsHeader(req.headers,k);if(v)headers[k]=v;}
  const pair=jsPair(headers.Cookie),sig=String(p.h5st||'').split(';');
- if(!pair||!headers['User-Agent']||!new RegExp('^https://pro\\.m\\.jd\\.com/mall/active/'+JC_PAGE+'/index\\.html(?:\\?|$)').test(headers.Referer||''))return false;
+ if(!pair||!headers['User-Agent']||!new RegExp('^https://pro\\.m\\.jd\\.com/mall/active/'+JC_SCENES[b.scene]+'/index\\.html(?:\\?|$)').test(headers.Referer||''))return false;
  const bound=host.read(JS_KEYS.bound,null)||host.read('QL_BRIDGE_ACCOUNT_V1',null),old=host.read(JC_KEY,null);
  if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('领券中心账号不一致');
  if(sig.length!==10||sig[2]!=='35fa0'||sig[5]!=='5.3'||sig[9]!==JC_ENCODING||!p['x-api-eid-token'])return false;
@@ -645,8 +646,24 @@ function jsCouponCapture(host,req,res,decode){
  // No old signature, timer, item, assignment or completed-action body is retained.
  const params={};for(const k of ['appid','client','clientVersion','loginType','uuid','openudid','x_app_key','eid','x-api-eid-token','lat','lng'])if(p[k]!==undefined)params[k]=p[k];
  params.method='POST';
- const common={scene:'jinquan'};for(const k of ['lat','lng','area','gcLat','gcLng','lbsParamMap'])if(b[k]!==undefined)common[k]=b[k];
+ const common={scene:b.scene};for(const k of ['lat','lng','area','gcLat','gcLng','lbsParamMap'])if(b[k]!==undefined)common[k]=b[k];
  host.write(JC_KEY,{pin:pair.pin,headers,params,common,signing:{environment:sig[7],encoding:sig[9]},capturedAt:at});return true;
+}
+function jsActivityTaskCapture(host,req,res,decode){
+ if(req?.method!=='POST'||Number(res?.status)!==200||jsHeader(req.headers,'X-Lazing-Activity-Run')==='1')return false;
+ if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)$/.test(String(req.url||'').split('?')[0]))return false;
+ const p=jsParams(req);if(p.functionId!=='jxzy_active_task_queryTaskList'||p.appid!=='jx_h5_babel'||p.client!=='jxh5'||p.channel!=='jxh5')return false;
+ const b=JSON.parse(p.body||'{}'),j=JSON.parse(res.body||'{}');
+ const cfg=b.craftId==='6824629a7c46584759d39b78'?{page:'2iqSwv1JiDHxAkHAikfU6XAECFmo',key:'JXZY_CHECKIN_ACCOUNT_V1'}:b.craftId==='69ae8eb86a31c802e19f9f8f'?{page:'2H8G6a7JecjqHH3t1ZWSoJjPtziP',key:'JD_HOME_CHECKIN_ACCOUNT_V1'}:null;
+ if(!cfg||b.source!=='jxzy'||Number(b.sceneval)!==2||Number(b.buid)!==325||!b.appCode||String(j.code)!=='0'||!Array.isArray(j.data?.taskInfoList))return false;
+ const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin']){const v=jsHeader(req.headers,k);if(v)headers[k]=v;}
+ const pair=jsPair(headers.Cookie);if(!pair||!headers['User-Agent']||!new RegExp('^https://pro\\.m\\.jd\\.com/mall/active/'+cfg.page+'/index\\.html(?:\\?|$)').test(headers.Referer||''))return false;
+ const bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null),key=cfg.key,old=host.read(key,null);
+ if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('京喜账号不一致');
+ const at=host.observedAt||Date.now();if(at<Number(old?.updatedAt||0))return false;
+ // Store only a verified query; bootstrap missing generic signing material at run time.
+ delete p.h5st;delete p.t;delete b.time;delete b.signStr;p.functionId='jxzy_active_querySign';p.body=JSON.stringify(b);
+ host.write(key,{...old,pin:pair.pin,headers,query:{endpoint:'https://api.m.jd.com/api',params:p},capturedAt:at,updatedAt:at});return true;
 }
 function runPlantCapture(context){
 const {$argument,$persistentStore,$notification,$httpClient,$done,$request,$response,$script,console,setTimeout,clearTimeout}=context;
@@ -921,7 +938,7 @@ function farmCapture(host,request,response,decodeEnvironment) {
 }
 // One dispatcher owns capture; all imported parsers receive a private request copy.
 async function jsCapture(host,request,response,parsers,decode){
- if(request?.method!=='POST'||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1')return null;
+ if(request?.method!=='POST'||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
  if(!jd&&!finance)return null;
@@ -930,7 +947,8 @@ async function jsCapture(host,request,response,parsers,decode){
  let pair=jsPair(jsHeader(request.headers,'Cookie'));
  // These native webviews omit login cookies in the captured H5 request. Use
  // an existing same-account canonical login; signed environments still bind pin.
- const scopedNative=jd&&(['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'].includes(f)&&(body.craftId==='69ae8eb86a31c802e19f9f8f'||body.pageId==='2H8G6a7JecjqHH3t1ZWSoJjPtziP')||f==='sh_c_query_task_list'&&p.appid==='hourly-m'&&body.scene==='jinquan');
+ const nativeTask=f==='jxzy_active_task_queryTaskList'&&['69ae8eb86a31c802e19f9f8f','6824629a7c46584759d39b78'].includes(body.craftId);
+ const scopedNative=jd&&(nativeTask||['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'].includes(f)&&(body.craftId==='69ae8eb86a31c802e19f9f8f'||body.pageId==='2H8G6a7JecjqHH3t1ZWSoJjPtziP')||f==='sh_c_query_task_list'&&p.appid==='hourly-m'&&Object.prototype.hasOwnProperty.call(JC_SCENES,body.scene));
  if(!pair&&scopedNative){
   const login=jsLogin(host.read).login;if(!login)return null;
   pair=jsPair(login.cookie);if(!pair)return null;
@@ -961,8 +979,9 @@ async function jsCapture(host,request,response,parsers,decode){
   }},$notification:{post:()=>{}},$httpClient:{post:()=>{throw Error('凭据入口禁止请求');}},console:{log:()=>{}},$done:()=>{}};
  if(health)jsTarget(health,request);
  if(retail)parsers.retail(context);else if(home)parsers.home(context);else if(jx)parsers.jxzy(context);else if(finance)parsers.finance(context);else if(plant)parsers.plant(context);
+ const activityTask=nativeTask&&jsActivityTaskCapture(host,request,response,decode);if(activityTask)changed.push(body.craftId==='69ae8eb86a31c802e19f9f8f'?'JD_HOME_CHECKIN_ACCOUNT_V1':'JXZY_CHECKIN_ACCOUNT_V1');
  const coupon=f==='sh_c_query_task_list'&&jsCouponCapture(host,request,response,decode);if(coupon)changed.push(JC_KEY);
- let farm=null;if(jd&&!coupon&&!home&&!retail&&!jx&&!plant&&!game&&!delivery&&!health&&!daily)farm=parsers.farm({...host,write:(k,v)=>{if(!allowed.has(k)||v.pin!==pair.pin)throw Error('凭据写入范围不符');host.write(k,v);changed.push(k);},now:()=>Date.now()},normalized,response,decode);
+ let farm=null;if(jd&&!activityTask&&!coupon&&!home&&!retail&&!jx&&!plant&&!game&&!delivery&&!health&&!daily)farm=parsers.farm({...host,write:(k,v)=>{if(!allowed.has(k)||v.pin!==pair.pin)throw Error('凭据写入范围不符');host.write(k,v);changed.push(k);},now:()=>Date.now()},normalized,response,decode);
  if(game||delivery){
   const task=game?'game':'delivery';jsTarget(task,request);
   const sig=String(p.h5st||'').split(';'),app=game?(f==='weGameHome'?'101aa':'730a6'):(f==='bean_deliverySign_home'?'c1e85':'987dd');
@@ -1007,4 +1026,4 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};

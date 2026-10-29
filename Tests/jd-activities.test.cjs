@@ -18,7 +18,7 @@ async function dispatch(fn,body,extra={},response={code:0},initial={}){
  $notification:{post:(...x)=>notes.push(x)},$httpClient:{get:()=>{throw Error('forbidden network');},post:()=>{throw Error('forbidden network');}},$done:x=>{out=x;finished=true;}};
  vm.runInNewContext(captureSource,sandbox,{timeout:3000});for(let i=0;i<30&&!finished;i++)await new Promise(r=>setTimeout(r,1));assert(finished);return {store,logs,notes,out};
 }
-test('three manual entries, no cron',()=>{assert.equal((plugin.match(/^generic then/gm)||[]).length,3);assert(!/^cron /m.test(plugin));assert(plugin.includes('tag="京喜自营"'));assert(plugin.includes('tag="东东农场"'));});
+test('four manual entries, no cron',()=>{assert.equal((plugin.match(/^generic then/gm)||[]).length,4);assert(!/^cron /m.test(plugin));assert(plugin.includes('tag="家电家居"'));assert(plugin.includes('tag="京喜自营"'));assert(plugin.includes('tag="东东农场"'));});
 for(const n of ['jd-golden-egg.js','jd-earn-beans.js','jd-wheel-activity.js'])test('removed release file '+n,()=>{assert(!fs.existsSync(path.join(root,'Scripts',n)));assert(!plugin.includes(n));});
 test('capture keeps PLUS and financial signin routes',()=>{assert(captureSource.includes("expected = mode==='blindbox' ? '35fa0'"));assert(plugin.includes('getPageInfoDoubleSignInForH5'));assert(!plugin.includes('getPageInfoSafetyTranslate'));});
 test('retired clients and automatic device/receipt requests absent',()=>{for(const s of [captureSource,jxSource])for(const key of ['createEggClient','createEarnClient','createEarnLedger','EARN_PATHS','EGG_PROJECT','jsTk.do','beanDetail/detail.json'])assert(!s.includes(key),key);});

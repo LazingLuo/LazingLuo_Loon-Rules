@@ -381,6 +381,7 @@ return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,signOnline:farmO
 // 434 capture: native coupon-centre scene. Independent of the retired Faker clients.
 const JC_KEY='JD_COUPON_ACTIVITY_ACCOUNT_V1',JC_JOURNAL='JD_COUPON_ACTIVITY_ATTEMPTS_V1';
 const JC_PAGE='2BGmkjr2mbi81R4ozsAR1ragZcyh';
+const JC_SCENES={jinquan:JC_PAGE,jinquan3:'2BuMtujoMx1EPnFvUrUpsrYucqUK'};
 const JC_APIS=['sh_c_query_task_list','sh_c_query_reward_list','sh_c_do_task'];
 const JC_ENCODING='of7rHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT';
 function jcProblem(label,j){const parts=[];for(const [k,v]of [['code',j?.code],['subCode',j?.data?.subCode]])if(/^-?\d{1,10}$/.test(String(v)))parts.push(k+'='+v);return Error(label+(parts.length?'（'+parts.join('，')+'）':''));}
@@ -393,11 +394,11 @@ function jsCouponCapture(host,req,res,decode){
  if(req.method!=='POST'||Number(res.status)!==200||jsHeader(req.headers,'X-Lazing-Activity-Run')==='1'||jsHeader(req.headers,'X-Lazing-Signin-Run')==='1')return false;
  const p=jsParams(req);if(p.functionId!=='sh_c_query_task_list'||p.appid!=='hourly-m'||!['apple','ios'].includes(p.client))return false;
  if(!/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/.test(String(req.url)))return false;
- const b=JSON.parse(p.body||'{}');if(b.scene!=='jinquan'||b.viewStage!=='taskList')return false;
+ const b=JSON.parse(p.body||'{}');if(!Object.prototype.hasOwnProperty.call(JC_SCENES,b.scene)||b.viewStage!=='taskList')return false;
  jcList(JSON.parse(res.body||'{}'));
  const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token']){const v=jsHeader(req.headers,k);if(v)headers[k]=v;}
  const pair=jsPair(headers.Cookie),sig=String(p.h5st||'').split(';');
- if(!pair||!headers['User-Agent']||!new RegExp('^https://pro\\.m\\.jd\\.com/mall/active/'+JC_PAGE+'/index\\.html(?:\\?|$)').test(headers.Referer||''))return false;
+ if(!pair||!headers['User-Agent']||!new RegExp('^https://pro\\.m\\.jd\\.com/mall/active/'+JC_SCENES[b.scene]+'/index\\.html(?:\\?|$)').test(headers.Referer||''))return false;
  const bound=host.read(JS_KEYS.bound,null)||host.read('QL_BRIDGE_ACCOUNT_V1',null),old=host.read(JC_KEY,null);
  if(bound?.pin&&bound.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)throw Error('领券中心账号不一致');
  if(sig.length!==10||sig[2]!=='35fa0'||sig[5]!=='5.3'||sig[9]!==JC_ENCODING||!p['x-api-eid-token'])return false;
@@ -406,7 +407,7 @@ function jsCouponCapture(host,req,res,decode){
  // No old signature, timer, item, assignment or completed-action body is retained.
  const params={};for(const k of ['appid','client','clientVersion','loginType','uuid','openudid','x_app_key','eid','x-api-eid-token','lat','lng'])if(p[k]!==undefined)params[k]=p[k];
  params.method='POST';
- const common={scene:'jinquan'};for(const k of ['lat','lng','area','gcLat','gcLng','lbsParamMap'])if(b[k]!==undefined)common[k]=b[k];
+ const common={scene:b.scene};for(const k of ['lat','lng','area','gcLat','gcLng','lbsParamMap'])if(b[k]!==undefined)common[k]=b[k];
  host.write(JC_KEY,{pin:pair.pin,headers,params,common,signing:{environment:sig[7],encoding:sig[9]},capturedAt:at});return true;
 }
 function jcBeans(d){
@@ -443,11 +444,12 @@ function createCouponActivity(host,crypto){
   const state=jsLogin(host.read),profile=host.read(JC_KEY,null),pin=state.pin,date=host.day();
   if(!profile||!profile.signing||!profile.params||!profile.common)throw Error('缺少领券中心凭据，请打开领券中心任务列表');
   if(profile.pin!==pin||!state.login)throw Error('领券中心账号不一致');
-  if(profile.params.appid!=='hourly-m'||profile.common.scene!=='jinquan'||profile.signing.encoding!==JC_ENCODING)throw Error('领券中心凭据不完整');
+  if(profile.params.appid!=='hourly-m'||!Object.prototype.hasOwnProperty.call(JC_SCENES,profile.common.scene)||profile.signing.encoding!==JC_ENCODING)throw Error('领券中心凭据不完整');
   const env=crypto.decodeEnvironment(profile.signing.environment);if(![pin,decodeURIComponent(pin)].includes(env.pp?.p1))throw Error('领券中心签名账号不一致');
   const lockKey='JD_COUPON_ACTIVITY_LOCK_V1',previous=host.read(lockKey,null);if(previous?.expires>host.now())throw Error('领券中心正在执行');
   const lock={id:host.now()+':'+host.random(),expires:host.now()+10*60*1000};host.write(lockKey,lock);
-  const report={date,results:[],beanQuantity:0,eggChances:0,unknownRewards:0},snapshot=JSON.stringify(profile);
+  const scene=profile.common.scene,report={date,scene,results:[],beanQuantity:0,eggChances:0,unknownRewards:0,eggBefore:null,eggAfter:null,eggsSmashed:0},snapshot=JSON.stringify(profile);
+  host.log('当前入口 '+scene+'；按最近访问的任务列表执行');
   function guard(){
    if(host.day()!==date||jsLogin(host.read).pin!==pin||host.read(lockKey,null)?.id!==lock.id||host.now()>lock.expires)throw Error('日期或账号变化，执行停止');
    if(JSON.stringify(host.read(JC_KEY,null))!==snapshot)throw Error('页面凭据已更新，请重新手动执行');
@@ -466,10 +468,16 @@ function createCouponActivity(host,crypto){
    if(Number(r.status)!==200)throw Error('HTTP '+Number(r.status));const j=JSON.parse(r.body);jcData(j);return j;
   }
   const journal=()=>host.read(JC_JOURNAL,{});
-  const key=(id,itemId)=>date+':'+crypto.hash(pin).slice(0,24)+':'+crypto.hash(id).slice(0,24)+(itemId?':'+crypto.hash(itemId).slice(0,24):'');
+  // Keep legacy jinquan attempt keys; isolate the new scene even for shared IDs.
+  const key=(id,itemId)=>date+':'+crypto.hash(pin).slice(0,24)+(scene==='jinquan'?'':':'+scene)+':'+crypto.hash(id).slice(0,24)+(itemId?':'+crypto.hash(itemId).slice(0,24):'');
+  let observed=false;
+  async function query(){const j=await call('sh_c_query_task_list',{viewStage:'taskList'}),list=jcList(j),n=j.data.smashRemainCnt;
+   const remain=Number.isInteger(n)&&n>=0&&n<=100000?n:null;
+   if(!observed){report.eggBefore=remain;observed=true;}report.eggAfter=remain;return list;
+  }
   function mark(id,itemId,phase,extra={}){guard();const j=journal();j[key(id,itemId)]={phase,at:host.now(),...extra};for(const k of Object.keys(j))if(k.slice(0,10)<date)delete j[k];host.write(JC_JOURNAL,j);}
   try{
-   const initial=jcList(await call('sh_c_query_task_list',{viewStage:'taskList'}));let latest=initial;host.log('读取 '+initial.length+' 项任务');
+   const initial=await query();let latest=initial;host.log('读取 '+initial.length+' 项任务');
    for(const original of initial){
     guard();const t=latest.find(x=>x.encryptAssignmentId===original.encryptAssignmentId);
     if(!t){report.results.push({name:String(original.assignmentName||'任务').slice(0,80),detail:'任务列表已变化，留待App'});continue;}
@@ -498,19 +506,20 @@ function createCouponActivity(host,crypto){
     row.detail=amounts.length?'接口返回 '+amounts.join('、'):'提交完成，奖励数量待确认';if(!amounts.length)report.unknownRewards++;
     row.beanQuantity=beans;row.eggChances=chances;
     mark(p.id,item.itemId,'accepted',{beanQuantity:beans,eggChances:chances});
-    latest=jcList(await call('sh_c_query_task_list',{viewStage:'taskList'}));
+    latest=await query();
     const after=latest.find(x=>x.encryptAssignmentId===p.id),afterItem=after?.ext?.shoppingActivity?.find(x=>x.itemId===item.itemId);
     row.confirmed=after?.completionFlag===true||Number(afterItem?.status)===2;
     if(!row.confirmed){row.detail+='，任务状态待确认';host.log(row.name+'：'+row.detail);break;}
     host.log(row.name+'：'+row.detail);
     }
    }
-   if(!report.results.some(row=>row.id))await call('sh_c_query_task_list',{viewStage:'taskList'});
+   if(!report.results.some(row=>row.id))await query();
   }catch(e){report.stopped=true;report.error=/^HTTP \d+$|^领券中心|账号|日期|缺少|正在执行|凭据已更新/.test(String(e.message))?String(e.message):'活动接口或任务参数变化，已停止';host.log(report.error);}
   finally{if(host.read(lockKey,null)?.id===lock.id)host.rawWrite('',lockKey);}
   const sums=[];if(report.beanQuantity>0)sums.push(report.beanQuantity+' 京豆');if(report.eggChances>0)sums.push(report.eggChances+' 次砸金蛋机会');
   const summary=sums.length?'接口返回 '+sums.join('、')+(report.unknownRewards?'；另有奖励待确认':''):report.unknownRewards?'奖励数量待确认':'本轮未取得已确认奖励';
-  report.message=report.results.map(r=>r.name+'：'+r.detail).join('\n')+'\n'+summary;
+  const balance=report.eggBefore!==null&&report.eggAfter!==null?'\n金蛋剩余次数：'+report.eggBefore+' → '+report.eggAfter+'；本轮未砸蛋':'\n本轮未砸蛋';
+  report.message='入口：'+scene+'\n'+report.results.map(r=>r.name+'：'+r.detail).join('\n')+'\n'+summary+balance;
   host.write('JD_COUPON_ACTIVITY_LAST_V1',report);return report;
  }
  return {run};
@@ -526,7 +535,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
     if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))return reject(Error('签名初始化不能携带登录凭据'));
    }else{
     if(!/^https:\/\/api\.m\.jd\.com\/client\.action\?functionId=sh_c_(?:query_task_list|do_task)$/.test(String(o.url)))return reject(Error('活动接口不符'));
-    const p=jsParams(o),b=JSON.parse(p.body||'{}');if(p.appid!=='hourly-m'||b.scene!=='jinquan')return reject(Error('活动参数不符'));
+    const p=jsParams(o),b=JSON.parse(p.body||'{}');if(p.appid!=='hourly-m'||!Object.prototype.hasOwnProperty.call(JC_SCENES,b.scene))return reject(Error('活动参数不符'));
    }
    const options={...o,timeout:15000,'auto-cookie':false,'auto-redirect':false,insecure:false};delete options.method;
    $httpClient.post(options,(e,r,b)=>e?reject(Error('网络请求失败')):resolve({status:Number(r?.status)||0,headers:r?.headers||{},body:String(b||'')}));
@@ -534,7 +543,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   const log=s=>console.log('[领券中心] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};
   const host={rawRead,rawWrite,read,write,request,now:()=>Date.now(),day:jsDay,random:()=>Math.random(),setTimeout,clearTimeout:cancel,sleep:ms=>new Promise(r=>setTimeout(r,ms)),log};
   try{
-   log('版本 20261028-1；手动执行领券中心浏览任务，分别统计京豆和砸金蛋机会');
+   log('版本 20261029-1；跟随最近访问的领券中心入口，统计京豆与剩余金蛋次数');
    const crypto=createSigninCrypto({...host,requestAlgo:o=>request('algo',o),progress:log});
    const r=await createCouponActivity(host,crypto).run();log(r.message);
    $notification.post('领券中心',r.stopped?'执行停止':'本次活动结果',(r.error?r.error+'\n':'')+r.message);
