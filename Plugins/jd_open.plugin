@@ -1,13 +1,13 @@
 #!name = 京东开屏处理与诊断
 #!desc = 保留start日期过期处理；只按m.360buyimg.com/mobilecms/内带尺寸的图片URL拒绝，不读取图片实际尺寸；素材图片和视频静默拒绝。定向诊断保留，start命中或配置修改时通知。内置统一凭据获取，放在签到和活动插件前面。
 #!loon_version = 3.5.1(983)
-#!date = 2026-10-29
+#!date = 2026-10-30
 
 [Script]
-request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-5") with tag="京东开屏请求观察", requires_body=true, timeout=10
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-5") with tag="京东开屏配置处理与凭据获取", requires_body=true, timeout=20
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-5", "export") with tag="导出京东开屏诊断记录", timeout=10
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261029-5", "reset") with tag="清空京东开屏诊断记录", timeout=5
+request if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261030-1") with tag="京东开屏请求观察", requires_body=true, timeout=10
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261030-1") with tag="京东开屏配置处理与凭据获取", requires_body=true, timeout=20
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261030-1", "export") with tag="导出京东开屏诊断记录", timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261030-1", "reset") with tag="清空京东开屏诊断记录", timeout=5
 
 [Rewrite]
 # 仅匹配URL中的尺寸路径并直接拒绝；不读取图片正文，所有扩展名均适用。

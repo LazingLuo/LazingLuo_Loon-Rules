@@ -1,8 +1,8 @@
 // 京东合并签到 2026-10-30.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-30.1';
+const JS_VERSION='2026-10-30.2';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到'],['index','京东指数签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
 const JS_HEALTH={hs:{activityId:'37252',appKey:'250520900001'},ys:{activityId:'34703',appKey:'250141600001'}};
 const jsClone=x=>JSON.parse(JSON.stringify(x));
@@ -39,11 +39,11 @@ function jsLogin(read){
  return {pin,login,profiles};
 }
 function jsLegacyAccount(task,pin,read,login){
- const key=task==='home'?'JD_HOME_CHECKIN_ACCOUNT_V1':task==='jxzy'?'JXZY_CHECKIN_ACCOUNT_V1':task==='plant'?'JD_PLANT_CHECKIN_ACCOUNT_V1':task==='finance'?'JD_JR_CHECKIN_ACCOUNT_V1':'JD_CHECKIN_TEST_ACCOUNT_V1';
+ const key=task==='index'?'JD_INDEX_CHECKIN_ACCOUNT_V1':task==='home'?'JD_HOME_CHECKIN_ACCOUNT_V1':task==='jxzy'?'JXZY_CHECKIN_ACCOUNT_V1':task==='plant'?'JD_PLANT_CHECKIN_ACCOUNT_V1':task==='finance'?'JD_JR_CHECKIN_ACCOUNT_V1':'JD_CHECKIN_TEST_ACCOUNT_V1';
  const p=read(key,null);if(!p)return {key,value:null};if(p.pin!==pin)throw Error('签到资料属于其他账号');const value=jsClone(p);
  if(login&&task!=='finance'){
   const apply=t=>{if(t?.headers){const name=Object.keys(t.headers).find(k=>k.toLowerCase()==='cookie');if(name){t.headers[name]=jsMergeCookie(t.headers[name],login);t.loginUpdatedAt=login.time;}}};
-  if(task==='plant'){apply(value.query);apply(value.claim);}else if(task==='jxzy'||task==='home')apply(value);else Object.values(value.modes||{}).forEach(apply);
+  if(task==='plant'){apply(value.query);apply(value.claim);}else if(task==='jxzy'||task==='home'||task==='index')apply(value);else Object.values(value.modes||{}).forEach(apply);
  }
  return {key,value};
 }
@@ -55,7 +55,8 @@ function jsTarget(task,o){
   if(!['https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/queryWeekSignMain','https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/dailyCashSignReceive','https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoDoubleSignInForH5','https://ms.jr.jd.com/gw2/generic/DoubleSign/h5/m/jrSendSignAward'].includes(url))throw Error('金融接口地址不符');return;
  }
  jsEndpoint(url);const p=jsParams(o),f=p.functionId,b=JSON.parse(p.body||'{}');
- const allowed=JS_ALLOWED[task]||(task==='daily'?['findBeanSceneNew','bff_rightsCenter_interaction']:task==='scratch'?['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction']:task==='blindbox'?['bff_marketing_interaction']:['jxzy','home'].includes(task)?['jxzy_active_querySign','jxzy_active_drawSign']:['weGameHome','weGameLottery']);
+ const allowed=JS_ALLOWED[task]||(task==='daily'?['findBeanSceneNew','bff_rightsCenter_interaction']:task==='scratch'?['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction']:task==='blindbox'?['bff_marketing_interaction']:['jxzy','home','index'].includes(task)?['jxzy_active_querySign','jxzy_active_drawSign']:['weGameHome','weGameLottery']);
+ if(task==='index'&&(b.craftId!=='6a8270f9a65ae0dacfa38042'||p.appid!=='jx_h5_babel'))throw Error('京东指数签到活动不符');
  if(task==='home'&&(b.craftId!=='69ae8eb86a31c802e19f9f8f'||p.appid!=='jx_h5_babel'))throw Error('家电家居签到活动不符');
  if(!allowed.includes(f))throw Error('签到接口不符');
  if(task==='game'&&b.linkId!==JS_GAME||task==='plant'&&b.linkId!=='4HcenxuZM4XiHesOb1HG4g'||task==='delivery'&&!['2775','5358'].includes(String(b.activityId)))throw Error('签到活动不符');
@@ -1761,6 +1762,276 @@ function jxSettings(value){
 })();
 
 }
+function runIndexSignin(context){
+const {$argument,$persistentStore,$notification,$httpClient,$done,$request,$response,$script,console,setTimeout,clearTimeout}=context;
+const module=undefined;
+// Independent Jingxi self-operated daily check-in. Credentials stay in Loon.
+const JX_PAGE="3XzyjnTW4gbEk1BMxafkjP9QEKRw";
+const JX_CRAFT="6a8270f9a65ae0dacfa38042";
+const JX_SIGN_APP="c50cc";
+const JX_ENCODING="qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT";
+const JX_ACCOUNT='JD_INDEX_CHECKIN_ACCOUNT_V1',JX_LAST='JD_INDEX_CHECKIN_LAST_RESULT_V1';
+const JX_HISTORY='JD_INDEX_CHECKIN_HISTORY_V1',JX_LOCK='JD_INDEX_CHECKIN_LOCK_V1',JX_ATTEMPT='JD_INDEX_CHECKIN_ATTEMPT_V1';
+function jxRead(key,fallback){const text=$persistentStore.read(key);if(!text)return fallback;try{return JSON.parse(text);}catch(_){throw new Error('京东指数本地记录无法解析，请重新获取凭据');}}
+function jxWrite(key,value){if(!$persistentStore.write(JSON.stringify(value),key))throw new Error('京东指数本地记录保存失败');}
+function jxDay(){return new Date(Date.now()+8*3600000).toISOString().slice(0,10);}
+function jxCookie(text,name){const m=String(text||'').match(new RegExp('(?:^|;\\s*)'+name+'=([^;]+)'));return m?m[1]:'';}
+function jxHeader(headers,name){const key=Object.keys(headers||{}).find(k=>k.toLowerCase()===name.toLowerCase());return key?headers[key]:'';}
+function jxForm(params){return Object.keys(params).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(params[k])).join('&');}
+function jxParseForm(text){const out={};String(text||'').split('&').forEach(part=>{if(!part)return;const n=part.indexOf('='),decode=s=>decodeURIComponent(s.replace(/\+/g,' '));out[decode(n<0?part:part.slice(0,n))]=decode(n<0?'':part.slice(n+1));});return out;}
+function jxEndpoint(url){if(!/^https:\/\/api\.m\.jd\.com\/api(?:\?|$)/.test(String(url)))throw new Error('京东指数签到接口来源不符');return 'https://api.m.jd.com/api';}
+function jxReferer(url){return new RegExp('^https://pro\\.m\\.jd\\.com/mall/active/'+JX_PAGE+'/index\\.html(?:\\?|$)').test(String(url||''));}
+function jxAccepted(data){return !!data&&String(data.code)==='0'&&!!data.data&&typeof data.data==='object'&&!Array.isArray(data.data);}
+function jxMessage(data){return String(data&& (data.msg||data.message||data.errMsg)||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,120);}
+function jxCount(value){const n=Number(value);return value!==null&&value!==undefined&&value!==''&&Number.isInteger(n)&&n>=0&&n<=10000?n:null;}
+function jxStatus(data){
+ if(!jxAccepted(data))throw new Error('京东指数签到查询失败：'+String(data&&data.code)+' '+jxMessage(data));
+ const d=data.data,status=jxCount(d.status),days=jxCount(d.alreadySignDays);
+ if(days===null||![1,2].includes(status)||typeof d.itemId!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(d.itemId))throw new Error('京东指数签到状态不明确，请查看日志');
+ const list=d.signList;
+ if(list!==undefined&&!Array.isArray(list))throw new Error('京东指数签到记录结构变化，请查看日志');
+ const today=Array.isArray(list)&&list.some(x=>typeof x==='string'&&x.startsWith(jxDay()+'_'));
+ if((status===2&&!today)||(status===1&&today))throw new Error('京东指数签到状态与今日记录不一致，请查看日志');
+ return {done:status===2,days,itemId:d.itemId};
+}
+function jxStateDetails(data){
+ const d=data&&data.data||{},list=d.signList;
+ return {status:jxCount(d.status),roundDays:jxCount(d.alreadySignDays),totalDays:jxCount(d.totalSignDays),
+  todayRecorded:Array.isArray(list)?list.some(x=>typeof x==='string'&&x.startsWith(jxDay()+'_')):false};
+}
+function jxRewards(data){
+ const rows=data&&data.data&&data.data.prizeInfos;
+ let beans=0,couponAmount=0,couponCount=0;
+ if(Array.isArray(rows))for(const row of rows){
+  if(!row||row.discount===null||row.discount===undefined||row.discount==='')continue;
+  const amount=Number(row.discount);if(!Number.isFinite(amount)||amount<=0||amount>100000)continue;
+  if(Number(row.prizeType)===2&&Number.isInteger(amount))beans+=amount;
+  if(Number(row.prizeType)===1){couponAmount+=amount;couponCount++;}
+ }
+ return {beanQuantity:beans,couponAmount:Number(couponAmount.toFixed(2)),couponCount};
+}
+function jxSummary(r){
+ if(r.status==='signed_confirmed'||r.status==='already_done'){
+  let text=r.status==='already_done'?'今天已签到':r.beanQuantity>0?'获得 '+r.beanQuantity+' 京豆':r.couponCount>0?'获得优惠券，面额合计 '+r.couponAmount+' 元':'已签到，奖励见活动页';
+  if(r.roundDays>0)text+='，本轮第 '+r.roundDays+' 天';return '签到成功，'+text+'。';
+ }
+ if(r.status==='claim_success_verify_unconfirmed')return '领取返回成功，状态复查未确认，请查看活动页。';
+ if(/签名环境版本不兼容|签名环境结构不完整/.test(r.message||''))return '签到失败，签名环境不兼容，请查看日志。';
+ if(/凭据|未登[录陆]|登录|账号/.test(r.message||''))return '签到失败，凭据可能失效或不完整，请重新获取京东指数凭据。';
+ return '签到失败，请查看执行日志或最近结果。';
+}
+function jxCapturedBody(params,kind){
+ if(!params||params.appid!=='jx_h5_babel'||params.channel!=='jxh5'||params.client!=='jxh5')throw new Error('京东指数活动请求来源不符');
+ const b=JSON.parse(params.body||'{}');
+ if(kind==='environment'){
+  if(params.functionId!=='jxzy_active_queryActive'||b.pageId!==JX_PAGE)throw new Error('京东指数页面签名环境来源不符');
+ }else if(b.source!=='jxzy'||b.craftId!==JX_CRAFT||params.functionId!==(kind==='query'?'jxzy_active_querySign':'jxzy_active_drawSign'))throw new Error('京东指数签到活动模板不符');
+ if(Number(b.sceneval)!==2||Number(b.buid)!==325||typeof b.appCode!=='string'||!b.appCode)throw new Error('京东指数页面参数不完整');
+ return b;
+}
+function jxObservedAt(){const value=typeof $script!=='undefined'&&$script.startTime?Number(new Date($script.startTime)):NaN;return Number.isFinite(value)&&value>0&&value<=Date.now()?value:Date.now();}
+// Public frontend HMAC-MD5 implementation and parameter ordering.
+// Source: https://storage11.360buyimg.com/ifloors/00038951/static/js/main.2eeb94e2.js
+function jxBodySign(body){
+function Ae(e,t){var n=(65535&e)+(65535&t);return(e>>16)+(t>>16)+(n>>16)<<16|65535&n}function He(e,t,n,r,o,i){return Ae((a=Ae(Ae(t,e),Ae(r,i)))<<(c=o)|a>>>32-c,n);var a,c}function Ne(e,t,n,r,o,i,a){return He(t&n|~t&r,e,t,o,i,a)}function Le(e,t,n,r,o,i,a){return He(t&r|n&~r,e,t,o,i,a)}function Je(e,t,n,r,o,i,a){return He(t^n^r,e,t,o,i,a)}function Be(e,t,n,r,o,i,a){return He(n^(t|~r),e,t,o,i,a)}function Me(e,t){var n,r,o,i,a;e[t>>5]|=128<<t%32,e[14+(t+64>>>9<<4)]=t;var c=1732584193,u=-271733879,s=-1732584194,l=271733878;for(n=0;n<e.length;n+=16)r=c,o=u,i=s,a=l,c=Ne(c,u,s,l,e[n],7,-680876936),l=Ne(l,c,u,s,e[n+1],12,-389564586),s=Ne(s,l,c,u,e[n+2],17,606105819),u=Ne(u,s,l,c,e[n+3],22,-1044525330),c=Ne(c,u,s,l,e[n+4],7,-176418897),l=Ne(l,c,u,s,e[n+5],12,1200080426),s=Ne(s,l,c,u,e[n+6],17,-1473231341),u=Ne(u,s,l,c,e[n+7],22,-45705983),c=Ne(c,u,s,l,e[n+8],7,1770035416),l=Ne(l,c,u,s,e[n+9],12,-1958414417),s=Ne(s,l,c,u,e[n+10],17,-42063),u=Ne(u,s,l,c,e[n+11],22,-1990404162),c=Ne(c,u,s,l,e[n+12],7,1804603682),l=Ne(l,c,u,s,e[n+13],12,-40341101),s=Ne(s,l,c,u,e[n+14],17,-1502002290),c=Le(c,u=Ne(u,s,l,c,e[n+15],22,1236535329),s,l,e[n+1],5,-165796510),l=Le(l,c,u,s,e[n+6],9,-1069501632),s=Le(s,l,c,u,e[n+11],14,643717713),u=Le(u,s,l,c,e[n],20,-373897302),c=Le(c,u,s,l,e[n+5],5,-701558691),l=Le(l,c,u,s,e[n+10],9,38016083),s=Le(s,l,c,u,e[n+15],14,-660478335),u=Le(u,s,l,c,e[n+4],20,-405537848),c=Le(c,u,s,l,e[n+9],5,568446438),l=Le(l,c,u,s,e[n+14],9,-1019803690),s=Le(s,l,c,u,e[n+3],14,-187363961),u=Le(u,s,l,c,e[n+8],20,1163531501),c=Le(c,u,s,l,e[n+13],5,-1444681467),l=Le(l,c,u,s,e[n+2],9,-51403784),s=Le(s,l,c,u,e[n+7],14,1735328473),c=Je(c,u=Le(u,s,l,c,e[n+12],20,-1926607734),s,l,e[n+5],4,-378558),l=Je(l,c,u,s,e[n+8],11,-2022574463),s=Je(s,l,c,u,e[n+11],16,1839030562),u=Je(u,s,l,c,e[n+14],23,-35309556),c=Je(c,u,s,l,e[n+1],4,-1530992060),l=Je(l,c,u,s,e[n+4],11,1272893353),s=Je(s,l,c,u,e[n+7],16,-155497632),u=Je(u,s,l,c,e[n+10],23,-1094730640),c=Je(c,u,s,l,e[n+13],4,681279174),l=Je(l,c,u,s,e[n],11,-358537222),s=Je(s,l,c,u,e[n+3],16,-722521979),u=Je(u,s,l,c,e[n+6],23,76029189),c=Je(c,u,s,l,e[n+9],4,-640364487),l=Je(l,c,u,s,e[n+12],11,-421815835),s=Je(s,l,c,u,e[n+15],16,530742520),c=Be(c,u=Je(u,s,l,c,e[n+2],23,-995338651),s,l,e[n],6,-198630844),l=Be(l,c,u,s,e[n+7],10,1126891415),s=Be(s,l,c,u,e[n+14],15,-1416354905),u=Be(u,s,l,c,e[n+5],21,-57434055),c=Be(c,u,s,l,e[n+12],6,1700485571),l=Be(l,c,u,s,e[n+3],10,-1894986606),s=Be(s,l,c,u,e[n+10],15,-1051523),u=Be(u,s,l,c,e[n+1],21,-2054922799),c=Be(c,u,s,l,e[n+8],6,1873313359),l=Be(l,c,u,s,e[n+15],10,-30611744),s=Be(s,l,c,u,e[n+6],15,-1560198380),u=Be(u,s,l,c,e[n+13],21,1309151649),c=Be(c,u,s,l,e[n+4],6,-145523070),l=Be(l,c,u,s,e[n+11],10,-1120210379),s=Be(s,l,c,u,e[n+2],15,718787259),u=Be(u,s,l,c,e[n+9],21,-343485551),c=Ae(c,r),u=Ae(u,o),s=Ae(s,i),l=Ae(l,a);return[c,u,s,l]}function qe(e){var t,n="",r=32*e.length;for(t=0;t<r;t+=8)n+=String.fromCharCode(e[t>>5]>>>t%32&255);return n}function Ue(e){var t,n=[];for(n[(e.length>>2)-1]=void 0,t=0;t<n.length;t+=1)n[t]=0;var r=8*e.length;for(t=0;t<r;t+=8)n[t>>5]|=(255&e.charCodeAt(t/8))<<t%32;return n}function Fe(e){return qe(Me(Ue(e),8*e.length))}function Ge(e){var t,n,r="";for(n=0;n<e.length;n+=1)t=e.charCodeAt(n),r+="0123456789abcdef".charAt(t>>>4&15)+"0123456789abcdef".charAt(15&t);return r}function Ve(e){return unescape(encodeURIComponent(e))}function ze(e){return Fe(Ve(e))}function Ke(e,t){return function(e,t){var n,r,o=Ue(e),i=[],a=[];for(i[15]=a[15]=void 0,o.length>16&&(o=Me(o,8*e.length)),n=0;n<16;n+=1)i[n]=909522486^o[n],a[n]=1549556828^o[n];return r=Me(i.concat(Ue(t)),512+8*t.length),qe(Me(a.concat(r),640))}(Ve(e),Ve(t))}var $e=function(e,t,n,r){return r?Fe(e):t?n?Ke(t,e):Ge(Ke(t,e)):n?ze(e):Ge(ze(e))};function Xe(e){var t=function(e){var t="";for(var n in e){var r=e[n];r instanceof Object&&(r=JSON.stringify(r)),null!=r&&null!=r&&("number"==typeof r||"boolean"==typeof r||""!=r)&&(t+="&"+r)}return t=t.substring(1,t.length)}(function(e){var t=[],n=0;for(var r in e)t[n]=r,n++;var o=t.sort(),i={};for(var a in o)i[o[a]]=e[o[a]];return i}(e=JSON.parse(e)));return function(e){var t=arguments.length>1&&void 0!==arguments[1]?arguments[1]:{},n=t.key,r=void 0===n?null:n,o=t.raw,i=void 0!==o&&o;return $e(e,r,i)}(t=t.toString(),{key:"xtl_sqg_mall-^&*-damai_(789)_@#$"})}
+const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify(clean));
+}
+// Decode this SDK's reversed custom Base64 locally. Never log decoded values.
+function jxDecodeEnvironment(encoded) {
+  const map='rqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_9876543210zyxwvuts';
+  if(typeof encoded!=='string'||encoded.length<16||encoded.length>12000)throw new Error('原始签名环境长度异常');
+  let bits=0,value=0,bytes=[];
+  for(let i=encoded.length-1;i>=0;i--) {
+    const n=map.indexOf(encoded[i]);
+    if(n<0)throw new Error('原始签名环境编码不符');
+    value=(value<<6)|n;bits+=6;
+    if(bits>=8){bits-=8;bytes.push(value>>>bits&255);}
+  }
+  // encode() appends padding data. Extract only the complete JSON object.
+  const first=bytes.indexOf(123),last=bytes.lastIndexOf(125);
+  if(first<0||last<=first)throw new Error('原始签名环境不是 JSON');
+  const json=decodeURIComponent(bytes.slice(first,last+1).map(b=>'%'+b.toString(16).padStart(2,'0')).join(''));
+  const env=JSON.parse(json);
+  if(!env||typeof env!=='object'||Array.isArray(env)||!env.extend||typeof env.extend!=='object'||Array.isArray(env.extend)||!env.pp||typeof env.pp!=='object'||Array.isArray(env.pp)||typeof env.fp!=='string')throw new Error('签名环境结构不完整，请保留当前凭据以便排查');
+  if(!['h5_file_v5.3.5','h5_file_v5.3.6'].includes(env.v)){
+    // Version identifiers are safe to report; never log decoded device/account data.
+    const version=typeof env.v==='string'&&/^h5_file_v[0-9.]{1,24}$/.test(env.v)?env.v:'缺失或无法识别';
+    throw new Error('签名环境版本不兼容：'+version+'；当前脚本支持h5_file_v5.3.5、h5_file_v5.3.6');
+  }
+  return env;
+}
+// Standard SHA-256 for the UTF-8 request body; JD's SDK handles its own signing hashes.
+function jxSha256(text) {
+  const bytes = unescape(encodeURIComponent(text));
+  const words = [];
+  const bitLength = bytes.length * 8;
+  for (let i = 0; i < bytes.length; i++) words[i >> 2] = (words[i >> 2] || 0) | bytes.charCodeAt(i) << (24 - (i % 4) * 8);
+  words[bitLength >> 5] = (words[bitLength >> 5] || 0) | 0x80 << (24 - bitLength % 32);
+  const end = ((bitLength + 64 >> 9) << 4) + 15;
+  words[end - 1] = Math.floor(bitLength / 4294967296);
+  words[end] = bitLength | 0;
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const rotr = (x,n) => x >>> n | x << 32 - n;
+  for (let offset = 0; offset < words.length; offset += 16) {
+    const w = [];
+    let [a,b,c,d,e,f,g,h] = H;
+    for (let i = 0; i < 64; i++) {
+      if (i < 16) w[i] = words[offset + i] | 0;
+      else {
+        const x = w[i-15], y = w[i-2];
+        w[i] = ((rotr(x,7)^rotr(x,18)^x>>>3) + w[i-16] + (rotr(y,17)^rotr(y,19)^y>>>10) + w[i-7]) | 0;
+      }
+      const t1 = (h + (rotr(e,6)^rotr(e,11)^rotr(e,25)) + ((e&f)^(~e&g)) + K[i] + w[i]) | 0;
+      const t2 = ((rotr(a,2)^rotr(a,13)^rotr(a,22)) + ((a&b)^(a&c)^(b&c))) | 0;
+      h=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;
+    }
+    [a,b,c,d,e,f,g,h].forEach((x,i)=>H[i]=(H[i]+x)|0);
+  }
+  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
+}
+function jxInstallBrowser(profile) {
+  // Keep the SDK's browser shim private: Loon globals may be read-only.
+  const g = {};
+  const saved = jxRead('JD_INDEX_CHECKIN_SDK_V1', null);
+  const cache = saved && saved.pin === profile.pin ? saved.values : {};
+  const local = {
+    getItem:k=>Object.prototype.hasOwnProperty.call(cache,k) ? cache[k] : null,
+    setItem:(k,v)=>{cache[k]=String(v);jxWrite('JD_INDEX_CHECKIN_SDK_V1',{pin:profile.pin,values:cache});},
+    removeItem:k=>{delete cache[k];jxWrite('JD_INDEX_CHECKIN_SDK_V1',{pin:profile.pin,values:cache});}
+  };
+  const ref = profile.headers.Referer || 'https://pro.m.jd.com/';
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const btoa = input => {
+    const s = String(input); let out='';
+    for(let i=0;i<s.length;i+=3) {
+      const a=s.charCodeAt(i), b=s.charCodeAt(i+1), c=s.charCodeAt(i+2);
+      if(a>255||b>255||c>255) throw new Error('非 Latin1 编码');
+      const n=a<<16|(b||0)<<8|(c||0);
+      out+=alphabet[n>>>18&63]+alphabet[n>>>12&63]+(i+1<s.length?alphabet[n>>>6&63]:'=')+(i+2<s.length?alphabet[n&63]:'=');
+    }
+    return out;
+  };
+  const atob = input => {
+    const s=String(input).replace(/\s/g,'').replace(/=+$/,'');let bits=0, value=0, out='';
+    for(let i=0;i<s.length;i++) {
+      const n=alphabet.indexOf(s[i]);if(n<0) throw new Error('Base64 编码无效');
+      value=value<<6|n;bits+=6;
+      if(bits>=8){bits-=8;out+=String.fromCharCode(value>>>bits&255);}
+    }
+    return out;
+  };
+  const width=420,height=912;
+  Object.assign(g, {
+    window:g,self:g,Element:class Element {},
+    XMLHttpRequest:class XMLHttpRequest { open(){throw new Error('SDK 网络调用已禁用');} },
+    navigator:{userAgent:profile.headers['User-Agent'],language:'zh-CN',languages:['zh-CN'],platform:'iPhone',cookieEnabled:true},
+    location:{href:ref,origin:'https://pro.m.jd.com',hostname:'pro.m.jd.com',protocol:'https:'},
+    localStorage:local,
+    document:{cookie:profile.headers.Cookie,documentElement:{},createElement:()=>({style:{},getContext:()=>null}),getElementsByTagName:()=>[],addEventListener:()=>{}},
+    screen:{width,height,colorDepth:24},innerWidth:width,innerHeight:height,devicePixelRatio:3,
+    atob,btoa
+  });
+  return g;
+}
+function jxMakeSigner(...args){return jsSharedMakeSigner(args[0],args[1],args[2],args[3],{setTimeout,clearTimeout});}
+function jxSettings(value){
+ let config=typeof value==='object'&&value&&!Array.isArray(value)?Object.assign({},value):{mode:typeof value==='string'?value:''};
+ if(typeof value==='string'&&value.trim().startsWith('{')){try{config=JSON.parse(value);}catch(_){throw new Error('京东指数签到参数格式错误');}}
+ if(!config.mode&&Object.prototype.hasOwnProperty.call(config,'delayMin')&&Object.prototype.hasOwnProperty.call(config,'delayMax'))config.mode='cron';
+ const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
+ if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
+ return {mode:config.mode||'',min,max};
+}
+(async function(){
+ let settings;try{settings=jxSettings(typeof $argument==='undefined'?'':$argument);}catch(e){console.log('[京东指数自营签到] '+e.message);$notification.post('京东指数自营签到','参数错误',e.message);return $done({});}
+ const mode=settings.mode,result={time:Date.now(),date:jxDay(),mode,phase:'prepare'};
+ let owned=false,lockValue,record=true;
+ function http(params,headers){
+  return new Promise((resolve,reject)=>$httpClient.post({url:'https://api.m.jd.com/api?functionId='+encodeURIComponent(params.functionId),headers:Object.assign({},headers,{'Content-Type':'application/x-www-form-urlencoded'}),body:jxForm(params),timeout:15000,'auto-redirect':false,'auto-cookie':false,insecure:false},(error,response,text)=>{
+   if(error)return reject(new Error('网络请求失败'));
+   if(!response||Number(response.status)!==200)return reject(new Error('接口HTTP状态异常：'+String(response&&response.status)));
+   try{resolve(JSON.parse(text));}catch(_){reject(new Error('接口响应无法解析'));}
+  }));
+ }
+ try{
+  if(mode==='status'){
+   record=false;const previous=jxRead(JX_LAST,null);console.log('[京东指数自营签到] 最近结果：'+JSON.stringify(previous));
+   $notification.post('京东指数自营签到','最近结果',previous?previous.date+' '+jxSummary(previous):'暂无记录');return;
+  }
+  if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从京东指数插件的手动或定时签到入口执行');
+  if(mode==='cron'){
+   result.phase='waiting';result.randomDelaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
+   console.log('[京东指数自营签到] 随机等待 '+result.randomDelaySeconds+' 秒');
+   if(result.randomDelaySeconds>0)await new Promise(resolve=>setTimeout(resolve,result.randomDelaySeconds*1000));
+   if(jxDay()!==result.date)throw new Error('等待跨过零点，本次停止');
+  }
+  const profile=jxRead(JX_ACCOUNT,null);
+  if(!profile||!profile.query||!profile.signing||!profile.headers)throw new Error('缺少京东指数签到凭据，请开启获取开关后进入京东指数自营页面');
+  const pin=jxCookie(profile.headers.Cookie,'pt_pin');
+  if(!pin||pin!==profile.pin||!jxCookie(profile.headers.Cookie,'pt_key')||!profile.headers['User-Agent']||!jxReferer(profile.headers.Referer))throw new Error('京东指数登录凭据或页面账号不完整，请重新获取');
+  jxEndpoint(profile.query.endpoint);jxCapturedBody(profile.query.params,'query');
+  if(profile.claim){jxEndpoint(profile.claim.endpoint);jxCapturedBody(profile.claim.params,'claim');}
+  const env=jxDecodeEnvironment(profile.signing.environment);
+  if(!env.pp.p1||![profile.pin,decodeURIComponent(profile.pin)].includes(env.pp.p1))throw new Error('京东指数签名环境账号不匹配，请重新获取');
+  result.credentialCapturedAt=profile.capturedAt;result.environmentCapturedAt=profile.signing.capturedAt;result.environmentVersion=env.v;
+  if(Number(jxRead(JX_LOCK,0))>Date.now()){record=false;console.log('[京东指数自营签到] 签到正在执行，请稍后查看结果');return;}
+  lockValue=Date.now()+90000;jxWrite(JX_LOCK,lockValue);owned=true;
+  function fresh(template,bodyOverride){
+   const params=Object.assign({},template.params),b=bodyOverride||JSON.parse(params.body);
+   delete params.h5st;delete b.signStr;b.time=Date.now();b.signStr=jxBodySign(b);
+   params.body=JSON.stringify(b);params.t=String(Date.now());return params;
+  }
+  function query(){return http(fresh(profile.query),profile.headers);}
+  result.phase='query';const before=await query();result.queryCode=String(before.code);result.queryMessage=jxMessage(before);result.queryState=jxStateDetails(before);
+  const state=jxStatus(before);
+  if(state.done){result.status='already_done';result.roundDays=state.days;result.message='京东指数自营今天已签到';return;}
+  if(jxDay()!==result.date)throw new Error('执行跨过零点，本次停止');
+  const attempt=jxRead(JX_ATTEMPT,null);
+  if(attempt&&attempt.pin===profile.pin&&attempt.date===result.date&&attempt.craftId===JX_CRAFT)throw new Error('今天已有领取提交记录，请到京东指数活动页确认结果');
+  const qBody=JSON.parse(profile.query.params.body);
+  const claim=profile.claim||{endpoint:'https://api.m.jd.com/api',params:Object.assign({},profile.query.params,{functionId:'jxzy_active_drawSign'})};
+  const claimBody=profile.claim?JSON.parse(profile.claim.params.body):{itemId:state.itemId,craftId:JX_CRAFT,source:'jxzy',sceneval:qBody.sceneval,buid:qBody.buid,appCode:qBody.appCode};
+  claimBody.itemId=state.itemId;
+  ['appCode','buid','sceneval'].forEach(k=>{claimBody[k]=qBody[k];});
+  const params=fresh(claim,claimBody);
+  // Keep current page transport fields and token together after App/page updates.
+  ['appid','channel','client','clientVersion','loginType','uuid','cthr','xAPIRegion','xAPIClientLanguage','xAPIClientMode','xAPITz','xAPICurrency'].forEach(k=>{if(profile.query.params[k]!==undefined)params[k]=profile.query.params[k];});
+  if(profile.signing.eidToken)params['x-api-eid-token']=profile.signing.eidToken;
+  if(!params['x-api-eid-token'])throw new Error('京东指数领取设备凭据不完整，请重新进入活动页面获取');
+  const input={};['appid','body','functionId','t','client','clientVersion'].forEach(k=>{if(params[k]===undefined||params[k]==='')throw new Error('京东指数签名参数不完整，请重新获取');input[k]=k==='body'?jxSha256(params[k]):params[k];});
+  const browser=jxInstallBrowser({pin:profile.pin,headers:profile.headers}),signer=jxMakeSigner(JX_SIGN_APP,browser,undefined,env);
+  const signed=signer.signSync(input),parts=String(signed.h5st||'').split(';');
+  if(parts.length!==10||parts[2]!==JX_SIGN_APP||parts[5]!=='5.3'||parts[9]!==JX_ENCODING)throw new Error('京东指数签名参数检查未通过');
+  const generated=jxDecodeEnvironment(parts[7]);
+  if(generated.fp!==parts[1]||JSON.stringify(generated.pp)!==JSON.stringify(env.pp)||generated.canvas!==env.canvas||generated.webglFp!==env.webglFp||generated.v!==env.v)throw new Error('京东指数签名环境一致性检查未通过');
+  params.h5st=signed.h5st;result.signatureVersion=parts[5];result.environmentLength=parts[7].length;
+  if(jxDay()!==result.date)throw new Error('执行跨过零点，本次停止');
+  jxWrite(JX_ATTEMPT,{pin:profile.pin,date:result.date,craftId:JX_CRAFT,time:Date.now()});
+  result.phase='claim';const received=await http(params,profile.headers);result.claimCode=String(received.code);result.claimMessage=jxMessage(received);
+  if(!jxAccepted(received))throw new Error('京东指数领取失败：'+result.claimCode+' '+result.claimMessage);
+  const claimed=received.data;
+  if(!Array.isArray(claimed.signList)||!claimed.signList.some(x=>typeof x==='string'&&x.startsWith(result.date+'_'))||jxCount(claimed.alreadySignDays)===null)throw new Error('京东指数领取结果未确认，请到活动页查看');
+  Object.assign(result,jxRewards(received));result.roundDays=jxCount(claimed.alreadySignDays);
+  result.phase='verify';
+  try{
+   const after=await query();result.verifyCode=String(after.code);result.verifyState=jxStateDetails(after);
+   const verified=jxStatus(after);if(!verified.done)throw new Error('签到状态未更新');
+   result.roundDays=verified.days;result.status='signed_confirmed';result.message='京东指数自营今日签到已确认';
+  }catch(_){result.status='claim_success_verify_unconfirmed';result.message='领取返回成功，今日签到复查未确认';}
+ }catch(e){result.status='stopped';result.message=/^(京东指数|缺少京东指数|请从京东指数|等待跨|执行跨|今天已有|网络请求|接口HTTP|接口响应|签名环境|原始签名环境)/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请查看执行阶段';}
+ finally{
+  if(owned&&jxRead(JX_LOCK,0)===lockValue)$persistentStore.write('',JX_LOCK);
+  if(record){
+   result.finishedAt=Date.now();
+   try{jxWrite(JX_LAST,result);const history=jxRead(JX_HISTORY,[]);jxWrite(JX_HISTORY,(Array.isArray(history)?history:[]).concat(result).slice(-30));}catch(_){console.log('[京东指数自营签到] 结果保存失败');}
+   console.log('[京东指数自营签到] '+JSON.stringify(result));$notification.post('京东指数自营签到',mode==='cron'?'自动签到结果':'手动签到结果',jxSummary(result));
+  }
+  $done({});
+ }
+})();
+
+}
 function runFinanceSignin(context){
 const {$argument,$persistentStore,$notification,$httpClient,$done,$request,$response,$script,console,setTimeout,clearTimeout}=context;
 const module=undefined;
@@ -2215,7 +2486,7 @@ function jsError(e){
 }
 const JS_LEGACY={
  daily:{fn:'retail',last:'JD_CHECKIN_TEST_LAST_RESULT_V1'},scratch:{fn:'retail',last:'JD_CHECKIN_TEST_LAST_RESULT_V1'},blindbox:{fn:'retail',last:'JD_CHECKIN_TEST_LAST_RESULT_V1'},
- plant:{fn:'plant',last:'JD_PLANT_CHECKIN_LAST_RESULT_V1'},jxzy:{fn:'jxzy',last:'JXZY_CHECKIN_LAST_RESULT_V1'},finance:{fn:'finance',last:'JD_JR_CHECKIN_LAST_RESULT_V1'},home:{fn:'home',last:'JD_HOME_CHECKIN_LAST_RESULT_V1'}
+ plant:{fn:'plant',last:'JD_PLANT_CHECKIN_LAST_RESULT_V1'},jxzy:{fn:'jxzy',last:'JXZY_CHECKIN_LAST_RESULT_V1'},finance:{fn:'finance',last:'JD_JR_CHECKIN_LAST_RESULT_V1'},home:{fn:'home',last:'JD_HOME_CHECKIN_LAST_RESULT_V1'},index:{fn:'index',last:'JD_INDEX_CHECKIN_LAST_RESULT_V1'}
 };
 function jsResult(task,r){
  if(!r||typeof r.status!=='string')return {task,status:'stopped',detail:'正在执行或没有新结果'};
@@ -2348,7 +2619,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   const host=jsLoonHost();
   try{
    const crypto=createSigninCrypto({...host,requestAlgo:o=>{jsTarget('game',o);return host.request('game',o);},progress:()=>{}});
-   const runner=createSignins(host,{retail:runRetailSignin,plant:runPlantSignin,jxzy:runJxSignin,home:runHomeSignin,finance:runFinanceSignin},crypto);
+   const runner=createSignins(host,{retail:runRetailSignin,plant:runPlantSignin,jxzy:runJxSignin,home:runHomeSignin,index:runIndexSignin,finance:runFinanceSignin},crypto);
    const r=await runner.run(typeof $argument==='undefined'?{}:$argument);
    if(r.busy){
     const text=(r.legacyLock?'上次签到占用尚未到期，剩余约 '+Math.ceil(r.remainingSeconds/60)+' 分钟。':'签到仍被占用；若上次已停止，约 '+r.remainingSeconds+' 秒后可重试。');
@@ -2360,4 +2631,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runPlantSignin,runJxSignin,runHomeSignin,runFinanceSignin,JS_KEYS,JS_TASKS,JS_GAME,JS_HEALTH};
+if(typeof module!=="undefined")module.exports={createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runPlantSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS,JS_GAME,JS_HEALTH};
