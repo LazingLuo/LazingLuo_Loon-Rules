@@ -68,6 +68,6 @@ async function run({profile=shared(),tasks=[task('a'),task('b',10),task('c',20)]
  r=await run({tasks:[task('a',10)],onRequest:({params,cb})=>{if(params.functionId.endsWith('rewardTask')){cb(null,{status:302},'');return true;}}});assert(r.result.stopped);assert.equal(r.calls.filter(x=>x.params.h5st).length,1);n++;
  r=await run({external:true});assert(r.result.stopped);assert.equal(r.calls.length,0);n++;
  const plugin=fs.readFileSync(path.join(base,fs.existsSync(path.join(base,'jd-activities.plugin'))?'jd-activities.plugin':'../Plugins/jd-activities.plugin'),'utf8');
- assert.equal((plugin.match(/^generic /gm)||[]).length,3);assert(!/^cron /m.test(plugin));assert(source.includes("const mode='all';"));n++;
+ assert.equal((plugin.match(/^generic /gm)||[]).length,5);assert(!/^cron /m.test(plugin));assert(source.includes("const mode='all';"));n++;
  console.log(n+' offline Loon checks passed: shared credentials, both SDKs, manual all/wait/complete/claim/verify, progress, locks, credential change, uncertainty and redaction. No live requests.');
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});

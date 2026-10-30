@@ -1,30 +1,4 @@
-// Activity execution revision 20261029-3
-// BEGIN JD activity request pacing: business requests only, before signing.
-function createJdActivityPacer(host) {
-  let completedAt = null, gapMs = 0;
-  async function beforeRequest() {
-    if (typeof host.guard === 'function') host.guard();
-    if (completedAt !== null) {
-      const remaining = Math.max(0, completedAt + gapMs - host.now());
-      if (remaining > 0) {
-        if (typeof host.log === 'function') host.log('请求间隔：等待 ' + (remaining / 1000).toFixed(1) + ' 秒');
-        await host.sleep(remaining);
-      }
-    }
-    if (typeof host.guard === 'function') host.guard();
-  }
-  async function request(...args) {
-    try { return await host.request(...args); }
-    finally {
-      completedAt = host.now();
-      const value = typeof host.random === 'function' ? host.random() : Math.random();
-      const random = Number.isFinite(value) ? Math.min(0.999999999, Math.max(0, value)) : 0.5;
-      gapMs = (2 + Math.floor(random * 4)) * 1000;
-    }
-  }
-  return { beforeRequest, request };
-}
-// END JD activity request pacing.
+// Activity execution revision 20261030-2
 
 // 京东合并签到 2026-10-26.2; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
@@ -468,7 +442,6 @@ function jcPlan(t){
  return {name,item:items[0],items,wait,id:t.encryptAssignmentId,limit,count};
 }
 function createCouponActivity(host,crypto,options={}){
- const pacing=createJdActivityPacer(host);
  async function run(){
   const state=jsLogin(host.read),source=host.read(JC_KEY,null),pin=state.pin,date=host.day();
   if(!source||!source.signing||!source.params||!source.common)throw Error('缺少领券中心凭据，请打开领券中心任务列表');
@@ -491,7 +464,7 @@ function createCouponActivity(host,crypto,options={}){
   }
   async function call(f,body){
    guard();if(!['sh_c_query_task_list','sh_c_do_task'].includes(f))throw Error('活动接口不符');
-   await pacing.beforeRequest();guard();
+   guard();
    const login=jsLogin(host.read).login;if(!login)throw Error('缺少京东Cookie');
    const headers={...profile.headers,Cookie:jsMergeCookie(profile.headers.Cookie,login),'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'};
    const p={...profile.params,functionId:f,body:JSON.stringify({...profile.common,...body})},input={};
@@ -500,7 +473,7 @@ function createCouponActivity(host,crypto,options={}){
    p.h5st=await crypto.signOnline('35fa0',{pin,headers},env,input);const sig=String(p.h5st).split(';');
    if(sig.length!==10||sig[2]!=='35fa0'||sig[5]!=='5.3'||sig[9]!==JC_ENCODING)throw Error('活动签名参数变化');
    guard();host.log(f==='sh_c_query_task_list'?'查询领券中心任务':'提交浏览步骤');
-   const r=await pacing.request('coupon',{url:'https://api.m.jd.com/client.action?functionId='+f,headers,body:jsEncode(p),method:'post'});
+   const r=await host.request('coupon',{url:'https://api.m.jd.com/client.action?functionId='+f,headers,body:jsEncode(p),method:'post'});
    if(Number(r.status)!==200)throw Error('HTTP '+Number(r.status));const j=JSON.parse(r.body);jcData(j);return j;
   }
   const journal=()=>host.read(JC_JOURNAL,{});
@@ -579,7 +552,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
   const log=s=>console.log('[领券中心] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};
   const host={rawRead,rawWrite,read,write,request,now:()=>Date.now(),day:jsDay,random:()=>Math.random(),setTimeout,clearTimeout:cancel,sleep:ms=>new Promise(r=>setTimeout(r,ms)),log};
   try{
-   log('版本 20261029-3；执行当前领券中心 jinquan3，统计京豆与剩余金蛋次数');
+   log('版本 20261030-2；执行当前领券中心 jinquan3，统计京豆与剩余金蛋次数');
    const crypto=createSigninCrypto({...host,requestAlgo:o=>request('algo',o),progress:log});
    const r=await createCouponActivity(host,crypto,{scene:'jinquan3'}).run();log(r.message);
    $notification.post('领券中心',r.stopped?'执行停止':'本次活动结果',(r.error?r.error+'\n':'')+r.message);
