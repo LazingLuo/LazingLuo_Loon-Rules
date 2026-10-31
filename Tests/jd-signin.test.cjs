@@ -133,11 +133,11 @@ function seedLegacy(h){
  await test('mutation journal failure blocks health action',async()=>{const h=host();h.write=(k,v)=>{if(k===K.attempts)throw Error('保存失败');h.map.set(k,JSON.stringify(v));};h.reply=()=>response({code:0,result:{status:1,id:'t',encodeId:'e'}});await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.length,1);});
  await test('date change after signing blocks mutation',async()=>{const h=host();h.reply=()=>response({success:true,data:{signMainVo:{currentStatus:1,markStr:'m'}}});let n=0;const c={...fakeCrypto,signOnline:async app=>{if(++n===2)h.changeDay('2099-01-01');return sig(app);}};await assert.rejects(()=>api.createExtraSignins(h,c).run('game'));assert.equal(h.calls.length,1);});
  await test('new day has independent journal',async()=>{const h=host();h.reply=(t,o)=>api.jsParams(o).functionId==='jdh_bm_getKitTask'?response({code:0,result:{status:1,id:'t',encodeId:'e'}}):Promise.reject(Error('network'));await assert.rejects(()=>extra(h).run('hs'));h.changeDay('2099-01-01');await assert.rejects(()=>extra(h).run('hs'));assert.equal(h.calls.filter(x=>api.jsParams(x).functionId==='jdh_msoa_doTaskGw').length,2);});
- await test('combined task ordering and finance double-sign position',async()=>{const h=host();seedLegacy(h);const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.deepEqual(r.results.map(x=>x.task),api.JS_TASKS.map(x=>x[0]));assert(r.results[5].doubleSign);assert.equal(h.waits.length,0);assert.equal(r.results.length,12);});
- await test('random wait occurs only between tasks',async()=>{const h=host();seedLegacy(h);const events=[];h.log=s=>events.push(s);h.random=()=>0;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:15});assert.equal(h.waits.length,11);assert(h.waits.every(x=>x===5000));assert(events[0].includes('第 1/12 项'));});
+ await test('combined task ordering and finance double-sign position',async()=>{const h=host();seedLegacy(h);const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.deepEqual(r.results.map(x=>x.task),api.JS_TASKS.map(x=>x[0]));assert(r.results[4].doubleSign);assert.equal(h.waits.length,0);assert.equal(r.results.length,11);});
+ await test('random wait occurs only between tasks',async()=>{const h=host();seedLegacy(h);const events=[];h.log=s=>events.push(s);h.random=()=>0;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:15});assert.equal(h.waits.length,10);assert(h.waits.every(x=>x===5000));assert(events[0].includes('第 1/11 项'));});
  await test('random wait upper bound',async()=>{const h=host();seedLegacy(h);h.random=()=>0.999999;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:120});assert(h.waits.every(x=>x===120000));});
- await test('single failed legacy task leaves other sign-ins running',async()=>{const h=host();seedLegacy(h);const l=basicLegacy(h);l.jxzy=()=>{throw Error('test');};const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[4].status,'stopped');assert.equal(r.results[9].status,'already_done');assert(r.finished);});
- await test('old LAST is not reused when a legacy lock returns early',async()=>{const h=host();seedLegacy(h);h.write('JXZY_CHECKIN_LAST_RESULT_V1',{time:1,date:day(),status:'signed_confirmed'});const l=basicLegacy(h);l.jxzy=c=>c.$done({});const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[4].status,'stopped');});
+ await test('single failed legacy task leaves other sign-ins running',async()=>{const h=host();seedLegacy(h);const l=basicLegacy(h);l.jxzy=()=>{throw Error('test');};const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[3].status,'stopped');assert.equal(r.results[8].status,'already_done');assert(r.finished);});
+ await test('old LAST is not reused when a legacy lock returns early',async()=>{const h=host();seedLegacy(h);h.write('JXZY_CHECKIN_LAST_RESULT_V1',{time:1,date:day(),status:'signed_confirmed'});const l=basicLegacy(h);l.jxzy=c=>c.$done({});const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[3].status,'stopped');});
  await test('overlap lock stops second execution',async()=>{const h=host();seedLegacy(h);h.write(K.lock,{id:'other',expires:Date.now()+100000});const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.equal(r.busy,true);assert.equal(h.calls.length,0);});
  await test('cross-midnight queue stops before next task',async()=>{const h=host();seedLegacy(h);h.sleep=async()=>h.changeDay('2099-01-01');const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:5});assert.equal(r.finished,false);assert.equal(r.results.length,1);assert.equal(h.rawRead(K.lock),'');});
  await test('account change stops queue',async()=>{const h=host();seedLegacy(h);h.sleep=async()=>h.write(K.bound,{pin:'other'});const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:5});assert.equal(r.finished,false);assert.equal(r.results.length,1);});
@@ -169,10 +169,6 @@ function seedLegacy(h){
   h.write('JD_CHECKIN_TEST_ACCOUNT_V1',{pin:'offline',modes:{daily:{capturedAt:Date.now(),headers:headers(),query:{endpoint:'https://api.m.jd.com/client.action',capturedAt:Date.now(),signatureAppId:'ed9a2',signatureParameterEncoding:encoding,referenceEnvironmentEncoded:e,params:{functionId:'findBeanSceneNew',appid:'signed_wh5_ihub',client:'apple',clientVersion:'15.0.0',body:'{}','x-api-eid-token':'FAKE_DEVICE'}}}}});
   const timers=[];let finish;const complete=new Promise(r=>finish=r);api.runRetailSignin({$argument:'daily',$persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:()=>{}},$httpClient:{post:(o,cb)=>{assert.equal(api.jsParams(o).functionId,'findBeanSceneNew');cb(null,{status:200},JSON.stringify({code:0,data:{signComponentInfoResult:[{assignmentType:5,ext:{taskType:'beanDailySign'},encryptAssignmentId:'q',completionFlag:true}]}}));}},$done:finish,$script:{},console:{log:()=>{}},setTimeout:(f,n)=>{const t=setTimeout(f,n);timers.push(t);return t;},clearTimeout});try{await complete;assert.equal(h.read('JD_CHECKIN_TEST_LAST_RESULT_V1').status,'already_done');}finally{timers.forEach(clearTimeout);}
  });
- await test('actual plant wrapper shares SDK and confirms existing check-in',async()=>{
-  const h=host(),link='4HcenxuZM4XiHesOb1HG4g',timers=[];h.write('JD_PLANT_CHECKIN_ACCOUNT_V1',{pin:'offline',query:{headers:headers(),capturedAt:Date.now(),endpoint:'https://api.m.jd.com/api',environment:encodeEnv(env()),appId:'101aa',encoding:'qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT',params:{appid:'wegame-hub',functionId:'weGameHome',client:'ios',clientVersion:'15.0.0',body:JSON.stringify({envType:1,linkId:link,appType:1})}}});
-  let finish;const done=new Promise(r=>finish=r);api.runPlantSignin({$argument:'manual',$persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:()=>{}},$httpClient:{post:(o,cb)=>cb(null,{status:200},JSON.stringify({success:true,code:0,data:{signMainVo:{currentStatus:3,startTime:day(),endTime:'2099-01-01',markStr:null},signListVo:[{signDate:day(),status:3,todayFlag:1}]}}))},$done:finish,$script:{},console:{log:()=>{}},setTimeout:(f,n)=>{const t=setTimeout(f,n);timers.push(t);return t;},clearTimeout});try{await done;assert.equal(h.read('JD_PLANT_CHECKIN_LAST_RESULT_V1').status,'already_done');}finally{timers.forEach(clearTimeout);}
- });
  await test('actual Jingxi wrapper preserves activity scope and completion',async()=>{
   const h=host(),page='2iqSwv1JiDHxAkHAikfU6XAECFmo';h.write('JXZY_CHECKIN_ACCOUNT_V1',{pin:'offline',headers:{...headers(),Referer:'https://pro.m.jd.com/mall/active/'+page+'/index.html'},capturedAt:Date.now(),query:{endpoint:'https://api.m.jd.com/api',params:{functionId:'jxzy_active_querySign',appid:'jx_h5_babel',channel:'jxh5',client:'jxh5',body:JSON.stringify({source:'jxzy',craftId:'6824629a7c46584759d39b78',tttId:'ttt2',canInstall:1,installed:0,sceneval:2,buid:325,appCode:'ms1888ebbf'})}},signing:{environment:encodeEnv(env()),capturedAt:Date.now(),eidToken:'FAKE_DEVICE'}});
   let finish;const done=new Promise(r=>finish=r);api.runJxSignin({$argument:'manual',$persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:()=>{}},$httpClient:{post:(o,cb)=>cb(null,{status:200},JSON.stringify({code:0,data:{itemId:'1',status:2,alreadySignDays:1,totalSignDays:3,signList:[day()+'_1.0'],prizeInfos:[]}}))},$done:finish,$script:{},console:{log:()=>{}},setTimeout,clearTimeout});await done;assert.equal(h.read('JXZY_CHECKIN_LAST_RESULT_V1').status,'already_done',h.read('JXZY_CHECKIN_LAST_RESULT_V1').message);
@@ -197,7 +193,7 @@ function seedLegacy(h){
    else{const p=api.jsParams(o);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);if(p.functionId==='jdh_bm_getKitTask')j={code:0,result:{status:4}};else if(p.functionId==='weGameHome')j={success:true,data:{signMainVo:{currentStatus:3}}};else if(p.functionId.startsWith('bean_deliverySign_'))j={code:0,data:{bizCode:0,result:{value:1}}};else throw Error('Unexpected native call');}
    cb(null,{status:200},JSON.stringify(j));
   }}};
-  try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,12);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
+  try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,11);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
  });
  // Virtual timers test interruption recovery without live network or real waits.
  function leaseHost(){
@@ -206,18 +202,18 @@ function seedLegacy(h){
   h.now=()=>now;h.random=()=>0.25;
   h.setTimeout=(fn,ms)=>{const id=++counter;timers.set(id,{fn,at:now+ms});return id;};
   h.clearTimeout=id=>timers.delete(id);
-  h.advance=async(ms,{fire=true}={})=>{const end=now+ms;let limit=0;while(fire){const entries=[...timers].filter(([,v])=>v.at<=end).sort((a,b)=>a[1].at-b[1].at);if(!entries.length)break;assert(++limit<1000);const [id,t]=entries[0];now=t.at;timers.delete(id);t.fn();await Promise.resolve();await Promise.resolve();}now=end;};
+  h.advance=async(ms,{fire=true}={})=>{const end=now+ms;let limit=0;while(fire){const entries=[...timers].filter(([,v])=>v.at<=end).sort((a,b)=>a[1].at-b[1].at);if(!entries.length)break;assert(++limit<1000);const [id,t]=entries[0];now=t.at;timers.delete(id);t.fn();for(let flush=0;flush<30;flush++)await Promise.resolve();}now=end;};
   h.sleep=ms=>h.advance(ms);h.timers=timers;return h;
  }
  function holdFirst(h){const legacy=basicLegacy(h);let first=true,context;const normal=legacy.retail;legacy.retail=c=>{if(first){first=false;context=c;}else normal(c);};return {legacy,get context(){return context;}};}
  await test('fresh sign-in lock has a 2-minute lease, separate from queue deadline',async()=>{
   const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
-  const lock=h.read(K.lock);assert.equal(lock.version,2);assert.equal(lock.expires-lock.startedAt,120000);assert.equal(lock.deadline-lock.startedAt,2700000);
+  const lock=h.read(K.lock);assert.equal(lock.version,3);assert.equal(lock.expires-lock.startedAt,120000);assert.equal(lock.deadline-lock.startedAt,2700000);
   held.context.$done();await pending;assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
  });
  await test('heartbeat renews a live queue during a long callback wait',async()=>{
   const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0}),initial=h.read(K.lock);
-  await h.advance(90000);const lock=h.read(K.lock);assert.equal(lock.id,initial.id);assert.equal(lock.heartbeatAt,initial.startedAt+90000);assert.equal(lock.expires,h.now()+120000);
+  await h.advance(90000);const lock=h.read(K.lock);assert.equal(lock.id,initial.id);assert.equal(lock.heartbeatAt,initial.startedAt+90000);assert.equal(lock.expires,initial.startedAt+121000);
   held.context.$done();await pending;assert.equal(h.timers.size,0);
  });
  await test('duplicate manual launches do not extend an existing lease',async()=>{
@@ -243,7 +239,7 @@ function seedLegacy(h){
  });
  await test('missing child completion callback has a bounded wait and no retry',async()=>{
   const h=leaseHost();seedLegacy(h);const held=holdFirst(h),pending=api.createSignins(h,held.legacy,fakeCrypto).run({gapSeconds:0});
-  await h.advance(210000);const r=await pending;assert.equal(r.results[0].detail,'本项执行超时，已停止等待');assert.equal(r.results.length,12);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
+  await h.advance(120000);const r=await pending;assert.equal(r.results[0].detail,'本项执行超时，本轮已停止');assert.equal(r.results.length,1);assert.equal(r.finished,false);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
  });
  await test('initialization write failure releases the newly acquired lock',async()=>{
   const h=leaseHost();seedLegacy(h);h.map.delete(K.bound);const write=h.write;h.write=(k,v)=>{if(k===K.bound)throw Error('本地记录保存失败');write(k,v);};const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.equal(r.finished,false);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
@@ -265,6 +261,75 @@ function seedLegacy(h){
   const h=host(),notes=[],logs=[];h.write(K.lock,{id:'OLD',expires:Date.now()+2700000});const before=h.rawRead(K.lock);let finish,doneCount=0;const complete=new Promise(r=>finish=r);
   vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),{$argument:{gapSeconds:0},$persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:(...a)=>notes.push(a)},$done:()=>{doneCount++;finish();},console:{log:s=>logs.push(s)},setTimeout,clearTimeout,$httpClient:{post:()=>{throw Error('unexpected request');}}},{timeout:10000});
   await complete;assert.equal(doneCount,1);assert.equal(notes.length,1);assert(notes[0][2].includes('45 分钟'));assert(logs.some(s=>s.includes('上次签到占用尚未到期')));assert.equal(h.rawRead(K.lock),before);
+ });
+
+ await test('plant is absent even when old plant credentials exist',async()=>{
+  const h=host();seedLegacy(h);const legacy=basicLegacy(h);legacy.plant=()=>{throw Error('removed plant must never run');};
+  const r=await api.createSignins(h,legacy,fakeCrypto).run({gapSeconds:0});
+  assert(!api.JS_TASKS.some(([task])=>task==='plant'));assert.equal(api.runPlantSignin,undefined);
+  assert(!r.results.some(row=>row.task==='plant'));assert(h.read('JD_PLANT_CHECKIN_ACCOUNT_V1'));
+ });
+ const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
+ await test('stuck Jingxi cannot slide its deadline through repeated launches',async()=>{
+  const h=leaseHost();seedLegacy(h);const legacy=basicLegacy(h);let jingxi;
+  legacy.jxzy=c=>{jingxi=c;};
+  const pending=api.createSignins(h,legacy,fakeCrypto).run({gapSeconds:0});await flush();
+  assert(jingxi);const initial=h.read(K.lock);assert.equal(initial.task,'jxzy');assert.equal(initial.name,'京喜签到');
+  for(const interval of [30000,50000,30000]){
+   await h.advance(interval);const before=h.rawRead(K.lock);
+   const busy=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});
+   assert(busy.busy);assert.equal(busy.taskRemainingSeconds,Math.ceil((initial.taskDeadline-h.now())/1000));
+   assert.equal(h.rawRead(K.lock),before);assert(h.read(K.lock).expires<=initial.taskDeadline+1000);
+  }
+  await h.advance(10000);const r=await pending;assert.equal(r.finished,false);assert.equal(r.results.length,4);
+  assert.equal(r.results[3].task,'jxzy');assert.equal(r.results[3].timedOut,true);assert.equal(h.rawRead(K.lock),'');
+  const last=h.rawRead(K.last),count=h.calls.length;
+  assert.equal(jingxi.$persistentStore.write('late','late-result'),false);
+  jingxi.$httpClient.post({url:'https://api.m.jd.com/api',body:form({functionId:'jxzy_active_drawSign'})},()=>{throw Error('late callback');});
+  jingxi.$done();await flush();assert.equal(h.rawRead(K.last),last);assert.equal(h.calls.length,count);assert.equal(h.timers.size,0);
+ });
+ await test('extra sign-in has the same item deadline and fences late response mutations',async()=>{
+  const h=leaseHost();seedLegacy(h);let complete;
+  const reply=h.reply;h.reply=(task,o)=>task==='hs'?new Promise(resolve=>{complete=resolve;}):reply(task,o);
+  const pending=api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});await flush();
+  assert(complete);assert.equal(h.read(K.lock).task,'hs');
+  await h.advance(120000);const r=await pending;assert.equal(r.finished,false);assert.equal(r.results.at(-1).task,'hs');assert(r.results.at(-1).timedOut);
+  const last=h.rawRead(K.last),calls=h.calls.length;
+  complete(response({code:0,result:{status:1,id:'LATE',encodeId:'LATE'}}));await flush();
+  assert.equal(h.calls.length,calls);assert.equal(h.rawRead(K.last),last);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
+ });
+ await test('finance item limit is three minutes and then releases the lease',async()=>{
+  const h=leaseHost();seedLegacy(h);const legacy=basicLegacy(h);legacy.finance=()=>{};
+  const pending=api.createSignins(h,legacy,fakeCrypto).run({gapSeconds:0});await flush();assert.equal(h.read(K.lock).task,'finance');
+  const began=h.now();await h.advance(150000);assert.equal(h.read(K.lock).taskDeadline,began+180000);assert(h.read(K.lock).expires<=began+181000);
+  await h.advance(30000);const r=await pending;assert(r.results.at(-1).timedOut);assert.equal(h.rawRead(K.lock),'');assert.equal(h.timers.size,0);
+ });
+ await test('Jingxi progress reports stages without request data',async()=>{
+  const h=host();seedLegacy(h);const legacy=basicLegacy(h);
+  h.reply=(task,o)=>task==='jxzy'?response({code:0}):seedReply(task,o);
+  const seed=host();seedLegacy(seed);const seedReply=seed.reply;
+  legacy.jxzy=c=>c.$httpClient.post(request('jxzy_active_querySign',{}),(error,response)=>{assert(!error);assert.equal(response.status,200);c.$done();});
+  await api.createSignins(h,legacy,fakeCrypto).run({gapSeconds:0});
+  assert(h.logs.includes('京喜：查询签到状态'));assert(h.logs.includes('京喜：查询签到状态返回 HTTP 200'));
+  assert(!/FAKE_SECRET|FAKE_DEVICE|pt_key/.test(h.logs.join('\n')));
+ });
+ await test('Loon local request timeout works without native clearTimeout and ignores late reply',async()=>{
+  const h=leaseHost();let callback;const context={module:{exports:{}},console:{log:()=>{}},setTimeout:h.setTimeout};
+  vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),context,{timeout:10000});
+  context.$persistentStore={read:h.rawRead,write:h.rawWrite};context.$httpClient={post:(o,cb)=>{assert.equal(o.timeout,15000);callback=cb;}};
+  const native=context.module.exports.jsLoonHost();let outcome;
+  native.request('jxzy',{url:'https://api.m.jd.com/api'}).then(()=>outcome='resolved',e=>outcome=e.message);
+  await h.advance(19999);assert.equal(outcome,undefined);await h.advance(1);assert.equal(outcome,'请求等待超时');
+  callback(null,{status:200},'{}');await flush();assert.equal(outcome,'请求等待超时');
+  let fired=0;const timer=native.setTimeout(()=>fired++,5);native.clearTimeout(timer);await h.advance(5);assert.equal(fired,0);
+  context.$httpClient.post=(o,cb)=>cb(null,{status:200},'ok');assert.equal((await native.request('jxzy',{})).body,'ok');
+  await h.advance(20000);assert.equal(outcome,'请求等待超时');assert.equal(h.timers.size,0);
+ });
+ await test('cancelled SDK callbacks remain inert on runtimes with ineffective clearTimeout',async()=>{
+  const h=leaseHost();seedLegacy(h);h.clearTimeout=()=>{};const legacy=basicLegacy(h);let cancelled=false;
+  legacy.jxzy=c=>{const t=c.setTimeout(()=>{cancelled=true;},10);c.clearTimeout(t);c.$done();};
+  const r=await api.createSignins(h,legacy,fakeCrypto).run({gapSeconds:0});assert(r.finished);
+  await h.advance(180001);assert.equal(cancelled,false);assert.equal(h.rawRead(K.lock),'');
  });
 
  // Verify generated artifacts parse in a native-like context without Node globals.

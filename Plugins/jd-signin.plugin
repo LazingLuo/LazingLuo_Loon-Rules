@@ -1,7 +1,7 @@
 #!name = 京东合并签到
-#!desc = 普通签到、每日刮卡、PLUS盲盒、种豆礼包、京喜、金融与双签、hs、ys、天天领豆、互动游戏、家电家居、京东指数签到。一个手动入口，自动执行同一流程；各项之间随机等待，结束后统一通知。凭据自动保存在本机；请停用原签到插件及重叠的凭据获取规则。
+#!desc = 普通签到、每日刮卡、PLUS盲盒、京喜、金融与双签、hs、ys、天天领豆、互动游戏、家电家居、京东指数签到。一个手动入口，自动执行同一流程；各项之间随机等待，结束后统一通知。凭据自动保存在本机；请停用原签到插件及重叠的凭据获取规则。
 #!loon_version = 3.5.1(983)
-#!date = 2026-10-30
+#!date = 2026-10-31
 
 [Argument]
 gapSeconds = input,"15",tag=任务间随机等待上限（秒）,desc=填5–120，实际每项间随机等待5秒至该数值；填0不等待。开始前不额外延迟
@@ -10,8 +10,8 @@ cronExp = input,"0 0 * * *",tag=自动执行时间,desc=默认每天00:00。依�
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?![^#]*[?&]functionId=start(?:&|$))(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-capture.js?v=20261030-1") with tag="京东统一凭据获取", requires_body=true, timeout=20
 response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-capture.js?v=20261030-1") with tag="金融签到凭据获取", requires_body=true, timeout=20
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261030-2", {${gapSeconds}}) with tag="京东全部签到（自动）", timeout=3000
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261030-2", {${gapSeconds}}) with tag="手动执行全部签到", timeout=3000
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261031-1", {${gapSeconds}}) with tag="京东全部签到（自动）", timeout=3000
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261031-1", {${gapSeconds}}) with tag="手动执行全部签到", timeout=3000
 
 [Mitm]
 hostname = api.m.jd.com, ms.jr.jd.com

@@ -1,9 +1,9 @@
 // 京东全部签到本机桥接 v0.1.0；由原合并签到构建，未改写任务接口。
 // 京东合并签到 2026-10-26.2; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-26.2';
+const JS_VERSION='2026-10-31.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
 const JS_HEALTH={hs:{activityId:'37252',appKey:'250520900001'},ys:{activityId:'34703',appKey:'250141600001'}};
 const jsClone=x=>JSON.parse(JSON.stringify(x));
@@ -40,11 +40,11 @@ function jsLogin(read){
  return {pin,login,profiles};
 }
 function jsLegacyAccount(task,pin,read,login){
- const key=task==='home'?'JD_HOME_CHECKIN_ACCOUNT_V1':task==='jxzy'?'JXZY_CHECKIN_ACCOUNT_V1':task==='plant'?'JD_PLANT_CHECKIN_ACCOUNT_V1':task==='finance'?'JD_JR_CHECKIN_ACCOUNT_V1':'JD_CHECKIN_TEST_ACCOUNT_V1';
+ const key=task==='home'?'JD_HOME_CHECKIN_ACCOUNT_V1':task==='jxzy'?'JXZY_CHECKIN_ACCOUNT_V1':task==='finance'?'JD_JR_CHECKIN_ACCOUNT_V1':'JD_CHECKIN_TEST_ACCOUNT_V1';
  const p=read(key,null);if(!p)return {key,value:null};if(p.pin!==pin)throw Error('签到资料属于其他账号');const value=jsClone(p);
  if(login&&task!=='finance'){
   const apply=t=>{if(t?.headers){const name=Object.keys(t.headers).find(k=>k.toLowerCase()==='cookie');if(name){t.headers[name]=jsMergeCookie(t.headers[name],login);t.loginUpdatedAt=login.time;}}};
-  if(task==='plant'){apply(value.query);apply(value.claim);}else if(task==='jxzy'||task==='home')apply(value);else Object.values(value.modes||{}).forEach(apply);
+  if(task==='jxzy'||task==='home')apply(value);else Object.values(value.modes||{}).forEach(apply);
  }
  return {key,value};
 }
@@ -59,7 +59,7 @@ function jsTarget(task,o){
  const allowed=JS_ALLOWED[task]||(task==='daily'?['findBeanSceneNew','bff_rightsCenter_interaction']:task==='scratch'?['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction']:task==='blindbox'?['bff_marketing_interaction']:['jxzy','home'].includes(task)?['jxzy_active_querySign','jxzy_active_drawSign']:['weGameHome','weGameLottery']);
  if(task==='home'&&(b.craftId!=='69ae8eb86a31c802e19f9f8f'||p.appid!=='jx_h5_babel'))throw Error('家电家居签到活动不符');
  if(!allowed.includes(f))throw Error('签到接口不符');
- if(task==='game'&&b.linkId!==JS_GAME||task==='plant'&&b.linkId!=='4HcenxuZM4XiHesOb1HG4g'||task==='delivery'&&!['2775','5358'].includes(String(b.activityId)))throw Error('签到活动不符');
+ if(task==='game'&&b.linkId!==JS_GAME||task==='delivery'&&!['2775','5358'].includes(String(b.activityId)))throw Error('签到活动不符');
  if(JS_HEALTH[task]){
   const query=f==='jdh_bm_getKitTask';
   if((query?b.m_patch_appKey:b.appKey)!==JS_HEALTH[task].appKey||b.channel!=='jdhapp'||query&&(b.groupCode!=='openkits'||p.appid!=='jdh-middle')||!query&&(!b.taskId||!b.encodeId||p.appid!=='JDHAPP'))throw Error('健康签到参数不符');
@@ -898,327 +898,6 @@ function jdcResultLine(r) {
     if(locked&&$persistentStore.read(lock)===lockValue)$persistentStore.write(undefined,lock);
     $done({});
   }
-})();
-
-}
-function runPlantSignin(context){
-const {$argument,$persistentStore,$notification,$httpClient,$done,$request,$response,$script,console,setTimeout,clearTimeout}=context;
-const module=undefined;
-// Independent plant-bean daily gift: manual verified; cron uses a configurable delay in seconds.
-const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
-function jdcRead(key, fallback) {
-  const raw = $persistentStore.read(key);
-  if (!raw) return fallback;
-  try { return JSON.parse(raw); } catch (_) { throw new Error('本地数据损坏，请重新获取凭据'); }
-}
-function jdcWrite(key, value) {
-  if (!$persistentStore.write(JSON.stringify(value), key)) throw new Error('本地保存失败');
-}
-function jdcParseForm(text) {
-  const result = {};
-  String(text || '').split('&').forEach(pair => {
-    if (!pair) return;
-    const i = pair.indexOf('=');
-    const decode = s => decodeURIComponent(s.replace(/\+/g, ' '));
-    result[decode(i < 0 ? pair : pair.slice(0, i))] = decode(i < 0 ? '' : pair.slice(i + 1));
-  });
-  return result;
-}
-function jdcForm(params) {
-  return Object.keys(params).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');
-}
-function jdcHeader(headers, name) {
-  const k = Object.keys(headers || {}).find(k => k.toLowerCase() === name.toLowerCase());
-  return k ? headers[k] : '';
-}
-function jdcCookie(cookie, name) {
-  const m = String(cookie).match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
-  return m ? m[1] : '';
-}
-function jdcDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
-function jdcIsScratchQuery(params) {
-  // This endpoint also serves ordinary sign-in. Only capture the observed
-  // scratch-page task scope; commonScene=secKillChannel selects the ordinary task.
-  try {
-    const body=JSON.parse(params.body||'{}');
-    const types=typeof body.taskType==='string'?body.taskType.split('_'):[];
-    return body.scene==='jdInteractTask'&&types.includes('beanDailySign')&&types.includes('beanDailyPlus')&&
-      (body.commonScene===undefined||body.commonScene==='');
-  } catch (_) {return false;}
-}
-function jdcTask(data, mode) {
-  const list = mode === 'daily' ? data && data.data && data.data.signComponentInfoResult
-    : data && data.rs && data.rs.beanTask && data.rs.beanTask.taskList;
-  if (!Array.isArray(list)) throw new Error('任务列表结构不符，未提交领取');
-  const tasks = list.filter(t => Number(t.assignmentType) === 5 && t.ext && t.ext.taskType === 'beanDailySign' && t.encryptAssignmentId);
-  if (tasks.length !== 1) throw new Error('每日任务无法唯一识别，未提交领取');
-  return tasks[0];
-}
-function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : mode === 'blindbox' ? 'PLUS每日盲盒' : '每日刮卡'; }
-function jdcEndpoint(url) {
-  const m = String(url).match(/^https:\/\/api\.m\.jd\.com\/(api|client\.action)(?:\?|$)/);
-  if (!m) throw new Error('接口地址不符');
-  return 'https://api.m.jd.com/' + m[1];
-}
-
-// The observed scratch query uses a business success code different from daily sign-in.
-function jdcQueryAccepted(data, mode) {
-  const code = String(data && data.code);
-  if (code === '0') return true;
-  return mode === 'scratch' && code === '1711000' && data.msg === '成功' &&
-    !!(data.rs && data.rs.beanTask && Array.isArray(data.rs.beanTask.taskList));
-}
-
-function jdcBoxAccepted(data) {
-  return !!data && String(data.code)==='1711000' && data.msg==='成功' && !!data.rs;
-}
-function jdcBoxToday(data) {
-  if(!jdcBoxAccepted(data)||!Array.isArray(data.rs.sendBenefitList))
-    throw new Error('盲盒奖励记录不完整，未继续开盒');
-  return data.rs.sendBenefitList.filter(x=>String(x.prizeTime||'').slice(0,10)===jdcDay());
-}
-const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
-const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
-function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
-function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
-function zStatusDetails(data){
- const payload=data&&data.data,main=payload&&payload.signMainVo,list=payload&&payload.signListVo;
- const number=v=>v!==null&&v!==undefined&&v!==''&&Number.isInteger(Number(v))&&Number(v)>=0&&Number(v)<=10000?Number(v):null;
- const task=main&&main.beforeTaskVo;
- return {mainPresent:!!main,listPresent:Array.isArray(list),currentStatus:number(main&&main.currentStatus),signDays:number(main&&main.signDays),
-  beforeTask:task?{type:task.taskType==='BROWSE_RTB'?'BROWSE_RTB':'other',finished:typeof task.taskFinished==='boolean'?task.taskFinished:null,seconds:number(task.timeLimitPeriod)}:null,
-  signList:Array.isArray(list)?list.slice(0,7).map(x=>({date:typeof x.signDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x.signDate)?x.signDate:null,status:number(x.status),todayFlag:number(x.todayFlag)})):[]};
-}
-function zSummary(result){
- if(/签名环境版本不兼容|签名环境结构不完整/.test(result.message||''))return '失败，签名环境不兼容，请查看日志中的版本或结构说明。';
- if(result.status==='manual_required')return result.message;
- if(['signed_confirmed','already_done'].includes(result.status)){
-  let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
-  if(result.continuousDays>0)text+='，连续 '+result.continuousDays+' 天';
-  return '成功，'+text+'。';
- }
- const text=[result.message,result.queryMessage,result.claimMessage].join(' ');
- return '失败，'+(/未登[录陆]|登录|凭据|账号.*匹配|原始签名环境/.test(text)?'凭据可能失效或不完整，请重新获取种豆凭据。':'请查看执行日志或最近结果。');
-}
-function zStatus(data){
- if(!zAccepted(data))throw new Error('签到状态查询失败：'+String(data&&data.code)+' '+(data?zMessage(data):'无说明'));
- const main=data.data.signMainVo,list=data.data.signListVo;
- if(!main||!Array.isArray(list))throw new Error('签到状态结构变化，未继续领取');
- const today=list.find(x=>x.signDate===jdcDay()&&Number(x.status)===3);
- if(today)return {done:true,main};
- const task=main.beforeTaskVo;
- if(Number(main.currentStatus)===0&&task&&task.taskType==='BROWSE_RTB'&&task.taskFinished===false){
-  const seconds=Number(task.timeLimitPeriod);
-  const duration=Number.isInteger(seconds)&&seconds>0&&seconds<=3600?seconds+'秒':'';
-  throw Object.assign(new Error('请先到种豆活动页手动完成浏览页面'+duration+'，再执行签到。'),{status:'manual_required'});
- }
- if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确（状态值'+String(zStatusDetails(data).currentStatus)+'），未继续领取');
- return {done:false,main};
-}
-// Standard SHA-256 for the UTF-8 request body; JD's SDK handles its own signing hashes.
-function jdcSha256(text) {
-  const bytes = unescape(encodeURIComponent(text));
-  const words = [];
-  const bitLength = bytes.length * 8;
-  for (let i = 0; i < bytes.length; i++) words[i >> 2] = (words[i >> 2] || 0) | bytes.charCodeAt(i) << (24 - (i % 4) * 8);
-  words[bitLength >> 5] = (words[bitLength >> 5] || 0) | 0x80 << (24 - bitLength % 32);
-  const end = ((bitLength + 64 >> 9) << 4) + 15;
-  words[end - 1] = Math.floor(bitLength / 4294967296);
-  words[end] = bitLength | 0;
-  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
-  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
-  const rotr = (x,n) => x >>> n | x << 32 - n;
-  for (let offset = 0; offset < words.length; offset += 16) {
-    const w = [];
-    let [a,b,c,d,e,f,g,h] = H;
-    for (let i = 0; i < 64; i++) {
-      if (i < 16) w[i] = words[offset + i] | 0;
-      else {
-        const x = w[i-15], y = w[i-2];
-        w[i] = ((rotr(x,7)^rotr(x,18)^x>>>3) + w[i-16] + (rotr(y,17)^rotr(y,19)^y>>>10) + w[i-7]) | 0;
-      }
-      const t1 = (h + (rotr(e,6)^rotr(e,11)^rotr(e,25)) + ((e&f)^(~e&g)) + K[i] + w[i]) | 0;
-      const t2 = ((rotr(a,2)^rotr(a,13)^rotr(a,22)) + ((a&b)^(a&c)^(b&c))) | 0;
-      h=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;
-    }
-    [a,b,c,d,e,f,g,h].forEach((x,i)=>H[i]=(H[i]+x)|0);
-  }
-  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
-}
-// Decode this SDK's reversed custom Base64 locally. Never log decoded values.
-function jdcDecodeEnvironment(encoded) {
-  const map='rqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA-_9876543210zyxwvuts';
-  if(typeof encoded!=='string'||encoded.length<16||encoded.length>12000)throw new Error('原始签名环境长度异常');
-  let bits=0,value=0,bytes=[];
-  for(let i=encoded.length-1;i>=0;i--) {
-    const n=map.indexOf(encoded[i]);
-    if(n<0)throw new Error('原始签名环境编码不符');
-    value=(value<<6)|n;bits+=6;
-    if(bits>=8){bits-=8;bytes.push(value>>>bits&255);}
-  }
-  // encode() appends padding data. Extract only the complete JSON object.
-  const first=bytes.indexOf(123),last=bytes.lastIndexOf(125);
-  if(first<0||last<=first)throw new Error('原始签名环境不是 JSON');
-  const json=decodeURIComponent(bytes.slice(first,last+1).map(b=>'%'+b.toString(16).padStart(2,'0')).join(''));
-  const env=JSON.parse(json);
-  if(!env||typeof env!=='object'||Array.isArray(env)||!env.extend||typeof env.extend!=='object'||Array.isArray(env.extend)||!env.pp||typeof env.pp!=='object'||Array.isArray(env.pp)||typeof env.fp!=='string')throw new Error('签名环境结构不完整，请保留当前凭据以便排查');
-  if(!['h5_file_v5.3.5','h5_file_v5.3.6'].includes(env.v)){
-    // Version identifiers are safe to report; never log decoded device/account data.
-    const version=typeof env.v==='string'&&/^h5_file_v[0-9.]{1,24}$/.test(env.v)?env.v:'缺失或无法识别';
-    throw new Error('签名环境版本不兼容：'+version+'；当前脚本支持h5_file_v5.3.5、h5_file_v5.3.6');
-  }
-  return env;
-}
-function jdcInstallBrowser(profile) {
-  // Keep the SDK's browser shim private: Loon globals may be read-only.
-  const g = {};
-  const saved = jdcRead('JD_CHECKIN_TEST_SDK_V1', null);
-  const cache = saved && saved.pin === profile.pin ? saved.values : {};
-  const local = {
-    getItem:k=>Object.prototype.hasOwnProperty.call(cache,k) ? cache[k] : null,
-    setItem:(k,v)=>{cache[k]=String(v);jdcWrite('JD_CHECKIN_TEST_SDK_V1',{pin:profile.pin,values:cache});},
-    removeItem:k=>{delete cache[k];jdcWrite('JD_CHECKIN_TEST_SDK_V1',{pin:profile.pin,values:cache});}
-  };
-  const ref = profile.headers.Referer || 'https://pro.m.jd.com/';
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const btoa = input => {
-    const s = String(input); let out='';
-    for(let i=0;i<s.length;i+=3) {
-      const a=s.charCodeAt(i), b=s.charCodeAt(i+1), c=s.charCodeAt(i+2);
-      if(a>255||b>255||c>255) throw new Error('非 Latin1 编码');
-      const n=a<<16|(b||0)<<8|(c||0);
-      out+=alphabet[n>>>18&63]+alphabet[n>>>12&63]+(i+1<s.length?alphabet[n>>>6&63]:'=')+(i+2<s.length?alphabet[n&63]:'=');
-    }
-    return out;
-  };
-  const atob = input => {
-    const s=String(input).replace(/\s/g,'').replace(/=+$/,'');let bits=0, value=0, out='';
-    for(let i=0;i<s.length;i++) {
-      const n=alphabet.indexOf(s[i]);if(n<0) throw new Error('Base64 编码无效');
-      value=value<<6|n;bits+=6;
-      if(bits>=8){bits-=8;out+=String.fromCharCode(value>>>bits&255);}
-    }
-    return out;
-  };
-  const width=420,height=912;
-  Object.assign(g, {
-    window:g,self:g,Element:class Element {},
-    XMLHttpRequest:class XMLHttpRequest { open(){throw new Error('SDK 网络调用已禁用');} },
-    navigator:{userAgent:profile.headers['User-Agent'],language:'zh-CN',languages:['zh-CN'],platform:'iPhone',cookieEnabled:true},
-    location:{href:ref,origin:'https://pro.m.jd.com',hostname:'pro.m.jd.com',protocol:'https:'},
-    localStorage:local,
-    document:{cookie:profile.headers.Cookie,documentElement:{},createElement:()=>({style:{},getContext:()=>null}),getElementsByTagName:()=>[],addEventListener:()=>{}},
-    screen:{width,height,colorDepth:24},innerWidth:width,innerHeight:height,devicePixelRatio:3,
-    atob,btoa
-  });
-  return g;
-}
-function jdcMakeSigner(...args){return jsSharedMakeSigner(args[0],args[1],args[2],args[3],{setTimeout,clearTimeout});}
-function checkinScheduleArgument(value) {
- const raw=typeof value==='string'?value:'';
- let config=value && typeof value==='object' && !Array.isArray(value) ? Object.assign({},value) : {mode:raw};
- if(raw.trim().startsWith('{')) {try {config=JSON.parse(raw);} catch(_) {throw new Error('随机延迟参数格式错误');}}
- if(!config.mode && Object.prototype.hasOwnProperty.call(config,'delayMin') && Object.prototype.hasOwnProperty.call(config,'delayMax'))config.mode='cron';
- const min=config.delayMin===undefined?0:Number(config.delayMin),max=config.delayMax===undefined?1200:Number(config.delayMax);
- if(config.mode==='cron'&&(!Number.isInteger(min)||!Number.isInteger(max)||min<0||max>2000||min>max))throw new Error('随机延迟须为0–2000秒的整数，最小值不能大于最大值');
- return {mode:config.mode||'',min,max};
-}
-(async function(){
- let settings,mode;try{settings=checkinScheduleArgument(typeof $argument==='undefined'?'':$argument);mode=settings.mode;}catch(e){console.log('[种豆签到] '+e.message);$notification.post('种豆得豆签到','参数错误',e.message);return $done({});}
- const LAST='JD_PLANT_CHECKIN_LAST_RESULT_V1',HISTORY='JD_PLANT_CHECKIN_HISTORY_V1',LOCK='JD_PLANT_CHECKIN_LOCK_V1',ATTEMPT='JD_PLANT_CHECKIN_ATTEMPT_V1';
- const result={time:Date.now(),date:jdcDay(),mode,phase:'prepare'};let locked=false,lockValue,recordResult=true;
- function http(template,params){
-  return new Promise((resolve,reject)=>$httpClient.post({url:jdcEndpoint(template.endpoint)+'?functionId='+encodeURIComponent(params.functionId),headers:Object.assign({},template.headers,{'Content-Type':'application/x-www-form-urlencoded'}),body:jdcForm(params),timeout:12000,'auto-redirect':false,'auto-cookie':false,insecure:false},(error,response,body)=>{
-   if(error)return reject(new Error('网络请求失败，本次不自动重试'));
-   if(!response||Number(response.status)!==200)return reject(new Error('HTTP状态异常，本次停止'));
-   try{resolve(JSON.parse(body));}catch(_){reject(new Error('返回内容无法解析，本次停止'));}
-  }));
- }
- try{
-  if(mode==='status'){
-   const last=jdcRead(LAST,null);console.log('[种豆签到] '+JSON.stringify(last));$notification.post('种豆得豆签到','最近结果',last?last.date+' '+zSummary(last):'暂无记录');return;
-  }
-  if(!['manual','cron'].includes(mode)||typeof $request!=='undefined')throw new Error('请从定时或手动签到入口执行');
-  if(mode==='cron'){
-   const delaySeconds=settings.min+Math.floor(Math.random()*(settings.max-settings.min+1));
-   result.phase='waiting';result.randomDelaySeconds=delaySeconds;
-   console.log('[种豆签到] 定时执行，随机延迟 '+delaySeconds+' 秒');
-   if(delaySeconds>0)await new Promise(resolve=>setTimeout(resolve,delaySeconds*1000));
-   if(jdcDay()!==result.date)throw new Error('等待跨过零点，本次签到停止');
-  }
-  const profile=jdcRead(Z_KEY,null);
-  if(!profile||!profile.query)throw new Error('缺少种豆签到凭据，请开启获取开关后进入签到礼包页');
-  function validate(t,kind){
-   if(!t||!t.capturedAt)throw new Error('种豆签到凭据缺失或不完整，请重新获取');
-   if(!t.headers||!jdcCookie(t.headers.Cookie,'pt_key')||jdcCookie(t.headers.Cookie,'pt_pin')!==profile.pin)throw new Error('种豆签到账号凭据不完整，请重新获取');
-   const b=JSON.parse(t.params.body||'{}');
-   if(t.params.appid!=='wegame-hub'||t.params.functionId!==(kind==='query'?'weGameHome':'weGameLottery')||b.linkId!==Z_LINK||Number(b.envType)!==1||Number(b.appType)!==1||t.appId!==(kind==='query'?'101aa':'730a6'))throw new Error('种豆签到模板不匹配，未发送请求');
-   if(!t.environment)throw new Error('缺少页面签名环境，请重新获取种豆签到凭据');
-   const env=jdcDecodeEnvironment(t.environment);
-   if(!env.pp.p1||![profile.pin,decodeURIComponent(profile.pin)].includes(env.pp.p1))throw new Error('签名环境账号不匹配，未发送请求');
-   return env;
-  }
-  const queryEnv=validate(profile.query,'query');
-  result.queryEnvironmentVersion=queryEnv.v;
-  result.credentialCapturedAt=profile.query.capturedAt;
-  if(profile.query.loginUpdatedAt){result.loginUpdatedAt=profile.query.loginUpdatedAt;result.loginSource=profile.query.loginSource;}
-  if(Number($persistentStore.read(LOCK)||0)>Date.now()){recordResult=false;console.log('[种豆签到] 签到正在执行，请稍后查看结果');return;}
-  lockValue=String(Date.now()+90000);
-  if(!$persistentStore.write(lockValue,LOCK))throw new Error('执行锁保存失败');locked=true;
-  const browser=jdcInstallBrowser({pin:profile.pin,headers:profile.query.headers});
-  function sign(template,env){
-   if(template.appId==='730a6')result.claimEnvironmentVersion=env.v;
-   const params=Object.assign({},template.params,{t:String(Date.now())});delete params.h5st;
-   const input={};['appid','body','client','clientVersion','functionId','t'].forEach(k=>{if(!params[k])throw new Error('签名参数缺失，请重新获取凭据');input[k]=k==='body'?jdcSha256(params[k]):params[k];});
-   const out=jdcMakeSigner(template.appId,browser,undefined,env).signSync(input),parts=String(out.h5st||'').split(';');
-   if(parts.length!==10||parts[5]!=='5.3'||parts[2]!==template.appId||parts[9]!==template.encoding)throw new Error('签名生成检查未通过，未发送请求');
-   const generated=jdcDecodeEnvironment(parts[7]);
-   if(generated.fp!==parts[1]||JSON.stringify(generated.pp)!==JSON.stringify(env.pp)||generated.canvas!==env.canvas||generated.webglFp!==env.webglFp)throw new Error('签名环境检查未通过，未发送请求');
-   result.signatureVersion=parts[5];result.environmentLength=parts[7].length;return Object.assign(params,{h5st:out.h5st});
-  }
-  result.phase='query';
-  const before=await http(profile.query,sign(profile.query,queryEnv));result.queryCode=String(before.code);result.queryMessage=zMessage(before);
-  result.queryState=zStatusDetails(before);
-  const state=zStatus(before);
-  if(state.done){if(Number.isInteger(Number(state.main.signDays))&&Number(state.main.signDays)>0)result.continuousDays=Number(state.main.signDays);result.status='already_done';result.message='种豆得豆礼包今天已领取，未重复提交。';return;}
-  const begin=String(state.main.startTime||'').slice(0,10),end=String(state.main.endTime||'').slice(0,10);
-  if(begin&&begin>jdcDay()||end&&end<jdcDay())throw new Error('礼包不在有效期内，未提交领取');
-  if(jdcDay()!==result.date)throw new Error('执行跨过零点，请稍后再试');
-  const old=jdcRead(ATTEMPT,null);
-  if(old&&old.pin===profile.pin&&old.date===result.date)throw new Error('今天已提交过领取，请查看记录；不重复提交');
-  let claim=profile.claim,claimEnv;
-  if(claim){claimEnv=validate(claim,'claim');}
-  else{
-   // Same captured page context; claim shape is the observed daily gift request.
-   claim=Object.assign({},profile.query,{appId:'730a6',params:Object.assign({},profile.query.params,{functionId:'weGameLottery',body:JSON.stringify({envType:1,linkId:Z_LINK,appType:1,status:1,markStr:''})})});claimEnv=queryEnv;
-  }
-  const body=JSON.parse(claim.params.body);body.status=1;body.markStr=typeof state.main.markStr==='string'?state.main.markStr:'';claim=Object.assign({},claim,{params:Object.assign({},claim.params,{body:JSON.stringify(body)})});
-  const params=sign(claim,claimEnv);
-  jdcWrite(ATTEMPT,{pin:profile.pin,date:result.date,time:Date.now()});
-  result.phase='claim';
-  const received=await http(claim,params);result.claimCode=String(received.code);result.claimMessage=zMessage(received);
-  if(!zAccepted(received))throw new Error('领取失败：'+result.claimCode+' '+result.claimMessage);
-  const award=received.data.awardVo;
-  if(award&&award.awardName==='BEAN'&&/^\d+$/.test(String(award.awardGivenNumber)))result.beanQuantity=Number(award.awardGivenNumber);
-  result.phase='verify';
-  try{
-   const verification=await http(profile.query,sign(profile.query,queryEnv));
-   result.verifyState=zStatusDetails(verification);
-   const after=zStatus(verification);
-   if(!after.done)throw new Error('未更新');
-   if(Number.isInteger(Number(after.main.signDays))&&Number(after.main.signDays)>0)result.continuousDays=Number(after.main.signDays);
-   result.status='signed_confirmed';result.message='种豆得豆礼包今日领取已确认'+(result.beanQuantity>0?'，获得 '+result.beanQuantity+' 京豆。':'，请到活动页查看奖励。');
-  }catch(_){result.status='claim_success_verify_unconfirmed';result.message='领取接口返回成功'+(result.beanQuantity>0?'，'+result.beanQuantity+' 京豆':'')+'；状态复查未确认，不自动重试。';}
- }catch(e){result.status=e.status==='manual_required'?'manual_required':'stopped';result.message=/[\u4e00-\u9fff]/.test(String(e.message))?String(e.message).slice(0,160):'脚本处理失败，请反馈执行阶段';}
- finally{
-  if(locked&&$persistentStore.read(LOCK)===lockValue)$persistentStore.write(undefined,LOCK);
-  if(mode!=='status'&&recordResult){
-   result.finishedAt=Date.now();
-   try{jdcWrite(LAST,result);const history=jdcRead(HISTORY,[]);history.push(result);jdcWrite(HISTORY,history.slice(-20));}catch(_){}
-   console.log('[种豆签到] '+JSON.stringify(result));$notification.post('种豆得豆签到',mode==='cron'?'自动签到结果':'手动签到结果',zSummary(result));
-  }
-  $done({});
- }
 })();
 
 }
@@ -2216,7 +1895,7 @@ function jsError(e){
 }
 const JS_LEGACY={
  daily:{fn:'retail',last:'JD_CHECKIN_TEST_LAST_RESULT_V1'},scratch:{fn:'retail',last:'JD_CHECKIN_TEST_LAST_RESULT_V1'},blindbox:{fn:'retail',last:'JD_CHECKIN_TEST_LAST_RESULT_V1'},
- plant:{fn:'plant',last:'JD_PLANT_CHECKIN_LAST_RESULT_V1'},jxzy:{fn:'jxzy',last:'JXZY_CHECKIN_LAST_RESULT_V1'},finance:{fn:'finance',last:'JD_JR_CHECKIN_LAST_RESULT_V1'},home:{fn:'home',last:'JD_HOME_CHECKIN_LAST_RESULT_V1'}
+ jxzy:{fn:'jxzy',last:'JXZY_CHECKIN_LAST_RESULT_V1'},finance:{fn:'finance',last:'JD_JR_CHECKIN_LAST_RESULT_V1'},home:{fn:'home',last:'JD_HOME_CHECKIN_LAST_RESULT_V1'}
 };
 function jsResult(task,r){
  if(!r||typeof r.status!=='string')return {task,status:'stopped',detail:'正在执行或没有新结果'};
@@ -2413,7 +2092,7 @@ function createJdShortcutBridge(env, execute) {
     // This unauthenticated probe contains no credentials or execution authority.
     if (route === 'probe' && method === 'GET') return jbReply({ok: 'yes', proof, code: 'CONNECTED', message: '快捷指令与Loon已连通'});
     if (jbHeader(request.headers, 'X-Lazing-Signin-Key') !== key) return failure('PAIRING_FAILED', '插件与快捷指令没有配对，请使用同一套文件');
-    if (!((method === 'GET' && route === 'status') || (method === 'POST' && ['start', 'finish', ...JS_TASKS.map(([t]) => 'task/' + t)].includes(route)))) return failure('BAD_ROUTE', '请求方式或签到入口不匹配');
+    if (!((method === 'GET' && route === 'status') || (method === 'POST' && ['start', 'finish', 'task/plant', ...JS_TASKS.map(([t]) => 'task/' + t)].includes(route)))) return failure('BAD_ROUTE', '请求方式或签到入口不匹配');
     try {
       if (route === 'status') {
         const s = get();
@@ -2436,7 +2115,7 @@ function createJdShortcutBridge(env, execute) {
         }
         validSession(s); interrupted(s); lease(s); save(JB_STORE, s);
         return jbReply({ok: 'yes', code: resumable ? 'RESUME' : 'READY', session: s.id,
-          message: resumable ? '继续本次签到，已完成的步骤直接读取结果' : '准备执行全部11项签到'});
+          message: resumable ? '继续本次签到，已完成的步骤直接读取结果' : '准备执行全部'+JS_TASKS.length+'项签到'});
       }
       let s = get();
       if (!s || jbHeader(request.headers, 'X-Lazing-Signin-Session') !== s.id) return failure('SESSION_MISMATCH', '执行记录已变化，请重新运行快捷指令');
@@ -2446,6 +2125,7 @@ function createJdShortcutBridge(env, execute) {
         publish(s, true); s.state = 'finished'; save(JB_STORE, s); release(s);
         return jbReply({ok: 'yes', code: 'FINISHED', session: s.id, message: summary(s)});
       }
+      if(route === 'task/plant') return jbReply({ok:'yes', code:'REMOVED', session:s.id, waitSeconds:0, message:'种豆礼包已移除，已跳过'});
       const task = route.slice(5), index = JS_TASKS.findIndex(([k]) => k === task);
       if (index < 0) return failure('BAD_TASK', '签到项目不匹配');
       const known = s.steps[task];
@@ -2470,7 +2150,7 @@ function createJdShortcutBridge(env, execute) {
       if (waitSeconds) s.pauses.push(waitSeconds);
       save(JB_STORE, s); publish(s, false); lease(s);
       return jbReply({ok: 'yes', code: 'STEP_DONE', session: s.id, waitSeconds,
-        message: '第 ' + (index + 1) + '/11 项 · ' + jsLine(row)});
+        message: '第 ' + (index + 1) + '/'+JS_TASKS.length+' 项 · ' + jsLine(row)});
     } catch (error) {
       const message = String(error && error.message || '');
       const identity = /账号|日期|登录凭据|超时/.test(message);
@@ -2527,7 +2207,7 @@ async function jbExecuteTask(env, context) {
   try {
     guard();
     const crypto = createSigninCrypto({...host, requestAlgo: options => { jsTarget('game', options); return host.request(context.task, options); }, progress: () => {}});
-    const runner = createSignins(host, {retail: runRetailSignin, plant: runPlantSignin, jxzy: runJxSignin,
+    const runner = createSignins(host, {retail: runRetailSignin, jxzy: runJxSignin,
       home: runHomeSignin, finance: runFinanceSignin}, crypto);
     const timeout = new Promise((_, reject) => { timerId = env.setTimeout(() => { active = false; reject(Error('执行已超时')); }, Math.max(1, context.deadline - env.now())); });
     const report = await Promise.race([runner.run({gapSeconds: 0, bridgeTask: context.task}), timeout]);
@@ -2555,7 +2235,7 @@ function jbLoonEnvironment() {
 if (typeof module !== 'undefined') module.exports = {createJdShortcutBridge, jbExecuteTask, jbReply,
   JB_BASE, JB_STORE, JB_BUDGET, JS_KEYS, JS_TASKS, createSignins, createExtraSignins, createSigninCrypto,
   jsSettings, jsLogin, jsLegacyAccount, jsTarget, jsPair, jsParams, jsMergeCookie, jsResult, jsLine, jsError,
-  runRetailSignin, runPlantSignin, runJxSignin, runHomeSignin, runFinanceSignin, JS_GAME, JS_HEALTH};
+  runRetailSignin,  runJxSignin, runHomeSignin, runFinanceSignin, JS_GAME, JS_HEALTH};
 if (typeof $done === 'function' && typeof $persistentStore !== 'undefined') {
   const env = jbLoonEnvironment(), bridge = createJdShortcutBridge(env, context => jbExecuteTask(env, context));
   if (typeof $request === 'undefined') {

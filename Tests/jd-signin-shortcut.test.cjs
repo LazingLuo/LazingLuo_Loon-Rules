@@ -62,17 +62,20 @@ function harness(execute, withLogin = true) {
   check((await h.request('task/daily', 'POST', {session: 'f'.repeat(32)})).code === 'SESSION_MISMATCH', 'wrong session refused');
   check((await h.request('task/scratch', 'POST', {session})).code === 'ORDER', 'out-of-order task refused');
   check((await h.request('finish', 'POST', {session})).code === 'NOT_FINISHED', 'cannot claim queue complete early');
+  const removed = await h.request('task/plant', 'POST', {session});
+  check(removed.code === 'REMOVED' && !h.invoked.includes('plant'), 'old shortcut plant step safely skips without execution');
+  check(!JS_TASKS.some(([t]) => t === 'plant') && !api.runPlantSignin, 'plant removed from bridge runner');
   for (const [index, [task]] of JS_TASKS.entries()) {
     const r = await h.request('task/' + task, 'POST', {session});
     check(r.ok === 'yes', 'task step received: ' + task);
-    check(index === 10 ? r.waitSeconds === 0 : r.waitSeconds >= 5 && r.waitSeconds <= 15, 'bounded gap after ' + task);
+    check(index === JS_TASKS.length-1 ? r.waitSeconds === 0 : r.waitSeconds >= 5 && r.waitSeconds <= 15, 'bounded gap after ' + task);
     const count = h.invoked.length;
     const cached = await h.request('task/' + task, 'POST', {session});
     check(cached.code === 'CACHED' && h.invoked.length === count, 'same step never resubmitted: ' + task);
   }
   const finish = await h.request('finish', 'POST', {session});
-  check(finish.ok === 'yes' && finish.code === 'FINISHED', 'all eleven finish');
-  check(h.invoked.join(',') === JS_TASKS.map(([t]) => t).join(','), 'exact eleven-task order');
+  check(finish.ok === 'yes' && finish.code === 'FINISHED', 'all remaining sign-ins finish');
+  check(h.invoked.join(',') === JS_TASKS.map(([t]) => t).join(','), 'exact remaining-task order');
   check(!h.env.rawRead(JS_KEYS.lock), 'shared lock released after finish');
   check(h.read(JS_KEYS.history).length === 1, 'one aggregate history entry');
   await h.request('finish', 'POST', {session});
