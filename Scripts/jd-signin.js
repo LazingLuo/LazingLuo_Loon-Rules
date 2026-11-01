@@ -1,8 +1,50 @@
-// 京东合并签到 2026-10-31.1; fixed check-in scope, local credentials.
+// 京东合并签到 2026-11-01.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-10-31.1';
+const JS_VERSION='2026-11-01.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到'],['index','京东指数签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到']];
+// Separate daily sign-in observed in HAR475. No medical browsing automation.
+const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
+const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
+const JSM_QUERY='market_daily_pageIndex',JSM_CLAIM='market_daily_doCompleteTask';
+function jsMedicalScope(p,b){
+ if(p.appid!=='jdh-middle'||b.channel!=='daily')return false;
+ if(p.functionId===JSM_QUERY)return b.taskVersion===1;
+ return p.functionId===JSM_CLAIM&&b.assignmentType===5&&b.actionType===0&&typeof b.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(b.encryptAssignmentId);
+}
+function jsMedicalData(j){
+ if(j?.success!==true||j.code!=='0000'||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('看病买药签到请求未通过');
+ return j.data;
+}
+function jsMedicalTask(j){
+ const list=jsMedicalData(j).assignmentList;
+ if(!Array.isArray(list)||list.length>150)throw Error('看病买药签到列表结构变化');
+ const rows=list.filter(t=>t?.assignmentType===5);
+ if(rows.length!==1)throw Error('看病买药签到任务不明确');
+ const t=rows[0];
+ if(t.assignmentDesc!=='每日签到'||typeof t.encryptAssignmentId!=='string'||!/^[-_A-Za-z0-9]{1,256}$/.test(t.encryptAssignmentId)||!t.signDetail||typeof t.signDetail!=='object')throw Error('看病买药签到任务结构变化');
+ return t;
+}
+function jsMedicalState(j,day){
+ const t=jsMedicalTask(j),s=t.signDetail;
+ if(!Array.isArray(s.signList)||s.signList.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}_\d+(?:\.\d+)?$/.test(x)))throw Error('看病买药签到日期结构变化');
+ const today=s.signList.some(x=>x.startsWith(day+'_'));
+ if(s.status===2&&today&&t.completionFlag===true&&t.completionCnt===1&&t.assignmentTimesLimit===1)return {task:t,done:true};
+ if(s.status===1&&!today&&t.completionFlag===false&&t.completionCnt===0&&t.assignmentTimesLimit===1&&t.timeStatus===1)return {task:t,done:false};
+ throw Error('看病买药签到状态不一致');
+}
+function jsMedicalReward(j){
+ const rows=jsMedicalData(j).successRewards;
+ if(!Array.isArray(rows)||!rows.length)return {};
+ let n=0,found=false;
+ for(const r of rows){
+  if(r?.rewardType!==3)continue;
+  if(typeof r.quantity!=='number'||!Number.isSafeInteger(r.quantity)||r.quantity<0||r.quantity>10000)return {};
+  found=true;n+=r.quantity;
+ }
+ return found&&n<=100000?{beanQuantity:n}:{};
+}
+
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
 const JS_HEALTH={hs:{activityId:'37252',appKey:'250520900001'},ys:{activityId:'34703',appKey:'250141600001'}};
 const jsClone=x=>JSON.parse(JSON.stringify(x));
@@ -47,7 +89,7 @@ function jsLegacyAccount(task,pin,read,login){
  }
  return {key,value};
 }
-const JS_ALLOWED={hs:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],ys:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],delivery:['bean_deliverySign_home','bean_deliverySign_sign','bean_deliverySign_continue_award'],game:['weGameHome','weGameLottery']};
+const JS_ALLOWED={medical:[JSM_QUERY,JSM_CLAIM],hs:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],ys:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],delivery:['bean_deliverySign_home','bean_deliverySign_sign','bean_deliverySign_continue_award'],game:['weGameHome','weGameLottery']};
 function jsTarget(task,o){
  const url=String(o.url||'');if(url==='https://cactus.jd.com/request_algo'){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('签名初始化不得带登录凭据');return;}
  if(task==='finance'){
@@ -59,6 +101,7 @@ function jsTarget(task,o){
  if(task==='index'&&(b.craftId!=='6a8270f9a65ae0dacfa38042'||p.appid!=='jx_h5_babel'))throw Error('京东指数签到活动不符');
  if(task==='home'&&(b.craftId!=='69ae8eb86a31c802e19f9f8f'||p.appid!=='jx_h5_babel'))throw Error('家电家居签到活动不符');
  if(!allowed.includes(f))throw Error('签到接口不符');
+ if(task==='medical'&&!jsMedicalScope(p,b))throw Error('看病买药签到参数不符');
  if(task==='game'&&b.linkId!==JS_GAME||task==='delivery'&&!['2775','5358'].includes(String(b.activityId)))throw Error('签到活动不符');
  if(JS_HEALTH[task]){
   const query=f==='jdh_bm_getKitTask';
@@ -2087,6 +2130,36 @@ function createExtraSignins(host,crypto){
   try{if(Number(kit(await query()).status)===4){mark(task,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}}catch(_){}
   return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
  }
+ async function medical(){
+  const task='medical',login=identity(),profile=host.read(JSM_KEY,null)||host.read('JD_MEDICAL_ACTIVITY_ACCOUNT_V1',null);
+  if(!profile)throw Error('缺少看病买药签到凭据，请打开对应签到页');
+  const pair=jsPair(jsHeader(profile.headers,'Cookie'));
+  if(profile.pin!==pin||!pair||pair.pin!==pin)throw Error('签到资料属于其他账号');
+  const env=crypto.decodeEnvironment(profile.environment);
+  if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))throw Error('签名账号不一致');
+  if(!jsHeader(profile.headers,'User-Agent')||typeof profile.eidToken!=='string'||!profile.eidToken)throw Error('缺少看病买药签到设备凭据');
+  const headers={...profile.headers};for(const k of Object.keys(headers))if(k.toLowerCase()==='cookie')delete headers[k];
+  headers.Cookie=jsMergeCookie(jsHeader(profile.headers,'Cookie'),login);headers.Referer=JSM_PAGE;headers.Origin='https://pro.m.jd.com';
+  async function options(f,b){
+   check();const p={functionId:f,appid:'jdh-middle',body:JSON.stringify(b)};
+   p.h5st=await crypto.signOnline('4b818',{pin,headers},env,{appid:p.appid,body:crypto.hash(p.body),functionId:f});
+   check();const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!=='4b818'||sig[5]!=='5.3')throw Error('看病买药签名输出异常');
+   p['x-api-eid-token']=profile.eidToken;
+   return {url:'https://api.m.jd.com/api?functionId='+f,headers:{...headers,'Content-Type':'application/x-www-form-urlencoded'},body:jsEncode(p)};
+  }
+  const query=async()=>jsMedicalState(await http(task,await options(JSM_QUERY,{taskVersion:1,channel:'daily'})),date);
+  const before=await query(),old=prior(task),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:{};
+  if(before.done){mark(task,'confirmed',known);return {status:'already_done',...known};}
+  if(old)return {status:'pending',detail:'今天已提交，去页面确认',...known};
+  const id=before.task.encryptAssignmentId;
+  const o=await options(JSM_CLAIM,{assignmentType:5,encryptAssignmentId:id,actionType:0,channel:'daily'});
+  check();mark(task,'pending');const j=await http(task,o);
+  if(j.success!==true||j.code!=='0000')return {status:'rejected',detail:'看病买药签到请求未通过'};
+  const quantity=jsMedicalReward(j);mark(task,'accepted',quantity);
+  try{const after=await query();if(after.done&&after.task.encryptAssignmentId===id){mark(task,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}}catch(_){}
+  return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
+ }
+
  function gameState(j){
   const r=j.data?.signMainVo;if(j.success!==true||!r||![0,1,3].includes(Number(r.currentStatus)))throw Error('互动签到状态读取失败');return r;
  }
@@ -2151,7 +2224,7 @@ function createExtraSignins(host,crypto){
   }
   return {status:parts.every(p=>p.status==='accepted')?'accepted':'partial',parts,detail:parts.map(p=>p.activityId+'：'+(p.status==='accepted'?'接口返回 '+p.beanQuantity+' 京豆':(p.beanQuantity>0?'已返回 '+p.beanQuantity+' 京豆，':'')+p.detail)).join('；')};
  }
- return {run:task=>task==='game'?game():task==='delivery'?delivery():health(task)};
+ return {run:task=>task==='medical'?medical():task==='game'?game():task==='delivery'?delivery():health(task)};
 }
 function jsError(e){
  const s=String(e?.message||'');const http=/HTTP (\d{1,3})/.exec(s);if(http)return 'HTTP '+http[1];
@@ -2359,4 +2432,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={jsLoonHost,createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS,JS_GAME,JS_HEALTH};
+if(typeof module!=="undefined")module.exports={JSM_KEY,JSM_PAGE,JSM_QUERY,JSM_CLAIM,jsMedicalScope,jsMedicalData,jsMedicalTask,jsMedicalState,jsMedicalReward,jsLoonHost,createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS,JS_GAME,JS_HEALTH};

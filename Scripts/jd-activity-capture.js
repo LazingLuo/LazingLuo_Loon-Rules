@@ -1,3 +1,4 @@
+// Shared credential capture 20261101-1: medical daily sign-in only.
 // Shared credential capture 20261030-1; retired finance/medical activities removed.
 // Medical daily capture integration 20261029-5.
 // Shared capture update 20261029-4: add independently scoped JR coinQuest.
@@ -73,6 +74,48 @@ function actJxTaskCapture(host,req,res,decode){
 const JS_VERSION='2026-10-26.2';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
+// Separate daily sign-in observed in HAR475. No medical browsing automation.
+const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
+const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
+const JSM_QUERY='market_daily_pageIndex',JSM_CLAIM='market_daily_doCompleteTask';
+function jsMedicalScope(p,b){
+ if(p.appid!=='jdh-middle'||b.channel!=='daily')return false;
+ if(p.functionId===JSM_QUERY)return b.taskVersion===1;
+ return p.functionId===JSM_CLAIM&&b.assignmentType===5&&b.actionType===0&&typeof b.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(b.encryptAssignmentId);
+}
+function jsMedicalData(j){
+ if(j?.success!==true||j.code!=='0000'||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('看病买药签到请求未通过');
+ return j.data;
+}
+function jsMedicalTask(j){
+ const list=jsMedicalData(j).assignmentList;
+ if(!Array.isArray(list)||list.length>150)throw Error('看病买药签到列表结构变化');
+ const rows=list.filter(t=>t?.assignmentType===5);
+ if(rows.length!==1)throw Error('看病买药签到任务不明确');
+ const t=rows[0];
+ if(t.assignmentDesc!=='每日签到'||typeof t.encryptAssignmentId!=='string'||!/^[-_A-Za-z0-9]{1,256}$/.test(t.encryptAssignmentId)||!t.signDetail||typeof t.signDetail!=='object')throw Error('看病买药签到任务结构变化');
+ return t;
+}
+function jsMedicalState(j,day){
+ const t=jsMedicalTask(j),s=t.signDetail;
+ if(!Array.isArray(s.signList)||s.signList.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}_\d+(?:\.\d+)?$/.test(x)))throw Error('看病买药签到日期结构变化');
+ const today=s.signList.some(x=>x.startsWith(day+'_'));
+ if(s.status===2&&today&&t.completionFlag===true&&t.completionCnt===1&&t.assignmentTimesLimit===1)return {task:t,done:true};
+ if(s.status===1&&!today&&t.completionFlag===false&&t.completionCnt===0&&t.assignmentTimesLimit===1&&t.timeStatus===1)return {task:t,done:false};
+ throw Error('看病买药签到状态不一致');
+}
+function jsMedicalReward(j){
+ const rows=jsMedicalData(j).successRewards;
+ if(!Array.isArray(rows)||!rows.length)return {};
+ let n=0,found=false;
+ for(const r of rows){
+  if(r?.rewardType!==3)continue;
+  if(typeof r.quantity!=='number'||!Number.isSafeInteger(r.quantity)||r.quantity<0||r.quantity>10000)return {};
+  found=true;n+=r.quantity;
+ }
+ return found&&n<=100000?{beanQuantity:n}:{};
+}
+
 const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
 const JS_HEALTH={hs:{activityId:'37252',appKey:'250520900001'},ys:{activityId:'34703',appKey:'250141600001'}};
 const jsClone=x=>JSON.parse(JSON.stringify(x));
@@ -1065,6 +1108,39 @@ function Ae(e,t){var n=(65535&e)+(65535&t);return(e>>16)+(t>>16)+(n>>16)<<16|655
 const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify(clean));
 }
 
+function jsMedicalCapture(host,request,response,decode){
+ const p=jsParams(request),b=JSON.parse(p.body||'{}');if(!jsMedicalScope(p,b))return null;
+ const page=jsHeader(request.headers,'x-referer-page')||jsHeader(request.headers,'Referer');
+ if(String(page).split('?')[0]!==JSM_PAGE)return null;
+ const j=JSON.parse(response.body||'{}');if(p.functionId===JSM_QUERY)jsMedicalTask(j);else jsMedicalData(j);
+ const cookie=String(jsHeader(request.headers,'Cookie')||''),parts=cookie.split(';').map(x=>x.trim()).filter(Boolean);
+ const direct=jsPair(cookie),login=jsLogin(host.read).login,identity=direct||login;
+ // A partial webview Cookie may use the existing login only after the signature
+ // account is checked. Ambiguous or conflicting login fields are never merged.
+ if(!identity||!direct&&parts.some(x=>x.startsWith('pt_key=')))return null;
+ const pins=parts.filter(x=>x.startsWith('pt_pin='));if(pins.length>1||pins.length===1&&pins[0].slice(7)!==identity.pin)return null;
+ const bound=host.read(JS_KEYS.bound,null),old=host.read(JSM_KEY,null);
+ if(bound?.pin&&bound.pin!==identity.pin||login&&login.pin!==identity.pin||old?.pin&&old.pin!==identity.pin)return null;
+ const sig=String(p.h5st||'').split(';');if(sig.length!==10||sig[2]!=='4b818'||sig[5]!=='5.3'||typeof p['x-api-eid-token']!=='string'||!p['x-api-eid-token'])return null;
+ const env=decode(sig[7]);if(![identity.pin,decodeURIComponent(identity.pin)].includes(env?.pp?.p1))return null;
+ const headers={};for(const k of ['User-Agent','Origin','Referer','x-referer-page','x-rp-client','x-babel-ihub']){const v=jsHeader(request.headers,k);if(v)headers[k]=v;}
+ if(!headers['User-Agent'])return null;
+ headers.Cookie=identity.cookie+parts.filter(x=>!/^pt_(?:key|pin)=/.test(x)).join(';')+';';
+ const at=host.observedAt||Date.now();if(at<Number(old?.capturedAt||0))return null;
+ host.write(JSM_KEY,{pin:identity.pin,headers,environment:sig[7],eidToken:p['x-api-eid-token'],capturedAt:at});
+ const updated=[JSM_KEY];
+ if(direct){
+  const previous=host.read(JS_KEYS.login,null);
+  if(!previous||at>=Number(previous.capturedAt||0)){
+   host.write(JS_KEYS.login,{...direct,headers,capturedAt:at});
+   host.write('QL_BRIDGE_CREDENTIAL_V1',{...direct,capturedAt:at,source:'combined-signin'});
+   if(!previous||previous.cookie!==direct.cookie)updated.push(JS_KEYS.login);
+  }
+ }
+ if(!bound)host.write(JS_KEYS.bound,{pin:identity.pin});
+ return {updated,first:!old};
+}
+
 async function jsCapture(host,request,response,parsers,decode){
  if(request?.method!=='POST'||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
@@ -1073,6 +1149,7 @@ async function jsCapture(host,request,response,parsers,decode){
  const p=jd?jsParams(request):{},f=p.functionId,body=jd?JSON.parse(p.body||'{}'):{};
  if(body.craftId===JDI_CRAFT||body.pageId===JDI_PAGE)return jsIndexCapture(host,request,response,decode);
  if(f==='start')return null; // Leave the splash rewrite to its own plugin.
+ if([JSM_QUERY,JSM_CLAIM].includes(f))return jsMedicalCapture(host,request,response,decode);
  let pair=jsPair(jsHeader(request.headers,'Cookie'));
  // These native webviews omit login cookies in the captured H5 request. Use
  // an existing same-account canonical login; signed environments still bind pin.
@@ -1146,7 +1223,7 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
   const read=(k,f)=>{const v=$persistentStore.read(k);if(!v)return f;return JSON.parse(v);};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('本地记录保存失败');};
   try{
-   const names={[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
+   const names={[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment);
    if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
@@ -1155,5 +1232,5 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
 
