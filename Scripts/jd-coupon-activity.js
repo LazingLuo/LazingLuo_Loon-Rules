@@ -4,9 +4,7 @@
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
 const JS_VERSION='2026-10-26.2';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
-const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
-const JS_HEALTH={hs:{activityId:'37252',appKey:'250520900001'},ys:{activityId:'34703',appKey:'250141600001'}};
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到']];
 const jsClone=x=>JSON.parse(JSON.stringify(x));
 const jsDay=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
 function jsHeader(h,k){const key=Object.keys(h||{}).find(x=>x.toLowerCase()===k.toLowerCase());return key?h[key]:'';}
@@ -49,22 +47,19 @@ function jsLegacyAccount(task,pin,read,login){
  }
  return {key,value};
 }
-const JS_ALLOWED={hs:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],ys:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],delivery:['bean_deliverySign_home','bean_deliverySign_sign','bean_deliverySign_continue_award'],game:['weGameHome','weGameLottery']};
 function jsTarget(task,o){
  const url=String(o.url||'');if(url==='https://cactus.jd.com/request_algo'){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('签名初始化不得带登录凭据');return;}
  if(task==='finance'){
   if(/^https:\/\/aks\.jdpay\.com\/aar2\/getJS\?version=2\.1\.0&name=browser(?:&[^#]*)?$/.test(url)){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('签名初始化不得带登录凭据');return;}
   if(!['https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/queryWeekSignMain','https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/dailyCashSignReceive','https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoDoubleSignInForH5','https://ms.jr.jd.com/gw2/generic/DoubleSign/h5/m/jrSendSignAward'].includes(url))throw Error('金融接口地址不符');return;
  }
- jsEndpoint(url);const p=jsParams(o),f=p.functionId,b=JSON.parse(p.body||'{}');
- const allowed=JS_ALLOWED[task]||(task==='daily'?['findBeanSceneNew','bff_rightsCenter_interaction']:task==='scratch'?['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction']:task==='blindbox'?['bff_marketing_interaction']:['jxzy','home'].includes(task)?['jxzy_active_querySign','jxzy_active_drawSign']:['weGameHome','weGameLottery']);
+ if(task!=='special')jsEndpoint(url);else if(url!=='https://api.m.jd.com/')throw Error('特价签到接口地址不符');const p=jsParams(o),f=p.functionId,b=JSON.parse(p.body||'{}');
+ const allowed={daily:['findBeanSceneNew','bff_rightsCenter_interaction'],scratch:['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction'],blindbox:['bff_marketing_interaction'],jxzy:['jxzy_active_querySign','jxzy_active_drawSign'],home:['jxzy_active_querySign','jxzy_active_drawSign'],index:['jxzy_active_querySign','jxzy_active_drawSign'],medical:['market_daily_pageIndex','market_daily_doCompleteTask'],special:['common_task_list','common_do_task']}[task];
+ if(!allowed||!allowed.includes(f))throw Error('签到接口不符');
  if(task==='home'&&(b.craftId!=='69ae8eb86a31c802e19f9f8f'||p.appid!=='jx_h5_babel'))throw Error('家电家居签到活动不符');
- if(!allowed.includes(f))throw Error('签到接口不符');
- if(task==='game'&&b.linkId!==JS_GAME||task==='plant'&&b.linkId!=='4HcenxuZM4XiHesOb1HG4g'||task==='delivery'&&!['2775','5358'].includes(String(b.activityId)))throw Error('签到活动不符');
- if(JS_HEALTH[task]){
-  const query=f==='jdh_bm_getKitTask';
-  if((query?b.m_patch_appKey:b.appKey)!==JS_HEALTH[task].appKey||b.channel!=='jdhapp'||query&&(b.groupCode!=='openkits'||p.appid!=='jdh-middle')||!query&&(!b.taskId||!b.encodeId||p.appid!=='JDHAPP'))throw Error('健康签到参数不符');
- }
+ if(task==='index'&&(b.craftId!=='6a8270f9a65ae0dacfa38042'||p.appid!=='jx_h5_babel'))throw Error('京东指数签到活动不符');
+ if(task==='medical'&&!jsMedicalScope(p,b))throw Error('看病买药签到参数不符');
+ if(task==='special'&&(p.appid!=='newtry'||b.channelId!=='16'||f==='common_do_task'&&(b.actionType!==undefined||b.itemId!=='1'||typeof b.assignmentId!=='string')))throw Error('特价签到参数不符');
 }
 function jsSharedMakeSigner(appId, browser, diagnostics, referenceEnvironment,timers) {
   const setTimeout=timers.setTimeout,clearTimeout=timers.clearTimeout;

@@ -1,3 +1,4 @@
+// Shared capture 20261102-1: own sign-ins and activities only.
 // Shared credential capture 20261101-1: medical daily sign-in only.
 // Shared credential capture 20261030-1; retired finance/medical activities removed.
 // Medical daily capture integration 20261029-5.
@@ -73,7 +74,7 @@ function actJxTaskCapture(host,req,res,decode){
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
 const JS_VERSION='2026-10-26.2';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['hs','hs签到'],['ys','ys签到'],['delivery','天天领豆'],['game','互动游戏签到'],['home','家电家居签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['plant','种豆礼包'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
 const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
 const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
@@ -116,8 +117,6 @@ function jsMedicalReward(j){
  return found&&n<=100000?{beanQuantity:n}:{};
 }
 
-const JS_GAME='MWC_-5cWq-JH1wrPPteH4w';
-const JS_HEALTH={hs:{activityId:'37252',appKey:'250520900001'},ys:{activityId:'34703',appKey:'250141600001'}};
 const jsClone=x=>JSON.parse(JSON.stringify(x));
 const jsDay=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
 function jsHeader(h,k){const key=Object.keys(h||{}).find(x=>x.toLowerCase()===k.toLowerCase());return key?h[key]:'';}
@@ -160,22 +159,19 @@ function jsLegacyAccount(task,pin,read,login){
  }
  return {key,value};
 }
-const JS_ALLOWED={hs:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],ys:['jdh_bm_getKitTask','jdh_msoa_doTaskGw'],delivery:['bean_deliverySign_home','bean_deliverySign_sign','bean_deliverySign_continue_award'],game:['weGameHome','weGameLottery']};
 function jsTarget(task,o){
  const url=String(o.url||'');if(url==='https://cactus.jd.com/request_algo'){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('签名初始化不得带登录凭据');return;}
  if(task==='finance'){
   if(/^https:\/\/aks\.jdpay\.com\/aar2\/getJS\?version=2\.1\.0&name=browser(?:&[^#]*)?$/.test(url)){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('签名初始化不得带登录凭据');return;}
   if(!['https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/queryWeekSignMain','https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/dailyCashSignReceive','https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoDoubleSignInForH5','https://ms.jr.jd.com/gw2/generic/DoubleSign/h5/m/jrSendSignAward'].includes(url))throw Error('金融接口地址不符');return;
  }
- jsEndpoint(url);const p=jsParams(o),f=p.functionId,b=JSON.parse(p.body||'{}');
- const allowed=JS_ALLOWED[task]||(task==='daily'?['findBeanSceneNew','bff_rightsCenter_interaction']:task==='scratch'?['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction']:task==='blindbox'?['bff_marketing_interaction']:['jxzy','home'].includes(task)?['jxzy_active_querySign','jxzy_active_drawSign']:['weGameHome','weGameLottery']);
+ if(task!=='special')jsEndpoint(url);else if(url!=='https://api.m.jd.com/')throw Error('特价签到接口地址不符');const p=jsParams(o),f=p.functionId,b=JSON.parse(p.body||'{}');
+ const allowed={daily:['findBeanSceneNew','bff_rightsCenter_interaction'],scratch:['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction'],blindbox:['bff_marketing_interaction'],jxzy:['jxzy_active_querySign','jxzy_active_drawSign'],home:['jxzy_active_querySign','jxzy_active_drawSign'],index:['jxzy_active_querySign','jxzy_active_drawSign'],medical:['market_daily_pageIndex','market_daily_doCompleteTask'],special:['common_task_list','common_do_task']}[task];
+ if(!allowed||!allowed.includes(f))throw Error('签到接口不符');
  if(task==='home'&&(b.craftId!=='69ae8eb86a31c802e19f9f8f'||p.appid!=='jx_h5_babel'))throw Error('家电家居签到活动不符');
- if(!allowed.includes(f))throw Error('签到接口不符');
- if(task==='game'&&b.linkId!==JS_GAME||task==='plant'&&b.linkId!=='4HcenxuZM4XiHesOb1HG4g'||task==='delivery'&&!['2775','5358'].includes(String(b.activityId)))throw Error('签到活动不符');
- if(JS_HEALTH[task]){
-  const query=f==='jdh_bm_getKitTask';
-  if((query?b.m_patch_appKey:b.appKey)!==JS_HEALTH[task].appKey||b.channel!=='jdhapp'||query&&(b.groupCode!=='openkits'||p.appid!=='jdh-middle')||!query&&(!b.taskId||!b.encodeId||p.appid!=='JDHAPP'))throw Error('健康签到参数不符');
- }
+ if(task==='index'&&(b.craftId!=='6a8270f9a65ae0dacfa38042'||p.appid!=='jx_h5_babel'))throw Error('京东指数签到活动不符');
+ if(task==='medical'&&!jsMedicalScope(p,b))throw Error('看病买药签到参数不符');
+ if(task==='special'&&(p.appid!=='newtry'||b.channelId!=='16'||f==='common_do_task'&&(b.actionType!==undefined||b.itemId!=='1'||typeof b.assignmentId!=='string')))throw Error('特价签到参数不符');
 }
 function runRetailCapture(context){
 const {$request,$response,$argument,$persistentStore,$notification,$script,$httpClient,console}=context;
@@ -1108,6 +1104,135 @@ function Ae(e,t){var n=(65535&e)+(65535&t);return(e>>16)+(t>>16)+(n>>16)<<16|655
 const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify(clean));
 }
 
+// HAR477 and JD's public ifloor 00041259: channel 16 only.
+const TJ_VERSION='20261102-1',TJ_KEY='JD_SPECIAL_CHANNEL_ACCOUNT_V1',TJ_JOURNAL='JD_SPECIAL_CHANNEL_ATTEMPTS_V1';
+const TJ_PAGE='https://pro.m.jd.com/mall/active/4WMAPf9VCBdEE8Rva1AVEPH7CBbj/index.html';
+const TJ_QUERY='common_task_list',TJ_DO='common_do_task';
+const TJ_ENCODING='qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT';
+function tjData(j){
+ if(String(j?.code)!=='0'||String(j?.data?.bizCode)!=='0'||!j?.data?.result||typeof j.data.result!=='object'||Array.isArray(j.data.result))throw Error('特价频道接口未通过');return j.data.result;
+}
+function tjList(j){
+ const list=tjData(j).taskInfo?.taskList;
+ if(!Array.isArray(list)||list.length>100)throw Error('特价频道任务列表变化');
+ const ids=new Set();for(const t of list){if(!t||typeof t.encryptAssignmentId!=='string'||!/^[-_A-Za-z0-9]{1,256}$/.test(t.encryptAssignmentId)||ids.has(t.encryptAssignmentId))throw Error('特价频道任务标识变化');ids.add(t.encryptAssignmentId);}
+ return list;
+}
+function tjResult(j,code){
+ const r=tjData(j).assignmentResult;if(String(r?.subCode)!==String(code))throw Error('特价频道任务步骤未通过');return r;
+}
+function tjBeans(r){
+ const rows=r?.rewardsInfo?.successRewards?.['3'];if(!Array.isArray(rows)||!rows.length)return null;
+ let n=0;for(const x of rows){if(x?.rewardType!==3||typeof x.quantity!=='number'||!Number.isSafeInteger(x.quantity)||x.quantity<0||x.quantity>100000)return null;n+=x.quantity;}return n<=100000?n:null;
+}
+function tjSignin(list,day){
+ const a=list.filter(t=>t.assignmentType===5&&t.assignmentName==='特价天天签到'&&t.ext?.extraType==='sign'&&Array.isArray(t.rewards)&&t.rewards.some(r=>r.rewardType===3));
+ if(a.length!==1)throw Error('特价签到任务不明确');const t=a[0],s=t.ext.sign1;
+ if(!s||![1,2].includes(s.status)||!Array.isArray(s.signList)||s.signList.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}_\d+(?:\.\d+)?$/.test(x))||s.itemId!=='1'||t.assignmentTimesLimit!==1||!Number.isInteger(t.canReceiveTimes)||t.canReceiveTimes<0||t.canReceiveTimes>1)throw Error('特价签到状态变化');
+ const today=s.signList.some(x=>x.startsWith(day+'_'));
+ if(s.status===2&&today&&t.completionFlag===true&&t.completionCnt===1)return {task:t,done:true};
+ if(s.status===1&&!today&&t.completionFlag===false&&t.completionCnt===0&&t.timeStatus===1&&t.canParticipation===true)return {task:t,done:false};
+ throw Error('特价签到状态不一致');
+}
+function tjBrowseUrl(u){return typeof u==='string'&&u.length<=16384&&!/[\x00-\x20\x7f]/.test(u)&&/^https:\/\/(?:pro\.m\.jd\.com\/mall\/active\/|jdhm\.jd\.com\/jdhhome\/|eco\.jr\.jd\.com\/(?:yifenh5(?:[/?#]|$)|common-growth-page\/index\.html(?:[?#]|$))|u\.jr\.jd\.com\/uc-fe-wxgrowing\/|ipay\.jd\.com\/pages\/bbf\/)/i.test(u);}
+function tjPlan(t){
+ const name=String(t.assignmentName||'任务').slice(0,80),ext=t.ext||{},items=ext.shoppingActivity;
+ if(t.assignmentType===5)return {name,skip:'由合并签到处理'};
+ if(t.assignmentType!==1||ext.extraType!=='shoppingActivity'||ext.outerTaskType!==9||ext.subTaskType!==undefined&&ext.subTaskType!==0||t.appJumpType||t.appType||/点击\d|商品|视频|直播|小说|广告|下单|关注|邀请|组件|订阅/.test(name+' '+String(t.assignmentDesc||'')))return {name,skip:'需App操作'};
+ if(!Array.isArray(t.rewards)||!t.rewards.some(r=>[1,3,4,6].includes(r.rewardType)))return {name,skip:'奖励类型不明确，留待App'};
+ const limit=t.assignmentTimesLimit,count=t.completionCnt,wait=ext.waitDuration,pending=t.canReceiveTimes;
+ if(!Number.isInteger(limit)||limit<1||limit>30||!Number.isInteger(count)||count<0||count>limit||!Number.isInteger(pending)||pending<0||pending>limit||!Number.isInteger(wait)||wait<1||wait>60||!Array.isArray(items)||!items.length||items.length>30)return {name,skip:'任务结构变化，留待App'};
+ const ids=new Set();for(const it of items){if(!it||typeof it.itemId!=='string'||!it.itemId||it.itemId.length>256||ids.has(it.itemId)||![1,2].includes(it.status))return {name,skip:'浏览项目变化，留待App'};ids.add(it.itemId);}
+ const eligible=items.filter(it=>tjBrowseUrl(it.url));
+ if(!eligible.length)return {name,skip:'需App打开浏览页面'};
+ if(pending>0){const item=eligible.find(it=>it.status===2);return item?{name,claim:item,id:t.encryptAssignmentId,count,wait}:{name,skip:'领奖项目不明确，留待App'};}
+ if(t.completionFlag===true||count===limit)return {name,skip:'已完成'};
+ if(t.timeStatus!==1||t.canParticipation!==true)return {name,skip:'当前不可做'};
+ const item=eligible.find(it=>it.status===1);return item?{name,item,id:t.encryptAssignmentId,count,wait}:{name,skip:'暂无可处理浏览项目'};
+}
+function tjCapture(host,req,res,decode){
+ const p=jsParams(req),b=JSON.parse(p.body||'{}');if(p.functionId!==TJ_QUERY||p.appid!=='newtry'||b.channelId!=='16'||b.ext?.queryReceiveTimes!==1||![1,2].includes(b.extMap?.sceneType))return null;
+ const page=jsHeader(req.headers,'x-referer-page')||jsHeader(req.headers,'Referer');if(String(page).split('?')[0]!==TJ_PAGE)return null;
+ tjList(JSON.parse(res.body||'{}'));
+ const cookie=String(jsHeader(req.headers,'Cookie')||''),direct=jsPair(cookie),login=jsLogin(host.read).login,pair=direct||login;
+ if(!pair||!direct&&/(?:^|;)\s*pt_key=/.test(cookie))return null;
+ const pins=cookie.split(';').map(s=>s.trim()).filter(s=>s.startsWith('pt_pin='));if(pins.length>1||pins.length===1&&pins[0].slice(7)!==pair.pin)return null;
+ const bound=host.read(JS_KEYS.bound,null),old=host.read(TJ_KEY,null);if(bound?.pin&&bound.pin!==pair.pin||login&&login.pin!==pair.pin||old?.pin&&old.pin!==pair.pin)return null;
+ const sig=String(p.h5st||'').split(';');if(sig.length!==10||sig[2]!=='35fa0'||sig[5]!=='5.3'||sig[9]!==TJ_ENCODING||!p['x-api-eid-token']||!['apple','ios'].includes(p.client)||!/^\d+(?:\.\d+){1,3}$/.test(p.clientVersion||''))return null;
+ const env=decode(sig[7]);if(![pair.pin,decodeURIComponent(pair.pin)].includes(env?.pp?.p1))return null;
+ const headers={};for(const k of ['User-Agent','Referer','Origin','x-referer-page','x-rp-client']){const v=jsHeader(req.headers,k);if(v)headers[k]=v;}if(!headers['User-Agent'])return null;
+ headers.Cookie=pair.cookie+cookie.split(';').map(s=>s.trim()).filter(s=>s&&!/^pt_(?:key|pin)=/.test(s)).join(';')+';';
+ const at=host.observedAt||Date.now();if(at<Number(old?.capturedAt||0))return null;
+ const params={};for(const k of ['area','clientVersion','client','loginType','appid','xAPIClientLanguage','uuid','d_model','d_brand','model','osVersion','x-api-eid-token'])if(p[k]!==undefined)params[k]=p[k];
+ const query={ext:{queryReceiveTimes:1},extMap:{sceneType:2},channelId:'16'};if(typeof b.extMap.desktopTaskAppId==='string'&&/^\d{1,32}$/.test(b.extMap.desktopTaskAppId))query.extMap.desktopTaskAppId=b.extMap.desktopTaskAppId;
+ host.write(TJ_KEY,{pin:pair.pin,headers,params,query,environment:sig[7],capturedAt:at});const updated=[TJ_KEY];
+ if(direct){const previous=host.read(JS_KEYS.login,null);if(!previous||at>=Number(previous.capturedAt||0)){host.write(JS_KEYS.login,{...direct,headers,capturedAt:at});host.write('QL_BRIDGE_CREDENTIAL_V1',{...direct,capturedAt:at,source:'special-channel'});if(!previous||previous.cookie!==direct.cookie)updated.push(JS_KEYS.login);}}
+ if(!bound)host.write(JS_KEYS.bound,{pin:pair.pin});return {updated,first:!old};
+}
+function createSpecialClient(host,crypto){
+ const date=host.day(),login=jsLogin(host.read).login,source=host.read(TJ_KEY,null);
+ if(!source?.params||!source.environment||!source.query||!login)throw Error('缺少特价频道凭据，请打开特价任务列表');
+ const pin=source.pin,pair=jsPair(jsHeader(source.headers,'Cookie'));if(pin!==login.pin||!pair||pair.pin!==pin||source.params.appid!=='newtry'||source.query.channelId!=='16')throw Error('特价频道凭据不一致');
+ const env=crypto.decodeEnvironment(source.environment);if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))throw Error('特价频道签名账号不一致');
+ const snapshot=JSON.stringify(source),journal=()=>{const j=host.read(TJ_JOURNAL,{});if(!j||typeof j!=='object'||Array.isArray(j))throw Error('特价频道提交记录读取失败');return j;},key=(id,item,phase)=>date+':'+crypto.hash(pin)+':'+crypto.hash(id)+':'+crypto.hash(item)+':'+phase;
+ const prior=(id,item,phase)=>journal()[key(id,item,phase)];
+ function guard(){host.guard();if(host.day()!==date||jsLogin(host.read).login?.pin!==pin||JSON.stringify(host.read(TJ_KEY,null))!==snapshot)throw Error('特价频道日期或凭据变化，已停止');}
+ function mark(id,item,phase,values={}){guard();const j=journal();j[key(id,item,phase)]={at:Date.now(),...values};for(const k of Object.keys(j))if(k.slice(0,10)<date)delete j[k];host.write(TJ_JOURNAL,j);}
+ async function call(f,b,mutation){
+  guard();if(![TJ_QUERY,TJ_DO].includes(f)||b.channelId!=='16')throw Error('特价频道请求范围不符');
+  const current=jsLogin(host.read).login;if(!current||current.pin!==pin)throw Error('缺少特价频道Cookie');
+  const headers={...source.headers,Cookie:jsMergeCookie(source.headers.Cookie,current),'Content-Type':'application/x-www-form-urlencoded','X-Lazing-Activity-Run':'1'};
+  const p={...source.params,functionId:f,t:String(Date.now()),body:JSON.stringify(b)},input={};for(const k of ['appid','body','client','clientVersion','functionId','t']){if(!p[k])throw Error('缺少特价频道签名参数');input[k]=k==='body'?crypto.hash(p[k]):p[k];}
+  p.h5st=await crypto.signOnline('35fa0',{pin,headers},env,input);const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!=='35fa0'||sig[5]!=='5.3'||sig[9]!==TJ_ENCODING)throw Error('特价频道签名字段变化');
+  guard();if(mutation)mutation();const r=await host.request('special',{url:'https://api.m.jd.com/',headers,body:jsEncode(p)});
+  guard();if(Number(r.status)!==200)throw Error('特价频道 HTTP '+(Number(r.status)||0));const j=JSON.parse(r.body);tjData(j);return j;
+ }
+ const query=async()=>tjList(await call(TJ_QUERY,source.query));
+ const action=(t,item,phase,b,expected)=>call(TJ_DO,b,()=>mark(t.encryptAssignmentId,item,phase)).then(j=>tjResult(j,expected));
+ async function sign(){
+  let before=tjSignin(await query(),date),t=before.task,old=prior(t.encryptAssignmentId,'sign','submit');
+  if(before.done)return {status:'already_done',...(Number.isInteger(old?.beanQuantity)?{beanQuantity:old.beanQuantity}:{})};
+  if(old)return {status:'pending',detail:'今天已提交，去页面确认'};
+  // Public JD CHECK_TASK strategy: no actionType; a fresh sign uses itemId "1".
+  const r=await action(t,'sign','submit',{channelId:'16',itemId:'1',assignmentId:t.encryptAssignmentId,ext:{doReceiveRewards:t.canReceiveTimes>0?1:null}},0),n=tjBeans(r);
+  const quantity=n===null?{}:{beanQuantity:n};mark(t.encryptAssignmentId,'sign','submit',{accepted:true,...quantity});
+  try{const after=tjSignin(await query(),date);if(after.done&&after.task.encryptAssignmentId===t.encryptAssignmentId)return {status:'signed_confirmed',...quantity};}catch(_){}
+  return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
+ }
+ async function browse(){
+  const report={rows:[],confirmed:0,submissions:0,beanQuantity:0,rewardResponses:0,stopped:false};
+  try{
+   let list=await query();const initial=list.map(t=>t.encryptAssignmentId);host.log('读取 '+list.length+' 项任务');
+   outer:for(const id of initial){
+    let t=list.find(t=>t.encryptAssignmentId===id);if(!t)continue;const row={title:String(t.assignmentName||'任务').slice(0,80),result:'',confirmed:0};report.rows.push(row);
+    for(let limit=0;limit<31;limit++){
+     guard();t=list.find(t=>t.encryptAssignmentId===id);if(!t){row.result='任务已移除';break;}
+     const plan=tjPlan(t);if(plan.skip){if(!row.result)row.result=plan.skip;break;}
+     if(report.submissions>=30){row.result='达到本轮处理上限';break outer;}
+     const item=plan.claim||plan.item,itemId=item.itemId;
+     if(!plan.claim){
+      if(prior(id,itemId,'start')||prior(id,itemId,'complete')){row.result='已有提交记录，留待App确认';break;}
+      host.log(row.title+'：接取任务');await action(t,itemId,'start',{channelId:'16',itemId,assignmentId:id,ext:{jumpUrl:item.url},actionType:1},1);report.submissions++;
+      host.log('浏览计时 '+plan.wait+' 秒');await host.sleep((plan.wait+1)*1000);guard();
+      host.log('提交完成');await action(t,itemId,'complete',{channelId:'16',itemId,assignmentId:id,actionType:0,ext:{doReceiveRewards:null}},0);
+      list=await query();const after=list.find(x=>x.encryptAssignmentId===id),it=after?.ext?.shoppingActivity?.find(x=>x.itemId===itemId);
+      if(!after||after.completionCnt<=plan.count||it?.status!==2){row.result='已提交，进度待App确认';break;}
+      report.confirmed++;row.confirmed++;row.result='已确认完成 '+row.confirmed+' 次';
+      if(after.canReceiveTimes<=0)break;t=after;
+     }
+     if(prior(id,itemId,'claim')){row.result+='；奖励已有领取记录';break;}
+     host.log('领取奖励');const reward=await action(t,itemId,'claim',{channelId:'16',itemId,assignmentId:id,actionType:0,ext:{doReceiveRewards:1}},0),n=tjBeans(reward);
+     if(n!==null){report.beanQuantity+=n;report.rewardResponses++;row.result=(row.result||'领取已有奖励')+'；接口发放 '+n+' 京豆';}else row.result=(row.result||'领奖已提交')+'；接口未返回京豆数量';
+     list=await query();const after=list.find(x=>x.encryptAssignmentId===id);if(!after||after.canReceiveTimes>=t.canReceiveTimes){row.result+='；领奖状态待确认';break;}
+    }
+   }
+  }catch(e){report.stopped=true;report.message=tjError(e);const row=report.rows.at(-1);if(row&&!row.result)row.result='执行中断：'+report.message;}
+  return report;
+ }
+ return {query,sign,browse};
+}
+function tjError(e){const s=String(e?.message||'');return /^(特价|缺少特价)/.test(s)&&!/[\r\n]|https?:|pt_key|pt_pin/.test(s)?s.slice(0,120):'特价频道执行未完成，未自动重试';}
+
 function jsMedicalCapture(host,request,response,decode){
  const p=jsParams(request),b=JSON.parse(p.body||'{}');if(!jsMedicalScope(p,b))return null;
  const page=jsHeader(request.headers,'x-referer-page')||jsHeader(request.headers,'Referer');
@@ -1143,13 +1268,14 @@ function jsMedicalCapture(host,request,response,decode){
 
 async function jsCapture(host,request,response,parsers,decode){
  if(request?.method!=='POST'||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
- const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
+ const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
  if(!jd&&!finance)return null;
  const p=jd?jsParams(request):{},f=p.functionId,body=jd?JSON.parse(p.body||'{}'):{};
  if(body.craftId===JDI_CRAFT||body.pageId===JDI_PAGE)return jsIndexCapture(host,request,response,decode);
  if(f==='start')return null; // Leave the splash rewrite to its own plugin.
  if([JSM_QUERY,JSM_CLAIM].includes(f))return jsMedicalCapture(host,request,response,decode);
+ if(f===TJ_QUERY&&p.appid==='newtry')return tjCapture(host,request,response,decode);
  let pair=jsPair(jsHeader(request.headers,'Cookie'));
  // These native webviews omit login cookies in the captured H5 request. Use
  // an existing same-account canonical login; signed environments still bind pin.
@@ -1168,11 +1294,8 @@ async function jsCapture(host,request,response,parsers,decode){
  const home=['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'].includes(f)&&(body.craftId==='69ae8eb86a31c802e19f9f8f'||body.pageId==='2H8G6a7JecjqHH3t1ZWSoJjPtziP');
  const jx=['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'].includes(f);
  const plant=['weGameHome','weGameLottery'].includes(f)&&body.linkId==='4HcenxuZM4XiHesOb1HG4g';
- const game=['weGameHome','weGameLottery'].includes(f)&&body.linkId===JS_GAME;
- const delivery=['bean_deliverySign_home','bean_deliverySign_sign','bean_deliverySign_continue_award'].includes(f)&&['2775','5358'].includes(String(body.activityId));
- const health=Object.keys(JS_HEALTH).find(t=>(f==='jdh_bm_getKitTask'?body.m_patch_appKey:body.appKey)===JS_HEALTH[t].appKey&&JS_ALLOWED[t].includes(f));
  const daily=['startup','logConfig','queryPagePopWindow','babelGetGuideTips'].includes(f);
- const accepted=data?.success!==false&&(data?.code===0||data?.code==='0'||data?.code===200||data?.code==='200'||data?.success===true||retail&&String(data?.code)==='1711000'&&data?.msg==='成功'&&!!data?.rs||delivery&&data?.code===undefined&&String(data?.data?.bizCode)==='0');
+ const accepted=data?.success!==false&&(data?.code===0||data?.code==='0'||data?.code===200||data?.code==='200'||data?.success===true||retail&&String(data?.code)==='1711000'&&data?.msg==='成功'&&!!data?.rs);
  if(!finance&&!accepted)return null;
  const changed=[],allowed=new Set(['JD_CHECKIN_TEST_ACCOUNT_V1','JXZY_CHECKIN_ACCOUNT_V1','JD_JR_CHECKIN_ACCOUNT_V1','JD_PLANT_CHECKIN_ACCOUNT_V1','JD_FARM_TASKS_ACCOUNT_V1','JD_HOME_CHECKIN_ACCOUNT_V1']);
  const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token','x-referer-page','request-from']){const v=jsHeader(request.headers,k);if(v)headers[k]=v;}
@@ -1183,28 +1306,13 @@ async function jsCapture(host,request,response,parsers,decode){
    if(!allowed.has(k))throw Error('凭据入口写入范围不符');const value=JSON.parse(v);if(value.pin!==pair.pin)throw Error('账号不一致');
    const old=host.rawRead(k),ok=host.rawWrite(v,k);if(!ok)throw Error('本地记录保存失败');if(old!==v)changed.push(k);return ok;
   }},$notification:{post:()=>{}},$httpClient:{post:()=>{throw Error('凭据入口禁止请求');}},console:{log:()=>{}},$done:()=>{}};
- if(health)jsTarget(health,request);
  if(retail)parsers.retail(context);else if(home)parsers.home(context);else if(jx)parsers.jxzy(context);else if(finance)parsers.finance(context);else if(plant)parsers.plant(context);
  const activityTask=nativeTask&&jsActivityTaskCapture(host,request,response,decode);if(activityTask)changed.push(body.craftId==='69ae8eb86a31c802e19f9f8f'?'JD_HOME_CHECKIN_ACCOUNT_V1':'JXZY_CHECKIN_ACCOUNT_V1');
  const coupon=f==='sh_c_query_task_list'&&jsCouponCapture(host,request,response,decode);if(coupon)changed.push(JC_KEY);
- let farm=null;if(jd&&!activityTask&&!coupon&&!home&&!retail&&!jx&&!plant&&!game&&!delivery&&!health&&!daily)farm=parsers.farm({...host,write:(k,v)=>{if(!allowed.has(k)||v.pin!==pair.pin)throw Error('凭据写入范围不符');host.write(k,v);changed.push(k);},now:()=>Date.now()},normalized,response,decode);
- if(game||delivery){
-  const task=game?'game':'delivery';jsTarget(task,request);
-  const sig=String(p.h5st||'').split(';'),app=game?(f==='weGameHome'?'101aa':'730a6'):(f==='bean_deliverySign_home'?'c1e85':'987dd');
-  if(sig.length===10&&sig[5]==='5.3'&&sig[2]===app&&p['x-api-eid-token']&&headers['User-Agent']){
-   const env=decode(sig[7]);if(![pair.pin,decodeURIComponent(pair.pin)].includes(env.pp.p1))throw Error('签名账号不匹配');
-   const profile=host.read(JS_KEYS.extra,{pin:pair.pin});if(profile.pin!==pair.pin)throw Error('账号不一致');
-   const previous=profile[task],at=host.observedAt||Date.now();
-   if(at>=Number(previous?.capturedAt||0)){
-    // Query captures are preferred; never retain a markStr, reward or h5st as a template.
-    profile[task]={params:{client:p.client,clientVersion:p.clientVersion,'x-api-eid-token':p['x-api-eid-token']},headers,environment:sig[7],capturedAt:at};
-    host.write(JS_KEYS.extra,profile);changed.push(JS_KEYS.extra);
-   }
-  }
- }
+ let farm=null;if(jd&&!activityTask&&!coupon&&!home&&!retail&&!jx&&!plant&&!daily)farm=parsers.farm({...host,write:(k,v)=>{if(!allowed.has(k)||v.pin!==pair.pin)throw Error('凭据写入范围不符');host.write(k,v);changed.push(k);},now:()=>Date.now()},normalized,response,decode);
  // Finance keeps its independent Cookie. Only validated retail/native activity
  // traffic may update the generic JD login pair.
- const validSource=daily||health||game||delivery||farm||changed.some(k=>k!=='JD_JR_CHECKIN_ACCOUNT_V1');
+ const validSource=daily||farm||changed.some(k=>k!=='JD_JR_CHECKIN_ACCOUNT_V1');
  if(validSource&&accepted&&headers['User-Agent']){
   const old=host.read(JS_KEYS.login,null),at=host.observedAt||Date.now();
   if(!old||at>=Number(old.capturedAt||0)){
@@ -1223,7 +1331,7 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
   const read=(k,f)=>{const v=$persistentStore.read(k);if(!v)return f;return JSON.parse(v);};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('本地记录保存失败');};
   try{
-   const names={[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
+   const names={[TJ_KEY]:'特价频道',[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment);
    if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
@@ -1232,5 +1340,5 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={TJ_KEY,tjCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
 

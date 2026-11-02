@@ -110,33 +110,6 @@ function harness(execute, withLogin = true) {
   check(prior.code === 'CACHED' && prior.message.includes('结果待App确认') && interrupted.invoked.length === 0, 'interrupted task is not automatically repeated');
   check((await interrupted.request('task/scratch', 'POST', {session: iSession})).ok === 'yes', 'queue continues after uncertain prior task');
 
-  // Exercise real JS core and real persistent journals with synthetic JD replies.
-  let signed = false;
-  const real = harness(async (context, env) => context.task === 'hs' ? jbExecuteTask(env, context) : {task: context.task, status: 'already_done'});
-  real.env.request = async (task, options) => {
-    real.calls.push({task, options});
-    check(task === 'hs', 'selected core never dispatches a different task');
-    const p = api.jsParams(options);
-    let data;
-    if (p.functionId === 'jdh_bm_getKitTask') data = {code: 0, result: {status: signed ? 4 : 1, id: 'FAKE_TASK', encodeId: 'FAKE_ENCODE'}};
-    else if (p.functionId === 'jdh_msoa_doTaskGw') { signed = true; data = {code: 0, result: {result: {prizeInfovo: [{money: 1}]}}}; }
-    else throw Error('Unexpected synthetic request');
-    return {status: 200, headers: {}, body: JSON.stringify(data)};
-  };
-  const realSession = (await real.request('start')).session;
-  for (const [t] of JS_TASKS.slice(0, 7)) await real.request('task/' + t, 'POST', {session: realSession});
-  const result = real.read(JB_STORE).steps.hs.row;
-  check(result.status === 'signed_confirmed' && result.beanQuantity === 1, 'real health flow signs and rechecks synthetic response');
-  check(real.calls.length === 3, 'one selected core executes exactly query, action and recheck');
-  check(real.read(JS_KEYS.lock).id === 'shortcut:' + realSession, 'core virtual lock never replaces shared bridge lease');
-  const previous = real.calls.length;
-  await real.request('task/hs', 'POST', {session: realSession});
-  check(real.calls.length === previous, 'real core result reused without additional request');
-  check(Object.keys(real.read(JS_KEYS.attempts)).length === 1, 'existing same-day action journal reused');
-  check(real.read(JS_KEYS.last).results.length === 7, 'aggregate results retained rather than replaced by single task');
-  let expiryRejected = false;
-  try { await jbExecuteTask(real.env, {session: real.read(JB_STORE), task: 'hs', operation: 'x', deadline: real.env.now() - 1}); } catch (_) { expiryRejected = true; }
-  check(expiryRejected && real.calls.length === previous, 'expired execution makes no request');
   console.log(checks + ' bridge checks passed; synthetic data only; no JD network calls.');
-  fs.writeFileSync(path.join(__dirname, 'functional-validation.json'), JSON.stringify({checks, jd_network_calls: 0, synthetic_core_requests: real.calls.length}, null, 2));
+  fs.writeFileSync(path.join(__dirname, 'functional-validation.json'), JSON.stringify({checks, jd_network_calls: 0, synthetic_core_requests: 0}, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; });
