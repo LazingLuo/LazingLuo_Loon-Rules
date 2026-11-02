@@ -30,7 +30,7 @@ test('known login error uses fixed readable wording',()=>{assert(explain(query,{
   cb(null,{status:200},JSON.stringify(j));}},$notification:{post:(...x)=>notes.push(x)},$done:()=>{clearTimeout(watchdog);resolve();},console:{log:s=>logs.push(s)},setTimeout:(fn,ms)=>setTimeout(fn,ms===11000?0:ms),clearTimeout};
   try{vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../Scripts/jd-special-activity.js'),'utf8'),context,{timeout:5000});}catch(e){clearTimeout(watchdog);reject(e);}
  });
- assert(logs.some(s=>s.includes('提交完成未通过')&&s.includes('业务码 110')));assert(notes.flat().some(s=>s.includes('浏览时间不足')));assert(!map.has('JD_ACTIVITY_MANUAL_V1.lock'));assert.equal(map.get('JD_SPECIAL_CHANNEL_LAST_V1').confirmed,0);assert.equal(calls.length,4);assert(!logs.join('').includes('FAKE_SECRET'));n++;
- console.log('OK actual Loon entry retains business rejection in its final summary and releases the lock');
+ assert(logs.some(s=>s.includes('已暂停')));assert(notes.flat().some(s=>s.includes('已暂停')));assert(!map.has('JD_ACTIVITY_MANUAL_V1.lock'));assert(!map.has('JD_SPECIAL_CHANNEL_LAST_V1'));assert.equal(calls.length,0);assert(!logs.join('').includes('FAKE_SECRET'));n++;
+ console.log('OK paused Loon entry makes zero requests and changes no task records');
  console.log(n+' diagnostic checks passed; synthetic data, no account requests.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,6 +1,6 @@
 // 京东合并签到 2026-11-02.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-02.1';
+const JS_VERSION='2026-11-02.2';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['special','特价频道签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
@@ -2223,7 +2223,7 @@ function createExtraSignins(host,crypto){
   return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
  }
 
- return {run:task=>{if(task==='medical')return medical();if(task==='special')return createSpecialClient(host,crypto).sign();throw Error('签到项目已移除');}};
+ return {run:task=>{if(task==='medical')return medical();if(task==='special')return {status:'manual_required',detail:'特价频道已暂停，请在App手动操作'};throw Error('签到项目已移除');}};
 }
 function jsError(e){
  const s=String(e?.message||'');const http=/HTTP (\d{1,3})/.exec(s);if(http)return 'HTTP '+http[1];

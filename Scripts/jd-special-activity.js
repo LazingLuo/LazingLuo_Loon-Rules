@@ -102,7 +102,7 @@ function jsTarget(task,o){
  if(task==='special'&&(p.appid!=='newtry'||b.channelId!=='16'||f==='common_do_task'&&(b.actionType!==undefined||b.itemId!=='1'||typeof b.assignmentId!=='string')))throw Error('特价签到参数不符');
 }
 // HAR477 and JD's public ifloor 00041259: channel 16 only.
-const TJ_VERSION='20261102-2',TJ_KEY='JD_SPECIAL_CHANNEL_ACCOUNT_V1',TJ_JOURNAL='JD_SPECIAL_CHANNEL_ATTEMPTS_V1';
+const TJ_VERSION='20261102-3',TJ_KEY='JD_SPECIAL_CHANNEL_ACCOUNT_V1',TJ_JOURNAL='JD_SPECIAL_CHANNEL_ATTEMPTS_V1';
 const TJ_PAGE='https://pro.m.jd.com/mall/active/4WMAPf9VCBdEE8Rva1AVEPH7CBbj/index.html';
 const TJ_QUERY='common_task_list',TJ_DO='common_do_task';
 const TJ_ENCODING='qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT';
@@ -574,32 +574,10 @@ function tjResponseDiagnostic(options,response,body){
 }
 
 if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
- (async()=>{
-  const NAME='特价频道',LOCK='JD_ACTIVITY_MANUAL_V1.lock',start=Date.now(),until=start+540000,runId=start+':'+Math.random();
-  const read=(k,f)=>{const v=$persistentStore.read(k);return v?JSON.parse(v):f;},write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('特价频道记录保存失败');};
-  const log=s=>console.log('['+NAME+'] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};let active=true,owned=false,timer,lastDiagnostic='';
-  const guard=()=>{if(!active||Date.now()+22000>=until||read(LOCK,null)?.runId!==runId)throw Error('特价频道本轮时限或占用已变化');};
-  function request(task,o){
-   guard();if(o.url==='https://cactus.jd.com/request_algo'){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('特价频道签名初始化地址不符');}
-   else{const p=jsParams(o),b=JSON.parse(p.body||'{}');if(![TJ_QUERY,TJ_DO].includes(p.functionId)||o.url!=='https://api.m.jd.com/'||p.appid!=='newtry'||b.channelId!=='16')throw Error('特价频道接口范围不符');}
-   return new Promise((resolve,reject)=>{let settled=false;const stop=(e,r)=>{if(settled)return;settled=true;cancel(t);e?reject(e):resolve(r);};const t=setTimeout(()=>stop(Error('特价频道请求超时')),20000);
-    $httpClient.post({...o,timeout:20000,'auto-cookie':false,'auto-redirect':false,insecure:false},(e,r,b)=>{if(settled)return;if(!active)return stop(Error('特价频道本轮已结束'));if(e)return stop(Error('特价频道网络请求失败'));const diagnostic=tjResponseDiagnostic(o,r,String(b||''));if(diagnostic){lastDiagnostic=diagnostic;log(diagnostic);}stop(null,{status:r?.status,body:String(b||'')});});
-   });
-  }
-  try{
-   const other=read(LOCK,null),signin=read(JS_KEYS.lock,null);if(other?.until>Date.now()||signin?.expires>Date.now())throw Error('特价频道等待当前签到或活动结束后再运行');
-   if(!read(TJ_KEY,null))throw Error('缺少特价频道凭据，请打开特价任务列表');
-   write(LOCK,{runId,until});owned=true;
-   const host={read,write,guard,log,day:jsDay,setTimeout,clearTimeout:cancel,request,requestAlgo:o=>request('algorithm',o),progress:log,sleep:ms=>new Promise((resolve,reject)=>{guard();if(ms<0||ms>65000)return reject(Error('特价频道计时超出范围'));setTimeout(()=>{try{guard();resolve();}catch(e){reject(e);}},ms);})};
-   const crypto=createSigninCrypto(host);log('版本 '+TJ_VERSION+'；仅处理普通计时浏览与领取，签到由合并签到处理');
-   const r=await Promise.race([createSpecialClient(host,crypto).browse(),new Promise((_,reject)=>{timer=setTimeout(()=>{active=false;reject(Error('特价频道本轮超时'));},540000);})]);
-   if(r.stopped&&lastDiagnostic)r.message=lastDiagnostic;
-   const summary='已确认完成 '+r.confirmed+' 次；接取 '+r.submissions+' 次。\n'+(r.rewardResponses?'接口明确发放 '+r.beanQuantity+' 京豆':'接口未返回京豆数量');
-   log((r.stopped?'已停止：'+r.message:'执行结束')+'\n'+r.rows.map(x=>x.title+'：'+x.result).join('\n')+'\n'+summary);write('JD_SPECIAL_CHANNEL_LAST_V1',{...r,at:Date.now()});
-   $notification.post(NAME,r.stopped?'执行停止':'执行完成',summary+(r.stopped?'\n'+r.message:''));
-  }catch(e){const message=tjError(e);log(message);$notification.post(NAME,'执行停止',message);}
-  finally{active=false;if(timer)cancel(timer);if(owned&&read(LOCK,null)?.runId===runId)$persistentStore.write(undefined,LOCK);$done({});}
- })();
+ const text='特价频道脚本已暂停，请在App手动操作。';
+ console.log('[特价频道] '+text);
+ try{$notification.post('特价频道','已暂停',text);}catch(_){}
+ $done({});
 }
 if(typeof module!=='undefined')module.exports={TJ_KEY,TJ_QUERY,TJ_DO,TJ_ENCODING,TJ_PAGE,tjList,tjSignin,tjPlan,tjBeans,tjCapture,createSpecialClient};
 

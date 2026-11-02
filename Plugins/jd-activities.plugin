@@ -1,5 +1,5 @@
 #!name = 京东活动（手动）
-#!desc = 京喜自营、东东农场、领券中心、家电家居、京东指数、特价频道。各一个手动入口，无定时。农场不自动浇水；领券中心使用jinquan3入口，不自动砸蛋。
+#!desc = 京喜自营、东东农场、领券中心、家电家居、京东指数；特价频道入口暂时停用。各一个手动入口，无定时。农场不自动浇水；领券中心使用jinquan3入口，不自动砸蛋。
 #!loon_version = 3.5.1(983)
 #!date = 2026-11-02
 
@@ -16,7 +16,7 @@ generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-
 
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-index-activity.js?v=20261030-2") with tag="京东指数", timeout=600
 
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-special-activity.js?v=20261102-2") with tag="特价频道", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-special-activity.js?v=20261102-3") with tag="特价频道", timeout=600
 
 [Mitm]
 hostname = api.m.jd.com, ms.jr.jd.com

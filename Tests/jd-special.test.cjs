@@ -93,7 +93,7 @@ let count=0;async function test(n,f){await f();count++;console.log('OK '+n);}
    else{const p=api.jsParams(o);assert.equal(p.functionId,QUERY);assert.equal(p.h5st.split(';')[9],ENC);assert.equal(o['auto-cookie'],false);assert.equal(o['auto-redirect'],false);j=list([signTask(true)]);}
    cb(null,{status:200},JSON.stringify(j));}},$notification:{post:(...x)=>notes.push(x)},$done:()=>{done++;clearTimeout(watchdog);resolve();},console:{log:()=>{}},setTimeout,clearTimeout};
    try{vm.runInNewContext(fs.readFileSync(path.join(root,'jd-special-activity.js'),'utf8'),context,{timeout:5000});}catch(e){clearTimeout(watchdog);reject(e);}
-  });assert.equal(done,1);assert.equal(notes.length,1);assert(calls.some(o=>o.url!=='https://cactus.jd.com/request_algo'&&api.jsParams(o).functionId===QUERY));assert(!h.read('JD_ACTIVITY_MANUAL_V1.lock'));assert(h.read('JD_SPECIAL_CHANNEL_LAST_V1'));
+  });assert.equal(done,1);assert.equal(notes.length,1);assert.equal(calls.length,0);assert(notes.flat().some(s=>s.includes('已暂停')));assert(!h.read('JD_ACTIVITY_MANUAL_V1.lock'));assert(!h.read('JD_SPECIAL_CHANNEL_LAST_V1'));
  });
  console.log(count+' special-channel checks passed; no live account requests.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
