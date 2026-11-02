@@ -102,7 +102,7 @@ function jsTarget(task,o){
  if(task==='special'&&(p.appid!=='newtry'||b.channelId!=='16'||f==='common_do_task'&&(b.actionType!==undefined||b.itemId!=='1'||typeof b.assignmentId!=='string')))throw Error('特价签到参数不符');
 }
 // HAR477 and JD's public ifloor 00041259: channel 16 only.
-const TJ_VERSION='20261102-1',TJ_KEY='JD_SPECIAL_CHANNEL_ACCOUNT_V1',TJ_JOURNAL='JD_SPECIAL_CHANNEL_ATTEMPTS_V1';
+const TJ_VERSION='20261102-2',TJ_KEY='JD_SPECIAL_CHANNEL_ACCOUNT_V1',TJ_JOURNAL='JD_SPECIAL_CHANNEL_ATTEMPTS_V1';
 const TJ_PAGE='https://pro.m.jd.com/mall/active/4WMAPf9VCBdEE8Rva1AVEPH7CBbj/index.html';
 const TJ_QUERY='common_task_list',TJ_DO='common_do_task';
 const TJ_ENCODING='qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT';
@@ -544,17 +544,46 @@ async function farmOnlineSign(app,profile,env,input){
 return {hash:farmSha256,decodeEnvironment:farmDecodeEnvironment,signOnline:farmOnlineSign};
 }
 
+// Retain only stage, numeric/short symbolic codes and fixed descriptions.
+// Never echo a raw response, URL, task identifier or arbitrary server message.
+function tjResponseDiagnostic(options,response,body){
+ const status=Number(response?.status)||0;
+ let stage='请求',p,b;
+ if(options.url==='https://cactus.jd.com/request_algo')stage='签名初始化';
+ else{try{p=jsParams(options);b=JSON.parse(p.body||'{}');stage=p.functionId===TJ_QUERY?'读取列表':b.actionType===1?'接取任务':b.ext?.doReceiveRewards===1?'领取奖励':'提交完成';}catch(_){}}
+ const prefix='特价频道'+stage;
+ if(status!==200)return prefix+'失败（HTTP '+status+'）';
+ if(stage==='签名初始化')return '';
+ let j;try{j=JSON.parse(body);}catch(_){return prefix+'失败：响应无法读取';}
+ const code=j?.code,biz=j?.data?.bizCode,result=j?.data?.result;
+ const expected=p?.functionId===TJ_QUERY?null:b?.actionType===1?'1':'0',sub=result?.assignmentResult?.subCode;
+ const structure=result&&typeof result==='object'&&!Array.isArray(result)&&(expected===null?Array.isArray(result.taskInfo?.taskList):String(sub)===expected);
+ if(String(code)==='0'&&String(biz)==='0'&&structure)return '';
+ const safe=v=>(typeof v==='string'||typeof v==='number')&&/^[A-Za-z0-9_-]{1,24}$/.test(String(v))?String(v):null;
+ const codes=[['接口码',code],['业务码',biz],['步骤码',sub]].filter(([,v])=>safe(v)!==null).map(([k,v])=>k+' '+safe(v));
+ const message=String(j?.data?.bizMsg||result?.assignmentResult?.msg||j?.message||'');
+ let reason='服务器拒绝本次请求';
+ if(String(biz)==='110'||/浏览时间不足/.test(message))reason='浏览时间不足';
+ else if(/任务(?:已经|已)完成|重复领取/.test(message))reason='任务已完成或奖励已领取';
+ else if(/未登录|登录失效|请.*登录/.test(message))reason='登录状态失效';
+ else if(/任务领取失败/.test(message))reason='任务领取失败';
+ else if(/未开始/.test(message))reason='活动尚未开始';
+ else if(/上限/.test(message))reason='已达到本次上限';
+ else if(String(code)==='0'&&String(biz)==='0'&&!structure)reason='返回步骤或结构与预期不同';
+ return prefix+'未通过'+(codes.length?'（'+codes.join('，')+'）':'')+'：'+reason;
+}
+
 if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  (async()=>{
   const NAME='特价频道',LOCK='JD_ACTIVITY_MANUAL_V1.lock',start=Date.now(),until=start+540000,runId=start+':'+Math.random();
   const read=(k,f)=>{const v=$persistentStore.read(k);return v?JSON.parse(v):f;},write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('特价频道记录保存失败');};
-  const log=s=>console.log('['+NAME+'] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};let active=true,owned=false,timer;
+  const log=s=>console.log('['+NAME+'] '+s),cancel=typeof clearTimeout==='function'?clearTimeout:()=>{};let active=true,owned=false,timer,lastDiagnostic='';
   const guard=()=>{if(!active||Date.now()+22000>=until||read(LOCK,null)?.runId!==runId)throw Error('特价频道本轮时限或占用已变化');};
   function request(task,o){
    guard();if(o.url==='https://cactus.jd.com/request_algo'){if(Object.keys(o.headers||{}).some(k=>/cookie|authorization/i.test(k)))throw Error('特价频道签名初始化地址不符');}
    else{const p=jsParams(o),b=JSON.parse(p.body||'{}');if(![TJ_QUERY,TJ_DO].includes(p.functionId)||o.url!=='https://api.m.jd.com/'||p.appid!=='newtry'||b.channelId!=='16')throw Error('特价频道接口范围不符');}
    return new Promise((resolve,reject)=>{let settled=false;const stop=(e,r)=>{if(settled)return;settled=true;cancel(t);e?reject(e):resolve(r);};const t=setTimeout(()=>stop(Error('特价频道请求超时')),20000);
-    $httpClient.post({...o,timeout:20000,'auto-cookie':false,'auto-redirect':false,insecure:false},(e,r,b)=>{if(settled)return;if(!active)return stop(Error('特价频道本轮已结束'));e?stop(Error('特价频道网络请求失败')):stop(null,{status:r?.status,body:String(b||'')});});
+    $httpClient.post({...o,timeout:20000,'auto-cookie':false,'auto-redirect':false,insecure:false},(e,r,b)=>{if(settled)return;if(!active)return stop(Error('特价频道本轮已结束'));if(e)return stop(Error('特价频道网络请求失败'));const diagnostic=tjResponseDiagnostic(o,r,String(b||''));if(diagnostic){lastDiagnostic=diagnostic;log(diagnostic);}stop(null,{status:r?.status,body:String(b||'')});});
    });
   }
   try{
@@ -564,6 +593,7 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    const host={read,write,guard,log,day:jsDay,setTimeout,clearTimeout:cancel,request,requestAlgo:o=>request('algorithm',o),progress:log,sleep:ms=>new Promise((resolve,reject)=>{guard();if(ms<0||ms>65000)return reject(Error('特价频道计时超出范围'));setTimeout(()=>{try{guard();resolve();}catch(e){reject(e);}},ms);})};
    const crypto=createSigninCrypto(host);log('版本 '+TJ_VERSION+'；仅处理普通计时浏览与领取，签到由合并签到处理');
    const r=await Promise.race([createSpecialClient(host,crypto).browse(),new Promise((_,reject)=>{timer=setTimeout(()=>{active=false;reject(Error('特价频道本轮超时'));},540000);})]);
+   if(r.stopped&&lastDiagnostic)r.message=lastDiagnostic;
    const summary='已确认完成 '+r.confirmed+' 次；接取 '+r.submissions+' 次。\n'+(r.rewardResponses?'接口明确发放 '+r.beanQuantity+' 京豆':'接口未返回京豆数量');
    log((r.stopped?'已停止：'+r.message:'执行结束')+'\n'+r.rows.map(x=>x.title+'：'+x.result).join('\n')+'\n'+summary);write('JD_SPECIAL_CHANNEL_LAST_V1',{...r,at:Date.now()});
    $notification.post(NAME,r.stopped?'执行停止':'执行完成',summary+(r.stopped?'\n'+r.message:''));
@@ -572,3 +602,5 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  })();
 }
 if(typeof module!=='undefined')module.exports={TJ_KEY,TJ_QUERY,TJ_DO,TJ_ENCODING,TJ_PAGE,tjList,tjSignin,tjPlan,tjBeans,tjCapture,createSpecialClient};
+
+if(typeof module!=='undefined')module.exports.tjResponseDiagnostic=tjResponseDiagnostic;
