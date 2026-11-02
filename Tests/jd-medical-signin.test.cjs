@@ -27,7 +27,7 @@ const run=h=>api.createExtraSignins(h,h.crypto).run('medical');
 const capture=(h,r,j)=>cap.jsCapture(h,r,reply(j),{},cap.farmDecodeEnvironment);
 let total=0;async function test(name,f){await f();total++;console.log('OK '+name);}
 (async()=>{
- await test('medical is separate from both existing kit sign-ins',()=>{assert.deepEqual(api.JS_TASKS.slice(-2,-1),[['medical','看病买药签到']]);assert.equal(api.JS_TASKS.length,9);assert(!api.JS_TASKS.some(x=>['hs','ys','delivery','game'].includes(x[0])));assert(!api.JS_TASKS.some(x=>x[0]==='plant'));});
+ await test('medical is separate from both existing kit sign-ins',()=>{assert.deepEqual(api.JS_TASKS.slice(-1),[['medical','看病买药签到']]);assert.equal(api.JS_TASKS.length,8);assert(!api.JS_TASKS.some(x=>['hs','ys','delivery','game'].includes(x[0])));assert(!api.JS_TASKS.some(x=>x[0]==='plant'));});
  await test('already signed today makes one query and no claim',async()=>{const h=host();h.reply=()=>reply(page(true));const r=await run(h);assert.equal(r.status,'already_done');assert.equal(r.beanQuantity,undefined);assert.equal(h.calls.length,1);});
  await test('fresh ID, exact claim scope, fresh Cookie and explicit one-bean reward',async()=>{
   const h=host();let done=false;h.reply=o=>{const p=api.jsParams(o),b=JSON.parse(p.body);assert.equal(p.appid,'jdh-middle');assert.equal(p.h5st.split(';')[2],'4b818');assert(o.headers.Cookie.includes('FRESH'));assert(o.headers.Cookie.includes('page=kept'));assert(!o.headers.Cookie.includes('FAKE_SECRET'));
@@ -72,7 +72,7 @@ let total=0;async function test(name,f){await f();total++;console.log('OK '+name
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('capture timeout')),1000);const context={$request:req(),$response:reply(page()),$persistentStore:{read:h.rawRead,write:h.rawWrite},$script:{startTime:new Date().toISOString()},$notification:{post:(...x)=>notes.push(x)},$done:x=>{result=x;clearTimeout(timer);resolve();},console:{log:()=>{}},setTimeout,clearTimeout};try{vm.runInNewContext(fs.readFileSync(path.join(root,name),'utf8'),context,{timeout:5000});}catch(e){clearTimeout(timer);reject(e);}});
   assert(h.read(KEY));assert(!result?.body);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!JSON.stringify(notes).includes('FAKE_DEVICE'));
  });
- await test('activity plugin keeps retired medical and finance entries removed',()=>{const p=fs.readFileSync(path.join(__dirname,'../Plugins/jd-activities.plugin'),'utf8');assert(!/jd-(?:medical-activity|jr-beans)/.test(p));assert.equal((p.match(/^generic /gm)||[]).length,6);});
+ await test('activity plugin keeps retired medical and finance entries removed',()=>{const p=fs.readFileSync(path.join(__dirname,'../Plugins/jd-activities.plugin'),'utf8');assert(!/jd-(?:medical-activity|jr-beans)/.test(p));assert.equal((p.match(/^generic /gm)||[]).length,5);});
  await test('combined runner executes the new task inside its existing timeout and lock scope',async()=>{
   const h=host();Object.assign(h,{now:()=>Date.now(),random:()=>0.5,sleep:async()=>{},setTimeout,clearTimeout});let done=false;
   h.reply=o=>{const p=api.jsParams(o);if(p.functionId==='jdh_bm_getKitTask')return reply({code:0,result:{status:4}});if(p.functionId===QUERY)return reply(page(done));assert.equal(p.functionId,CLAIM);done=true;return reply(claim(1));};
