@@ -1,0 +1,19 @@
+#!name = 抖音广告拦截测试与通知
+#!desc = 自用测试：A拒绝开屏接口，B广告接口返回空JSON。两类分别通知并统计；可分别开关。需信任MitM证书。
+#!author = LazingLuo；接口参考 snail007、Minis
+#!loon_version = 3.5.1(983)
+#!date = 2026-11-03
+
+[Argument]
+screen = switch,true,tag=A 开屏接口,desc=拒绝screen/ad请求并记录命中
+ad = switch,true,tag=B 广告接口,desc=api/ad及zlink广告接口返回空JSON并记录命中
+notify = switch,true,tag=命中通知,desc=两类请求每次命中分别通知，关闭后仍保存统计
+
+[Script]
+request if ${url} ~= /^https?:\/\/aweme\.snssdk\.com(?::(?:80|443))?\/aweme\/v1\/screen\/ad\// then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/douyin-ad-probe.js?v=20261103-1", {${screen}, ${ad}, ${notify}}) with tag="抖音_A开屏接口", enable=${screen}, timeout=5
+request if ${url} ~= /^https:\/\/(?:aweme\.snssdk\.com|api[0-9]*-normal-[a-z0-9-]+\.amemv\.com)(?::443)?\/api\/ad\// then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/douyin-ad-probe.js?v=20261103-1", {${screen}, ${ad}, ${notify}}) with tag="抖音_B广告接口", enable=${ad}, timeout=5
+request if ${url} ~= /^https:\/\/zlink\.ugsdk\.cn(?::443)?\/ad\// then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/douyin-ad-probe.js?v=20261103-1", {${screen}, ${ad}, ${notify}}) with tag="抖音_B广告跳转接口", enable=${ad}, timeout=5
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/douyin-ad-probe.js?v=20261103-1", "stats") with tag="抖音广告命中统计", timeout=5
+
+[Mitm]
+hostname = aweme.snssdk.com, api*-normal-*.amemv.com, zlink.ugsdk.cn
