@@ -1,6 +1,6 @@
-// 京东合并签到 2026-11-03.2; fixed check-in scope, local credentials.
+// 京东合并签到 2026-11-03.3; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-03.2';
+const JS_VERSION='2026-11-03.3';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到'],['used','特价二手签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
@@ -73,7 +73,7 @@ function jsSettings(value){
  return {gap,automatic:true,autoEnabled:p.autoEnabled,startDelaySeconds};
 }
 
-function jsProfiles(read){const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null),jx=read('JXZY_CHECKIN_ACCOUNT_V1',null),plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null),finance=read('JD_JR_CHECKIN_ACCOUNT_V1',null);return {retail,jx,plant,finance};}
+function jsProfiles(read){const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null),jx=read('JXZY_CHECKIN_ACCOUNT_V1',null),finance=read('JD_JR_CHECKIN_ACCOUNT_V1',null);return {retail,jx,finance};}
 function jsLogin(read){
  const profiles=jsProfiles(read),bound=read(JS_KEYS.bound,null),candidates=[];
  const add=(p,headers,time)=>{const pair=jsPair(jsHeader(headers,'cookie'));if(pair&&(!p||p===pair.pin))candidates.push({...pair,headers,time:Number(time)||0});};
@@ -81,8 +81,7 @@ function jsLogin(read){
  for(const c of Object.values(JB_CONFIG)){const p=read(c.key,null);if(p)add(p.pin,p.headers,p.capturedAt);}
  for(const p of Object.values(profiles.retail?.modes||{}))add(profiles.retail.pin,p.headers,p.loginUpdatedAt||p.capturedAt);
  if(profiles.jx)add(profiles.jx.pin,profiles.jx.headers,profiles.jx.loginUpdatedAt||profiles.jx.capturedAt);
- if(profiles.plant?.query)add(profiles.plant.pin,profiles.plant.query.headers,profiles.plant.query.loginUpdatedAt||profiles.plant.query.capturedAt);
- const pin=bound?.pin||read('QL_BRIDGE_ACCOUNT_V1',null)?.pin||profiles.retail?.pin||profiles.jx?.pin||profiles.plant?.pin||profiles.finance?.pin||candidates[0]?.pin;
+ const pin=bound?.pin||read('QL_BRIDGE_ACCOUNT_V1',null)?.pin||profiles.retail?.pin||profiles.jx?.pin||profiles.finance?.pin||candidates[0]?.pin;
  // Once the consolidated native capture exists, its observed timestamp and the
  // compatible generic login store are authoritative. Legacy captures timestamp
  // response handling, which could otherwise make a delayed old response win.

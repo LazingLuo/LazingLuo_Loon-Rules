@@ -26,7 +26,7 @@ const fakeCrypto={hash:s=>crypto.createHash('sha256').update(s).digest('hex'),de
 const extra=h=>api.createExtraSignins(h,fakeCrypto);
 let total=0;
 async function test(name,fn){await fn();total++;console.log('OK '+name);}
-function parsers(){return {retail:cap.runRetailCapture,jxzy:cap.runJxCapture,home:cap.runHomeCapture,finance:cap.runFinanceCapture,plant:cap.runPlantCapture,farm:cap.farmCapture};}
+function parsers(){return {retail:cap.runRetailCapture,jxzy:cap.runJxCapture,home:cap.runHomeCapture,finance:cap.runFinanceCapture,farm:cap.farmCapture};}
 function request(f,b,params={}){return {method:'POST',url:'https://api.m.jd.com/api?functionId='+f,headers:headers(),body:form({functionId:f,body:JSON.stringify(b),...params})};}
 const capture=(h,req,j)=>cap.jsCapture(h,req,response(j),parsers(),cap.farmDecodeEnvironment);
 function basicLegacy(h){

@@ -1,4 +1,4 @@
-// Shared capture 20261103-5: own sign-ins and activities only.
+// Shared capture 20261103-6: own sign-ins and activities only.
 // Shared credential capture 20261101-1: medical daily sign-in only.
 // Shared credential capture 20261030-1; retired finance/medical activities removed.
 // Medical daily capture integration 20261029-5.
@@ -28,7 +28,6 @@ function actSharedMaterial(read,decode){
  for(const g of Object.values(farm?.scopes||{}))for(const t of Object.values(g.templates||{}))add(farm.pin,t.headers,t.at,t.signing||g.signing,t.params,'农场');
  const jx=read('JXZY_CHECKIN_ACCOUNT_V1',null);if(jx)add(jx.pin,jx.headers,jx.loginUpdatedAt||jx.capturedAt,jx.signing,{...jx.query?.params,'x-api-eid-token':jx.signing?.eidToken},'京喜');
  const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null);for(const t of Object.values(retail?.modes||{}))add(retail.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'签到');
- const plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null);for(const t of [plant?.query,plant?.claim])if(t)add(plant.pin,t.headers,t.loginUpdatedAt||t.capturedAt,{environment:t.referenceEnvironmentEncoded},t.params,'种豆');
  const pin=bound?.pin||canonical.filter(Boolean).sort((a,b)=>b.at-a.at)[0]?.pin||rows.sort((a,b)=>b.at-a.at)[0]?.pin;
  const same=rows.filter(x=>x.pin===pin).sort((a,b)=>b.at-a.at);
  const login=canonical.filter(x=>x?.pin===pin).sort((a,b)=>b.at-a.at)[0]||same[0];
@@ -131,7 +130,7 @@ const jsEncode=p=>Object.keys(p).map(k=>encodeURIComponent(k)+'='+encodeURICompo
 function jsParams(request){const url=String(request.url||''),query=url.includes('?')?jsForm(url.split('?')[1].split('#')[0]):{},body=jsForm(request.body),p={...query,...body};for(const k of Object.keys(query))if(body[k]!==undefined&&query[k]!==body[k])throw Error('请求参数不一致');return p;}
 function jsEndpoint(url){const s=String(url||'').split('?')[0];if(!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(s))throw Error('接口地址不符');return s;}
 function jsSettings(value){let p=value;if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){throw Error('等待参数格式错误');}}if(!p||typeof p!=='object'||Array.isArray(p))throw Error('请从签到插件运行');const gap=Number(p.gapSeconds===undefined?15:p.gapSeconds);if(!Number.isInteger(gap)||gap<0||gap>120||gap>0&&gap<5)throw Error('随机等待须填0或5–120秒');return {gap};}
-function jsProfiles(read){const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null),jx=read('JXZY_CHECKIN_ACCOUNT_V1',null),plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null),finance=read('JD_JR_CHECKIN_ACCOUNT_V1',null);return {retail,jx,plant,finance};}
+function jsProfiles(read){const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null),jx=read('JXZY_CHECKIN_ACCOUNT_V1',null),finance=read('JD_JR_CHECKIN_ACCOUNT_V1',null);return {retail,jx,finance};}
 function jsLogin(read){
  const profiles=jsProfiles(read),bound=read(JS_KEYS.bound,null),candidates=[];
  const add=(p,headers,time)=>{const pair=jsPair(jsHeader(headers,'cookie'));if(pair&&(!p||p===pair.pin))candidates.push({...pair,headers,time:Number(time)||0});};
@@ -139,8 +138,7 @@ function jsLogin(read){
  for(const c of Object.values(JB_CONFIG)){const p=read(c.key,null);if(p)add(p.pin,p.headers,p.capturedAt);}
  for(const p of Object.values(profiles.retail?.modes||{}))add(profiles.retail.pin,p.headers,p.loginUpdatedAt||p.capturedAt);
  if(profiles.jx)add(profiles.jx.pin,profiles.jx.headers,profiles.jx.loginUpdatedAt||profiles.jx.capturedAt);
- if(profiles.plant?.query)add(profiles.plant.pin,profiles.plant.query.headers,profiles.plant.query.loginUpdatedAt||profiles.plant.query.capturedAt);
- const pin=bound?.pin||read('QL_BRIDGE_ACCOUNT_V1',null)?.pin||profiles.retail?.pin||profiles.jx?.pin||profiles.plant?.pin||profiles.finance?.pin||candidates[0]?.pin;
+ const pin=bound?.pin||read('QL_BRIDGE_ACCOUNT_V1',null)?.pin||profiles.retail?.pin||profiles.jx?.pin||profiles.finance?.pin||candidates[0]?.pin;
  // Once the consolidated native capture exists, its observed timestamp and the
  // compatible generic login store are authoritative. Legacy captures timestamp
  // response handling, which could otherwise make a delayed old response win.
@@ -152,7 +150,7 @@ function jsLogin(read){
  return {pin,login,profiles};
 }
 function jsLegacyAccount(task,pin,read,login){
- const key=task==='home'?'JD_HOME_CHECKIN_ACCOUNT_V1':task==='jxzy'?'JXZY_CHECKIN_ACCOUNT_V1':task==='plant'?'JD_PLANT_CHECKIN_ACCOUNT_V1':task==='finance'?'JD_JR_CHECKIN_ACCOUNT_V1':'JD_CHECKIN_TEST_ACCOUNT_V1';
+ const key=task==='home'?'JD_HOME_CHECKIN_ACCOUNT_V1':task==='jxzy'?'JXZY_CHECKIN_ACCOUNT_V1':task==='finance'?'JD_JR_CHECKIN_ACCOUNT_V1':'JD_CHECKIN_TEST_ACCOUNT_V1';
  const p=read(key,null);if(!p)return {key,value:null};if(p.pin!==pin)throw Error('签到资料属于其他账号');const value=jsClone(p);
  if(login&&task!=='finance'){
   const apply=t=>{if(t?.headers){const name=Object.keys(t.headers).find(k=>k.toLowerCase()==='cookie');if(name){t.headers[name]=jsMergeCookie(t.headers[name],login);t.loginUpdatedAt=login.time;}}};
@@ -774,187 +772,6 @@ function jsActivityTaskCapture(host,req,res,decode){
  delete p.h5st;delete p.t;delete b.time;delete b.signStr;p.functionId='jxzy_active_querySign';p.body=JSON.stringify(b);
  host.write(key,{...old,pin:pair.pin,headers,query:{endpoint:'https://api.m.jd.com/api',params:p},capturedAt:at,updatedAt:at});return true;
 }
-function runPlantCapture(context){
-const {$argument,$persistentStore,$notification,$httpClient,$done,$request,$response,$script,console,setTimeout,clearTimeout}=context;
-const module=undefined;
-// Independent plant-bean daily gift capture. Credentials stay in Loon.
-const JDC_KEY = 'JD_CHECKIN_TEST_ACCOUNT_V1';
-function jdcRead(key, fallback) {
-  const raw = $persistentStore.read(key);
-  if (!raw) return fallback;
-  try { return JSON.parse(raw); } catch (_) { throw new Error('本地数据损坏，请重新获取凭据'); }
-}
-function jdcWrite(key, value) {
-  if (!$persistentStore.write(JSON.stringify(value), key)) throw new Error('本地保存失败');
-}
-function jdcParseForm(text) {
-  const result = {};
-  String(text || '').split('&').forEach(pair => {
-    if (!pair) return;
-    const i = pair.indexOf('=');
-    const decode = s => decodeURIComponent(s.replace(/\+/g, ' '));
-    result[decode(i < 0 ? pair : pair.slice(0, i))] = decode(i < 0 ? '' : pair.slice(i + 1));
-  });
-  return result;
-}
-function jdcForm(params) {
-  return Object.keys(params).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');
-}
-function jdcHeader(headers, name) {
-  const k = Object.keys(headers || {}).find(k => k.toLowerCase() === name.toLowerCase());
-  return k ? headers[k] : '';
-}
-function jdcCookie(cookie, name) {
-  const m = String(cookie).match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
-  return m ? m[1] : '';
-}
-function jdcDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
-function jdcIsScratchQuery(params) {
-  // This endpoint also serves ordinary sign-in. Only capture the observed
-  // scratch-page task scope; commonScene=secKillChannel selects the ordinary task.
-  try {
-    const body=JSON.parse(params.body||'{}');
-    const types=typeof body.taskType==='string'?body.taskType.split('_'):[];
-    return body.scene==='jdInteractTask'&&types.includes('beanDailySign')&&types.includes('beanDailyPlus')&&
-      (body.commonScene===undefined||body.commonScene==='');
-  } catch (_) {return false;}
-}
-function jdcTask(data, mode) {
-  const list = mode === 'daily' ? data && data.data && data.data.signComponentInfoResult
-    : data && data.rs && data.rs.beanTask && data.rs.beanTask.taskList;
-  if (!Array.isArray(list)) throw new Error('任务列表结构不符，未提交领取');
-  const tasks = list.filter(t => Number(t.assignmentType) === 5 && t.ext && t.ext.taskType === 'beanDailySign' && t.encryptAssignmentId);
-  if (tasks.length !== 1) throw new Error('每日任务无法唯一识别，未提交领取');
-  return tasks[0];
-}
-function jdcLabel(mode) { return mode === 'query_compare' ? '环境对比查询（不领取）' : mode === 'diagnose' ? '本地签名诊断' : mode === 'daily' ? '普通签到' : mode === 'blindbox' ? 'PLUS每日盲盒' : '每日刮卡'; }
-function jdcEndpoint(url) {
-  const m = String(url).match(/^https:\/\/api\.m\.jd\.com\/(api|client\.action)(?:\?|$)/);
-  if (!m) throw new Error('接口地址不符');
-  return 'https://api.m.jd.com/' + m[1];
-}
-
-// The observed scratch query uses a business success code different from daily sign-in.
-function jdcQueryAccepted(data, mode) {
-  const code = String(data && data.code);
-  if (code === '0') return true;
-  return mode === 'scratch' && code === '1711000' && data.msg === '成功' &&
-    !!(data.rs && data.rs.beanTask && Array.isArray(data.rs.beanTask.taskList));
-}
-
-function jdcBoxAccepted(data) {
-  return !!data && String(data.code)==='1711000' && data.msg==='成功' && !!data.rs;
-}
-function jdcBoxToday(data) {
-  if(!jdcBoxAccepted(data)||!Array.isArray(data.rs.sendBenefitList))
-    throw new Error('盲盒奖励记录不完整，未继续开盒');
-  return data.rs.sendBenefitList.filter(x=>String(x.prizeTime||'').slice(0,10)===jdcDay());
-}
-const Z_KEY='JD_PLANT_CHECKIN_ACCOUNT_V1';
-const Z_LINK='4HcenxuZM4XiHesOb1HG4g';
-function zAccepted(data){return !!data&&data.success===true&&String(data.code)==='0'&&!!data.data;}
-function zMessage(data){return String(data.displayMsg||data.msg||data.message||data.errMsg||'无说明').replace(/https?:\/\/\S+/g,'[链接]').slice(0,160);}
-function zStatusDetails(data){
- const payload=data&&data.data,main=payload&&payload.signMainVo,list=payload&&payload.signListVo;
- const number=v=>v!==null&&v!==undefined&&v!==''&&Number.isInteger(Number(v))&&Number(v)>=0&&Number(v)<=10000?Number(v):null;
- const task=main&&main.beforeTaskVo;
- return {mainPresent:!!main,listPresent:Array.isArray(list),currentStatus:number(main&&main.currentStatus),signDays:number(main&&main.signDays),
-  beforeTask:task?{type:task.taskType==='BROWSE_RTB'?'BROWSE_RTB':'other',finished:typeof task.taskFinished==='boolean'?task.taskFinished:null,seconds:number(task.timeLimitPeriod)}:null,
-  signList:Array.isArray(list)?list.slice(0,7).map(x=>({date:typeof x.signDate==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x.signDate)?x.signDate:null,status:number(x.status),todayFlag:number(x.todayFlag)})):[]};
-}
-function zSummary(result){
- if(/签名环境版本不兼容|签名环境结构不完整/.test(result.message||''))return '失败，签名环境不兼容，请查看日志中的版本或结构说明。';
- if(result.status==='manual_required')return result.message;
- if(['signed_confirmed','already_done'].includes(result.status)){
-  let text=result.status==='already_done'?'今天已领取':result.beanQuantity>0?'获得 '+result.beanQuantity+' 京豆':'已领取，奖励见活动页';
-  if(result.continuousDays>0)text+='，连续 '+result.continuousDays+' 天';
-  return '成功，'+text+'。';
- }
- const text=[result.message,result.queryMessage,result.claimMessage].join(' ');
- return '失败，'+(/未登[录陆]|登录|凭据|账号.*匹配|原始签名环境/.test(text)?'凭据可能失效或不完整，请重新获取种豆凭据。':'请查看执行日志或最近结果。');
-}
-function zStatus(data){
- if(!zAccepted(data))throw new Error('签到状态查询失败：'+String(data&&data.code)+' '+(data?zMessage(data):'无说明'));
- const main=data.data.signMainVo,list=data.data.signListVo;
- if(!main||!Array.isArray(list))throw new Error('签到状态结构变化，未继续领取');
- const today=list.find(x=>x.signDate===jdcDay()&&Number(x.status)===3);
- if(today)return {done:true,main};
- const task=main.beforeTaskVo;
- if(Number(main.currentStatus)===0&&task&&task.taskType==='BROWSE_RTB'&&task.taskFinished===false){
-  const seconds=Number(task.timeLimitPeriod);
-  const duration=Number.isInteger(seconds)&&seconds>0&&seconds<=3600?seconds+'秒':'';
-  throw Object.assign(new Error('请先到种豆活动页手动完成浏览页面'+duration+'，再执行签到。'),{status:'manual_required'});
- }
- if(Number(main.currentStatus)!==1)throw new Error('今日可领取状态不明确（状态值'+String(zStatusDetails(data).currentStatus)+'），未继续领取');
- return {done:false,main};
-}
-// Only this plugin's existing same-account login fields are refreshed.
-function zSyncLogin(profile,cookie,source,observedAt){
- const pin=jdcCookie(cookie,'pt_pin'),key=jdcCookie(cookie,'pt_key');
- if(!profile||profile.pin!==pin||!pin||!key)return false;
- let changed=false;
- for(const kind of ['query','claim']){
-  const template=profile[kind];
-  if(!template||!template.headers||jdcCookie(template.headers.Cookie,'pt_pin')!==pin)continue;
-  if(observedAt<Number(template.loginUpdatedAt||template.capturedAt||0))continue;
-  template.headers.Cookie=String(template.headers.Cookie).split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:pin|key)=/.test(x)).concat(['pt_pin='+pin,'pt_key='+key]).join('; ');
-  template.loginUpdatedAt=observedAt;template.loginSource=source;changed=true;
- }
- return changed;
-}
-function zLoginObservedAt(){
- const start=typeof $script!=='undefined'&&$script.startTime;
- const value=start?Number(new Date(start)):NaN;
- return Number.isFinite(value)&&value>0&&value<=Date.now()?value:Date.now();
-}
-(function(){
- let stage='检查请求';
- try {
-  if(typeof $request==='undefined'||typeof $response==='undefined'||$request.method!=='POST'||Number($response.status)!==200)return;
-  const endpoint=jdcEndpoint($request.url);
-  const params=Object.assign(jdcParseForm(($request.url.split('?')[1]||'').split('#')[0]),jdcParseForm($request.body));
-  if(params.appid!=='wegame-hub'||!['weGameHome','weGameLottery'].includes(params.functionId))return;
-  stage='解析活动参数';
-  const body=JSON.parse(params.body||'{}');
-  if(body.linkId!==Z_LINK||Number(body.envType)!==1||Number(body.appType)!==1)return;
-  stage='解析接口响应';
-  const data=JSON.parse($response.body||'{}');
-  if(!zAccepted(data)){console.log('[种豆签到] 未保存凭据：接口未返回登录成功状态，返回码 '+String(data.code));return;}
-  const kind=params.functionId==='weGameHome'?'query':'claim';
-  // Capture an authenticated page even when today's reward cannot be claimed.
-  // Eligibility is checked by the runner before any claim is submitted.
-  stage='检查签名配置';
-  const sig=String(params.h5st||'').split(';'),appId=kind==='query'?'101aa':'730a6';
-  if(sig.length!==10||sig[5]!=='5.3'||sig[2]!==appId)throw new Error('签名配置变化，请反馈执行日志');
-  stage='检查登录和页面凭据';
-  const headers={};
-  ['Cookie','User-Agent','Referer','Origin','wg-sdk-token','x-rp-client','x-referer-page','request-from'].forEach(k=>{const v=jdcHeader($request.headers,k);if(v)headers[k]=v;});
-  const pin=jdcCookie(headers.Cookie,'pt_pin');
-  const missing=[];
-  if(!pin)missing.push('pt_pin');
-  if(!jdcCookie(headers.Cookie,'pt_key'))missing.push('pt_key');
-  if(!headers['User-Agent'])missing.push('User-Agent');
-  if(!headers.Referer)missing.push('Referer');
-  if(missing.length)throw new Error('缺少 '+missing.join('、')+'，未保存');
-  delete params.h5st;
-  const old=jdcRead(Z_KEY,null),profile=old&&old.pin===pin?old:{pin};
-  const first=!profile[kind];
-  profile[kind]={endpoint,params,capturedAt:Date.now(),appId,encoding:sig[9],environment:sig[7],headers};
-  if(kind==='query')profile.query.queryState=zStatusDetails(data);
-  zSyncLogin(profile,headers.Cookie,'activity:plant',zLoginObservedAt());
-  stage='保存本地凭据';
-  jdcWrite(Z_KEY,profile);
-  console.log('[种豆签到] 已保存'+(kind==='query'?'查询凭据':'领取模板')+'，未修改原请求');
-  if(first)$notification.post('种豆得豆签到','凭据已保存',kind==='query'?'可关闭获取开关，在Loon中手动测试。':'已保存领取模板；还需进入页面保存查询凭据。');
- }catch(e){
-  // Only expose known validation messages; parser errors can contain credentials.
-  const detail=stage==='检查签名配置'?'签名配置变化，请反馈执行日志':stage==='检查登录和页面凭据'&&String(e.message).startsWith('缺少 ')?e.message:stage+'失败';
-  console.log('[种豆签到] 获取失败：'+detail);$notification.post('种豆得豆签到','凭据获取未完成',detail);
- }
- finally{$done({});}
-})();
-
-}
 // Current JD farm/platform contracts observed in 407/408; no account data.
 function farmTools() {
   const FARM='fWWo3YmB983abNOJPR7veg',WHEEL='VssYBUKJOen7HZXpC8dRFA';
@@ -1256,101 +1073,8 @@ function jsMedicalCapture(host,request,response,decode){
  return {updated,first:!old};
 }
 
-// HAR492: current planting activity. Task progress and green bubbles are separate.
-const PL_KEY='JD_PLANT_ACTIVITY_ACCOUNT_V1',PL_PREFIX='JD_PLANT_ACTIVITY_V1.',PL_LINK='4HcenxuZM4XiHesOb1HG4g';
-const PL_PAGE='https://pro.m.jd.com/mall/active/4Gck3RiwkxFEyA9ztVmQ2zwqjNRr/index.html';
-const PL_APPS={plantBeanIndex:'d246a',cultureBean:'6a216',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'};
-const PL_ENCODING={root:'of7rHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT',platform:'qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT'};
-const plClone=o=>JSON.parse(JSON.stringify(o));
-const plHeader=(h,k)=>{const keys=Object.keys(h||{}).filter(x=>x.toLowerCase()===k.toLowerCase());return keys.map(x=>String(h[x])).join(k.toLowerCase()==='cookie'?'; ':', ');};
-const plCookie=(s,k)=>{const a=String(s||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith(k+'='));return a.length===1?a[0].slice(k.length+1):'';};
-function plForm(s){const o={};for(const v of String(s||'').split('&')){if(!v)continue;const i=v.indexOf('='),d=x=>decodeURIComponent(x.replace(/\+/g,' ')),k=d(i<0?v:v.slice(0,i));if(k in o)throw Error('种豆请求参数重复');o[k]=d(i<0?'':v.slice(i+1));}return o;}
-const plEncode=p=>Object.keys(p).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(p[k])).join('&');
-const plAccepted=j=>!!j&&String(j.code)==='0'&&j.success!==false&&j.data?.success!==false;
-const plRef=r=>r===PL_PAGE||String(r||'').startsWith(PL_PAGE+'?');
-const plText=s=>String(s||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
-const plId=t=>String(t?.pipeExt?.assignmentId||'');
-function plList(d){if(!Array.isArray(d)||d.length>200)throw Error('种豆任务列表结构变化');const seen=new Set();for(const t of d){if(!t||!plId(t)||seen.has(plId(t))||!Number.isInteger(t.taskDoTimes)||t.taskDoTimes<0||!Number.isInteger(t.taskLimitTimes)||t.taskLimitTimes<1||t.taskDoTimes>t.taskLimitTimes||typeof t.taskType!=='string')throw Error('种豆任务状态不完整');seen.add(plId(t));}return d;}
-const plFinished=t=>t.taskFinished===true||t.taskDoTimes>=t.taskLimitTimes;
-function plCredentialStatus(a){
- const t=a?.templates||{},s=a?.signing||{},parts=[['主页',!!t.plantBeanIndex],['任务列表',!!(t['apTaskList:0']||t['apTaskList:6'])],['主页签名',!!(s.root?.environment&&s.root?.eidToken)],['计时签名',!!(s.platform?.environment&&s.platform?.eidToken)]];
- return {ready:parts.every(x=>x[1]),missing:parts.filter(x=>!x[1]).map(x=>x[0]),text:parts.map(x=>x[0]+'：'+(x[1]?'有':'缺')).join('；')};
-}
-function plPrepare(a){
- const out=plClone(a),t=out.templates||{};
- // queryType=6 and queryType=0 use the same captured account/page parameters.
- // The complete-list request body is independently observed in HAR492.
- if(!t['apTaskList:0']&&t['apTaskList:6']){t['apTaskList:0']=plClone(t['apTaskList:6']);t['apTaskList:0'].body.queryType=0;t['apTaskList:0'].derivedFrom=6;}
- return out;
-}
-function plCaptureResult(host,record,fn,result,updated=false,first=false,phase='response'){
- const s=plCredentialStatus(record),message=result+'；'+s.text,key=PL_KEY+'.capture',old=host.read(key,null);
- const at=host.observedAt||Date.now(),byFunction={...(old?.byFunction||{})};byFunction[fn]={at,result,phase};
- host.write(key,{at,fn,result,status:s,byFunction});
- return {updated:updated?[PL_KEY]:[],first,plantStatus:message,plantNotify:old?.status?.text!==s.text||old?.result!==result};
-}
-const PL_LANDINGS={
- 'https://pro.m.jd.com/mall/active/3fQ6Xs3McAgEgnJkYhL8qQdy9xNg/index.html':['babelChannel'],
- 'https://pro.m.jd.com/mall/active/4JRfHorUDXgL77E9YdNxSCNMKwkJ/index.html':['pageNum','rankId','queryType','fromName','preSrc','bbtf','rankType','preventPV','forceCurrentView']
-};
-function plLanding(url){
- const m=String(url||'').match(/^(https:\/\/pro\.m\.jd\.com\/mall\/active\/[A-Za-z0-9]+\/index\.html)(?:\?([^#]*))?$/),allowed=m&&PL_LANDINGS[m[1]];if(!allowed)return false;
- try{const q=plForm(m[2]);return Object.keys(q).every(k=>allowed.includes(k)&&/^[A-Za-z0-9_-]{1,40}$/.test(q[k]));}catch(_){return false;}
-}
-function plRound(j){const a=j?.data?.roundList;if(!Array.isArray(a))throw Error('种豆主页面结构变化');const current=a.filter(x=>String(x.roundState)==='2');if(current.length!==1||typeof current[0].roundId!=='string'||!current[0].roundId||!/^\d+$/.test(String(current[0].growth)))throw Error('种豆本轮进度不明确');const r=current[0];if(r.bubbleInfos!==undefined&&!Array.isArray(r.bubbleInfos))throw Error('种豆气泡结构变化');const seen=new Set();for(const b of r.bubbleInfos||[]){if(typeof b.nutrientsType!=='string'||!b.nutrientsType||seen.has(b.nutrientsType)||!Number.isInteger(b.nutrNum)||b.nutrNum<=0||b.nutrNum>100000)throw Error('种豆气泡数据不完整');seen.add(b.nutrientsType);}return r;}
-function plItem(t){
- if(t.taskType!=='BROWSE_CHANNEL'||![1,2].includes(t.timeLimitSwitch)||!Number.isInteger(t.timeLimitPeriod)||t.timeLimitPeriod<1||t.timeLimitPeriod>180||!Array.isArray(t.taskItemList))return null;
- // Titles and a five-second timer do not establish the landing-page behavior.
- // Only the two ordinary shopping paths manually completed in HAR492 are used.
- if(/视频|直播|小游戏|玩AI|邀请|助力|下单|组件|提醒/.test(plText(t.taskShowTitle)))return null;
- return t.taskItemList.find(i=>i&&plLanding(i.itemId)&&!i.clickUrl&&!i.itemUrl&&typeof i.pipeExt?.itemId==='string'&&i.pipeExt.itemId&&['1',1].includes(i.itemType))||null;
-}
-function plCapture(host,request,response,decode){
- const requestOnly=response===undefined||response===null,phase=requestOnly?'request':'response';
- if(request?.method!=='POST'||!requestOnly&&Number(response?.status)!==200||['X-Lazing-Plant-Run','X-Lazing-Signin-Run','X-Lazing-Farm-Run','X-Lazing-Activity-Run'].some(k=>plHeader(request.headers,k)==='1'))return null;
- const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?)(?:\?([^#]*))?$/);if(!m)return null;
- const q=plForm(m[2]),p=plForm(request.body);for(const k of Object.keys(p)){if(k in q&&q[k]!==p[k])throw Error('种豆请求参数冲突');q[k]=p[k];}
- const f=q.functionId;if(!['apTaskList',...Object.keys(PL_APPS)].includes(f))return null;
- const b=JSON.parse(q.body||'{}'),platform=f.startsWith('ap'),kind=platform?'platform':'root';
- if(requestOnly&&!platform)return null; // Home credentials still require a real successful response.
- const note=result=>plCaptureResult(host,host.read(PL_KEY,null),f,result,false,false,phase);
- if(platform&&b.linkId!==PL_LINK)return plRef(plHeader(request.headers,'Referer'))?note(q.body?'任务活动标识不匹配':'请求正文缺失'):null;
- if(platform&&q.appid!==(f==='apStartTaskTime'?'activity_platform_se':'activities_platform'))return note('任务客户端标识不匹配');
- if(!platform&&(q.appid!=='signed_wh5'||b.monitor_source!=='plant_m_plant_index'))return null;
- if(platform&&!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(m[1])||!platform&&m[1]!=='https://api.m.jd.com/')return null;
- if(!plRef(plHeader(request.headers,'Referer'))&&!(platform&&plHeader(request.headers,'Referer')==='https://pro.m.jd.com/'))return note('页面来源未通过检查');
- if(f==='apTaskList'&&![0,6].includes(b.queryType))return null;
- if(!requestOnly){const j=JSON.parse(response.body||'{}');if(!plAccepted(j))return note('接口未成功，未更新');if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);}
- let ck=plHeader(request.headers,'Cookie');const canonical=host.read('JD_SIGNIN_LOGIN_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
- const directPin=plCookie(ck,'pt_pin'),directKey=plCookie(ck,'pt_key');
- // The native webview in HAR492 sends only its page cookie. Reuse a captured
- // canonical login; a signed environment must still match that account below.
- if((!directPin||!directKey)&&canonical?.cookie){
-  const values=ck.split(';').map(x=>x.trim());if(values.filter(x=>x.startsWith('pt_pin=')).length>1||values.filter(x=>x.startsWith('pt_key=')).length>1)return note('Cookie字段重复');
-  if(directPin&&directPin!==canonical.pin||directKey&&directKey!==plCookie(canonical.cookie,'pt_key'))return note('页面Cookie与共享Cookie不一致');
-  ck=canonical.cookie+values.filter(x=>x&&!/^pt_(?:pin|key)=/.test(x)).join('; ')+';';
- }
- const pin=plCookie(ck,'pt_pin');if(!pin||!plCookie(ck,'pt_key')||!plHeader(request.headers,'User-Agent'))return note('Cookie或设备信息缺失');
- const old=host.read(PL_KEY,null),bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null);
- if(old?.pin&&old.pin!==pin||bound?.pin&&bound.pin!==pin||canonical?.pin&&canonical.pin!==pin)return null;
- const at=host.observedAt||Date.now(),record=old?plClone(old):{pin,templates:{},signing:{}};record.templates=record.templates||{};record.signing=record.signing||{};
- const key=f==='apTaskList'?f+':'+b.queryType:f;if(at<Number(record.templates[key]?.at||0))return null;
- const headers={Cookie:ck};for(const k of ['User-Agent','Referer','Origin','request-from','x-referer-page','x-rp-client']){const v=plHeader(request.headers,k);if(v)headers[k]=v;}
- if(PL_APPS[f]){const parts=String(q.h5st||'').split(';');if(parts.length!==10||parts[2]!==PL_APPS[f]||parts[5]!=='5.3'||parts[9]!==PL_ENCODING[kind])return note('签名格式未通过检查');if(!q['x-api-eid-token'])return note('签名设备标识缺失');let env;try{env=decode(parts[7]);}catch(_){return note('签名环境未通过检查');}if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))return null;
-  if(at>=Number(record.signing[kind]?.at||0))record.signing[kind]={environment:parts[7],encoding:parts[9],at,eidToken:q['x-api-eid-token']};
- }
- const params=plClone(q);delete params.h5st;delete params.t;delete params.body;
- // Never preserve round IDs, action item IDs or referral data as new actions.
- let base={};if(f==='apTaskList')base={linkId:PL_LINK,queryType:b.queryType,channel:4,...(typeof b.area==='string'?{area:b.area}:{})};
- if(f==='plantBeanIndex')base={wxHeadImgUrl:'',shareUuid:'',channel:String(b.channel||''),plantUpdateV1:'v1',monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- if(f==='cultureBean')base={monitor_source:'plant_m_plant_index',monitor_refer:'plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- record.templates[key]={endpoint:m[1],params,headers,body:base,at,capturePhase:phase};record.updatedAt=Math.max(at,Number(record.updatedAt||0));host.write(PL_KEY,record);
- return plCaptureResult(host,record,f,plCredentialStatus(record).ready?'已获取所需参数':'已保存部分参数',true,!old,phase);
-}
-
 async function jsCapture(host,request,response,parsers,decode){
- if((request?.method!=='POST'&&!(request?.method==='GET'&&/[?&]functionId=bom_doInteractiveAssignment(?:&|$)/.test(String(request.url||''))))||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1'||jsHeader(request.headers,'X-Lazing-Plant-Run')==='1')return null;
- const plantResult=plCapture(host,request,response,decode);if(plantResult)return plantResult;
+ if((request?.method!=='POST'&&!(request?.method==='GET'&&/[?&]functionId=bom_doInteractiveAssignment(?:&|$)/.test(String(request.url||''))))||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
  if(!jd&&!finance)return null;
@@ -1376,11 +1100,10 @@ async function jsCapture(host,request,response,parsers,decode){
  const retail=['findBeanSceneNew','bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction','bff_marketing_interaction'].includes(f);
  const home=['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'].includes(f)&&(body.craftId==='69ae8eb86a31c802e19f9f8f'||body.pageId==='2H8G6a7JecjqHH3t1ZWSoJjPtziP');
  const jx=['jxzy_active_querySign','jxzy_active_drawSign','jxzy_active_queryActive'].includes(f);
- const plant=['weGameHome','weGameLottery'].includes(f)&&body.linkId==='4HcenxuZM4XiHesOb1HG4g';
  const daily=['startup','logConfig','queryPagePopWindow','babelGetGuideTips'].includes(f);
  const accepted=data?.success!==false&&(data?.code===0||data?.code==='0'||data?.code===200||data?.code==='200'||data?.success===true||retail&&String(data?.code)==='1711000'&&data?.msg==='成功'&&!!data?.rs);
  if(!finance&&!accepted)return null;
- const changed=[],allowed=new Set(['JD_CHECKIN_TEST_ACCOUNT_V1','JXZY_CHECKIN_ACCOUNT_V1','JD_JR_CHECKIN_ACCOUNT_V1','JD_PLANT_CHECKIN_ACCOUNT_V1','JD_FARM_TASKS_ACCOUNT_V1','JD_HOME_CHECKIN_ACCOUNT_V1']);
+ const changed=[],allowed=new Set(['JD_CHECKIN_TEST_ACCOUNT_V1','JXZY_CHECKIN_ACCOUNT_V1','JD_JR_CHECKIN_ACCOUNT_V1','JD_FARM_TASKS_ACCOUNT_V1','JD_HOME_CHECKIN_ACCOUNT_V1']);
  const headers={};for(const k of ['Cookie','User-Agent','Referer','Origin','x-rp-client','wg-sdk-token','x-referer-page','request-from']){const v=jsHeader(request.headers,k);if(v)headers[k]=v;}
  const normalized={...request,headers:{...request.headers}};
  if(jd&&!jsForm(url.split('?')[1]||'').functionId&&f)normalized.url=url+(url.includes('?')?'&':'?')+'functionId='+encodeURIComponent(f);
@@ -1389,10 +1112,10 @@ async function jsCapture(host,request,response,parsers,decode){
    if(!allowed.has(k))throw Error('凭据入口写入范围不符');const value=JSON.parse(v);if(value.pin!==pair.pin)throw Error('账号不一致');
    const old=host.rawRead(k),ok=host.rawWrite(v,k);if(!ok)throw Error('本地记录保存失败');if(old!==v)changed.push(k);return ok;
   }},$notification:{post:()=>{}},$httpClient:{post:()=>{throw Error('凭据入口禁止请求');}},console:{log:()=>{}},$done:()=>{}};
- if(retail)parsers.retail(context);else if(home)parsers.home(context);else if(jx)parsers.jxzy(context);else if(finance)parsers.finance(context);else if(plant)parsers.plant(context);
+ if(retail)parsers.retail(context);else if(home)parsers.home(context);else if(jx)parsers.jxzy(context);else if(finance)parsers.finance(context);
  const activityTask=nativeTask&&jsActivityTaskCapture(host,request,response,decode);if(activityTask)changed.push(body.craftId==='69ae8eb86a31c802e19f9f8f'?'JD_HOME_CHECKIN_ACCOUNT_V1':'JXZY_CHECKIN_ACCOUNT_V1');
  const coupon=f==='sh_c_query_task_list'&&jsCouponCapture(host,request,response,decode);if(coupon)changed.push(JC_KEY);
- let farm=null;if(jd&&!activityTask&&!coupon&&!home&&!retail&&!jx&&!plant&&!daily)farm=parsers.farm({...host,write:(k,v)=>{if(!allowed.has(k)||v.pin!==pair.pin)throw Error('凭据写入范围不符');host.write(k,v);changed.push(k);},now:()=>Date.now()},normalized,response,decode);
+ let farm=null;if(jd&&!activityTask&&!coupon&&!home&&!retail&&!jx&&!daily)farm=parsers.farm({...host,write:(k,v)=>{if(!allowed.has(k)||v.pin!==pair.pin)throw Error('凭据写入范围不符');host.write(k,v);changed.push(k);},now:()=>Date.now()},normalized,response,decode);
  // Finance keeps its independent Cookie. Only validated retail/native activity
  // traffic may update the generic JD login pair.
  const validSource=daily||farm||changed.some(k=>k!=='JD_JR_CHECKIN_ACCOUNT_V1');
@@ -1414,16 +1137,14 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
   const read=(k,f)=>{const v=$persistentStore.read(k);if(!v)return f;return JSON.parse(v);};
   const write=(k,v)=>{if(!$persistentStore.write(JSON.stringify(v),k))throw Error('本地记录保存失败');};
   try{
-   const names={...Object.fromEntries(Object.values(JB_CONFIG).map(c=>[c.key,c.label])),[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆', [PL_KEY]:'种豆活动','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
+   const names={...Object.fromEntries(Object.values(JB_CONFIG).map(c=>[c.key,c.label])),[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
-   const captureHost={read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()};
-   const r=typeof $response!=='undefined'&&$response?await jsCapture(captureHost,$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment):plCapture(captureHost,$request,null,farmDecodeEnvironment);
-   if(r?.plantStatus){console.log('[种豆凭据] '+r.plantStatus);if(r.plantNotify)$notification.post('种豆得豆','凭据获取',r.plantStatus);}
-   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(!r.plantStatus&&(r.updated.includes(JS_KEYS.login)||r.first))$notification.post('京东签到','凭据已更新',text);}
+   const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,farm:farmCapture},farmDecodeEnvironment);
+   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
   }catch(_){console.log('[签到凭据] 获取未完成，保留原记录');}
   finally{$done({});}
  })();
 }
 
-if(typeof module!=="undefined")module.exports={PL_KEY,plCapture,plCredentialStatus,JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,farmCapture};
 

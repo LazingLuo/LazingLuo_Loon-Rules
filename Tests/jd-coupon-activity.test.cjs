@@ -20,7 +20,7 @@ function host(){let now=Date.now();const day=new Date(now+8*3600000).toISOString
  const h={read:(k,f)=>!map[k]?f:JSON.parse(map[k]),write:(k,v)=>{map[k]=JSON.stringify(v);},rawRead:k=>map[k]||null,rawWrite:(v,k)=>{map[k]=v;return true;},now:()=>now,day:()=>day,random:()=>0.5,map,calls,waits,logs,log:x=>logs.push(x),sleep:async ms=>{waits.push(ms);now+=ms;},request:async(t,o)=>{calls.push(o);return h.reply(o);}};
  h.write('JD_SIGNIN_ACCOUNT_V1',{pin:'offline'});h.write('JD_SIGNIN_LOGIN_V1',{pin:'offline',cookie:homeHeaders.Cookie,headers:homeHeaders,capturedAt:1});return h;
 }
-const parsers={retail:cap.runRetailCapture,jxzy:cap.runJxCapture,home:cap.runHomeCapture,finance:cap.runFinanceCapture,plant:cap.runPlantCapture,farm:cap.farmCapture};
+const parsers={retail:cap.runRetailCapture,jxzy:cap.runJxCapture,home:cap.runHomeCapture,finance:cap.runFinanceCapture,farm:cap.farmCapture};
 async function capture(h,f,b,{cookie=true,app='832f1',header={},params={}}={},j=queryResult()){
  const p={functionId:f,appid:'jx_h5_babel',channel:'jxh5',client:'jxh5',clientVersion:'1.2.5',body:JSON.stringify(signedBody(b)),...(f==='jxzy_active_querySign'?{}:{h5st:sig(app), 'x-api-eid-token':'FAKE_EID'}),...params};
  return cap.jsCapture(h,{method:'POST',url:'https://api.m.jd.com/api',headers:{...homeHeaders,...(!cookie?{Cookie:'page=only;'}:{}),...header},body:new URLSearchParams(p).toString()},reply(j),parsers,cap.farmDecodeEnvironment);
@@ -110,7 +110,7 @@ test('business rejection despite HTTP 200 is reported without action',async()=>{
 test('finish business rejection cannot add reported beans',async()=>{const h=setup();serve(h);const old=h.reply;h.reply=o=>{const p=api.jsParams(o),b=JSON.parse(p.body);return p.functionId==='sh_c_do_task'&&b.actionType===0?reply({success:true,code:0,data:{subCode:'8',successRewards:{'3':[{rewardType:3,rewardName:'京豆',quantity:99}]}}}):old(o);};const r=await coupon.createCouponActivity(h,fakeCrypto).run();assert(r.stopped);assert(r.error.includes('subCode=8'));assert.equal(r.beanQuantity,0);});
 test('wrong account cannot execute any request',async()=>{const h=setup();h.write('JD_SIGNIN_ACCOUNT_V1',{pin:'other'});serve(h);await assert.rejects(()=>coupon.createCouponActivity(h,fakeCrypto).run(),/账号/);assert.equal(h.calls.length,0);});
 test('signature field-set mismatch stops before action HTTP',async()=>{const h=setup();serve(h);const r=await coupon.createCouponActivity(h,{...fakeCrypto,signOnline:async()=>sig('35fa0','WRONG')}).run();assert(r.stopped);assert.equal(h.calls.length,0);});
-test('six activity menu entries and no automatic activity',()=>{const p=fs.readFileSync(path.join(root,'Plugins/jd-activities.plugin'),'utf8');assert.equal((p.match(/^generic /gm)||[]).length,6);assert(p.includes('tag="领券中心赚京豆"'));assert(p.includes('tag="家电家居"'));assert(!/^cron /m.test(p));});
+test('five activity menu entries and no automatic activity',()=>{const p=fs.readFileSync(path.join(root,'Plugins/jd-activities.plugin'),'utf8');assert.equal((p.match(/^generic /gm)||[]).length,5);assert(p.includes('tag="领券中心赚京豆"'));assert(p.includes('tag="家电家居"'));assert(!/^cron /m.test(p));});
 for(const file of process.argv.slice(2))test('captured fiction and egg-chance browse flows',async()=>{
  const decode=p=>p?.encoding==='base64'?Buffer.from(p.text||'','base64').toString():p?.text||'';
  const es=JSON.parse(fs.readFileSync(file,'utf8')).log.entries.slice().sort((a,b)=>Date.parse(a.startedDateTime)-Date.parse(b.startedDateTime));
