@@ -1,6 +1,6 @@
-// 京东合并签到 2026-11-03.3; fixed check-in scope, local credentials.
+// 京东合并签到 2026-11-04.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-03.3';
+const JS_VERSION='2026-11-04.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到'],['used','特价二手签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
@@ -27,8 +27,9 @@ function jsMedicalTask(j){
 }
 function jsMedicalState(j,day){
  const t=jsMedicalTask(j),s=t.signDetail;
- if(!Array.isArray(s.signList)||s.signList.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}_\d+(?:\.\d+)?$/.test(x)))throw Error('看病买药签到日期结构变化');
- const today=s.signList.some(x=>x.startsWith(day+'_'));
+ const signList=s.signList===undefined&&s.status===1?[]:s.signList;
+ if(!Array.isArray(signList)||signList.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}_\d+(?:\.\d+)?$/.test(x)))throw Error('看病买药签到日期结构变化');
+ const today=signList.some(x=>x.startsWith(day+'_'));
  if(s.status===2&&today&&t.completionFlag===true&&t.completionCnt===1&&t.assignmentTimesLimit===1)return {task:t,done:true};
  if(s.status===1&&!today&&t.completionFlag===false&&t.completionCnt===0&&t.assignmentTimesLimit===1&&t.timeStatus===1)return {task:t,done:false};
  throw Error('看病买药签到状态不一致');
@@ -2151,10 +2152,13 @@ function createExtraSignins(host,crypto){
  }
   async function batch(task){
    const c=JB_CONFIG[task],login=identity(),profile=host.read(c.key,null);
-   if(!profile?.headers||!profile.signing||!profile.templates)throw Error('缺少签到页面凭据');
+   if(!profile?.headers||!profile.templates)throw Error('缺少签到页面凭据');
+   if(!profile.templates.query)throw Error('缺少签到查询参数，请打开对应签到页');
    const pair=jsPair(jsHeader(profile.headers,'Cookie'));
    if(profile.pin!==pin||pair?.pin!==pin)throw Error('签到资料属于其他账号');
-   const env=crypto.decodeEnvironment(profile.signing.environment);if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))throw Error('签名账号不一致');
+   const signing=profile.signing;
+   const env=signing?.environment?crypto.decodeEnvironment(signing.environment):null;
+   if(env&&![pin,decodeURIComponent(pin)].includes(env.pp?.p1))throw Error('签名账号不一致');
    const snapshot=JSON.stringify(profile),headerCookie=jsMergeCookie(jsHeader(profile.headers,'Cookie'),login);
    const headers={...profile.headers,Cookie:headerCookie,Referer:c.page,'X-Lazing-Signin-Run':'1','Content-Type':'application/x-www-form-urlencoded'};
    const safe=()=>{check();if(host.login()?.pin!==pin||host.login()?.cookie!==login.cookie||host.read(JS_KEYS.login,null)?.pin&&host.read(JS_KEYS.login,null).pin!==pin||JSON.stringify(host.read(c.key,null))!==snapshot)throw Error('日期或账号资料变化');};
@@ -2171,9 +2175,11 @@ function createExtraSignins(host,crypto){
     p.body=JSON.stringify(b);
     if(task==='gameDaily'||c.craft||task==='hardware'&&!claim){p.t=String(now);if(task==='hardware')p.sign='11';}
     if(c.apps[f]){
+     if(!env)throw Error('缺少签名环境，请在对应页面签到一次');
+     const appId=task==='hardware'&&claim&&signing.appId==='b4c9d'?signing.appId:c.apps[f];
      const input={};for(const k of ['functionId','appid','client','body','clientVersion','sign','t','jsonp'])if(p[k])input[k]=k==='body'?crypto.hash(p.body):p[k];
-     p.h5st=await crypto.signOnline(c.apps[f],{pin,headers},env,input);safe();
-     const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!==c.apps[f]||sig[5]!=='5.3')throw Error('签到签名字段变化');
+     p.h5st=await crypto.signOnline(appId,{pin,headers},env,input);safe();
+     const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!==appId||sig[5]!=='5.3')throw Error('签到签名字段变化');
      if(profile.signing.eidToken)p['x-api-eid-token']=profile.signing.eidToken;
     }
     if(!jbScope(task,p,b))throw Error('签到参数结构变化');
@@ -2231,6 +2237,7 @@ function jsError(e){
  const s=String(e?.message||'');const http=/HTTP (\d{1,3})/.exec(s);if(http)return 'HTTP '+http[1];
  if(/缺少/.test(s))return /设备|签名环境/.test(s)?'缺少签名环境或设备凭据，请打开对应签到页':/金融/.test(s)?'缺少金融凭据，请打开金融签到页':'缺少凭据，请打开对应签到页';
  if(/今天已有|今天已提交/.test(s))return '今天已提交，去页面确认';
+ if(s==='看病买药签到日期结构变化')return '看病买药签到日期格式异常';
  if(/日期|账号/.test(s))return '日期或账号变化，已停止';
  if(/保存|读取失败/.test(s))return '本地记录失败，已停止';
  if(/签名/.test(s))return '签名初始化或校验失败';

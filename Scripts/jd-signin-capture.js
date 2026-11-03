@@ -1013,9 +1013,11 @@ function jbCapture(host,request,response,decode){
  h.Cookie=(fresh?direct:canonical||pair).cookie+rawCookie.split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x)).join(';')+';';
  const profile=old?jsClone(old):{pin:pair.pin,templates:{}};
  if(c.apps[f]){
-  const sig=String(p.h5st||'').split(';');if(sig.length!==10||sig[2]!==c.apps[f]||sig[5]!=='5.3')return null;
+  const sig=String(p.h5st||'').split(';');
+  const appId=sig[2], validApp=appId===c.apps[f]||task==='hardware'&&f===c.claim&&appId==='b4c9d';
+  if(sig.length!==10||!validApp||sig[5]!=='5.3')return null;
   const env=decode(sig[7]);if(![pair.pin,decodeURIComponent(pair.pin)].includes(env?.pp?.p1))return null;
-  profile.signing={environment:sig[7],encoding:sig[9],eidToken:p['x-api-eid-token']||'',capturedAt:at};
+  profile.signing={environment:sig[7],encoding:sig[9],eidToken:p['x-api-eid-token']||'',capturedAt:at,...(task==='hardware'?{appId}:{})};
  }
  if(c.craft&&typeof b.signStr==='string'&&b.signStr!==jbBodySign(b))return null;
  if(!profile.signing&&c.craft){

@@ -27,6 +27,16 @@ const run=h=>api.createExtraSignins(h,h.crypto).run('medical');
 const capture=(h,r,j)=>cap.jsCapture(h,r,reply(j),{},cap.farmDecodeEnvironment);
 let total=0;async function test(name,f){await f();total++;console.log('OK '+name);}
 (async()=>{
+ await test('first medical sign-in can omit history; signed status still requires it',async()=>{
+  const h=host(),pending=page(false),signed=page(true);
+  delete pending.data.assignmentList[1].signDetail.signList;
+  assert.equal(api.jsMedicalState(pending,day()).done,false);
+  let calls=0;
+  h.reply=()=>reply(++calls===1?pending:calls===2?claim(1):signed);
+  assert.equal((await run(h)).status,'signed_confirmed');
+  delete signed.data.assignmentList[1].signDetail.signList;
+  assert.throws(()=>api.jsMedicalState(signed,day()));
+ });
  await test('medical is separate from both existing kit sign-ins',()=>{assert.deepEqual(api.JS_TASKS.slice(7,8),[['medical','看病买药签到']]);assert.equal(api.JS_TASKS.length,13);assert(!api.JS_TASKS.some(x=>['hs','ys','delivery','game'].includes(x[0])));assert(!api.JS_TASKS.some(x=>x[0]==='plant'));});
  await test('already signed today makes one query and no claim',async()=>{const h=host();h.reply=()=>reply(page(true));const r=await run(h);assert.equal(r.status,'already_done');assert.equal(r.beanQuantity,undefined);assert.equal(h.calls.length,1);});
  await test('fresh ID, exact claim scope, fresh Cookie and explicit one-bean reward',async()=>{
@@ -48,7 +58,7 @@ let total=0;async function test(name,f){await f();total++;console.log('OK '+name
   ['yesterday status',t=>{t.signDetail.status=2;t.completionCnt=1;t.completionFlag=true;}],
   ['conflicting today record',t=>{t.signDetail.signList=[day()+'_1.0'];}],
   ['inactive task',t=>{t.timeStatus=0;}],
-  ['missing sign dates',t=>{delete t.signDetail.signList;}]
+  ['malformed sign dates',t=>{t.signDetail.signList=null;}]
  ])await test(name+' prevents a claim',async()=>{const h=host(),j=page(false);change(j.data.assignmentList[1]);h.reply=()=>reply(j);await assert.rejects(()=>run(h));assert.equal(h.calls.length,1);});
  await test('multiple sign-in tasks stop rather than guessing',async()=>{const h=host(),j=page(false);j.data.assignmentList.push({...task(),encryptAssignmentId:'other'});h.reply=()=>reply(j);await assert.rejects(()=>run(h));assert.equal(h.calls.length,1);});
  await test('rotated task ID does not confirm a different task',async()=>{const h=host();let n=0;h.reply=()=>{const j=++n===1?page(false):n===2?claim(1):page(true);if(n===3)j.data.assignmentList[1].encryptAssignmentId='changed';return reply(j);};const r=await run(h);assert.equal(r.status,'pending');assert.equal(r.beanQuantity,1);});

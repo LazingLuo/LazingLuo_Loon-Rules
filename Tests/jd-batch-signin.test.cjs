@@ -65,6 +65,37 @@ async function test(name,f){await f();total++;console.log('OK '+name);}
  }
  await test('gear unsigned query reuses only a same-account native sign-in environment',async()=>{const h=host();h.write('JD_HOME_CHECKIN_ACCOUNT_V1',{pin:'offline',signing:{environment:encode(env()),eidToken:'OFFLINE_DEVICE'}});await capture(h,'gear');assert(h.read(C.gear.key).signing);assert(!h.read('JXZY_CHECKIN_ACCOUNT_V1'));const bad=host();bad.write('JD_HOME_CHECKIN_ACCOUNT_V1',{pin:'other',signing:{environment:encode(env())}});await capture(bad,'gear');assert(!bad.read(C.gear.key).signing);});
  await test('game prior-task requirements and conflicting day records prevent mutations',async()=>{for(const change of [j=>j.data.signMainVo.beforeTaskVo={task:1},j=>j.data.signMainVo.currentStatus=2,j=>j.data.signListVo.push({todayFlag:1,status:3,signDate:day()})]){const h=await ready('gameDaily'),j=page('gameDaily');change(j);h.reply=()=>reply(j);await assert.rejects(()=>run(h,'gameDaily'));assert.equal(h.calls.length,1);}});
+ for(const task of ['gear','hardware','used'])await test(task+': unsigned query confirms a completed check-in without claim material',async()=>{
+  const h=host();
+  await capture(h,task);
+  assert.equal(h.read(C[task].key).signing,undefined);
+  h.reply=()=>reply(page(task,true));
+  assert.equal((await run(h,task)).status,'already_done');
+  assert.equal(h.calls.length,1);
+  h.reply=()=>reply(page(task,false));
+  h.map.delete(K.attempts);
+  await assert.rejects(()=>run(h,task),/缺少/);
+  assert.equal(h.calls.length,2);
+ });
+ for(const name of ['jd-signin-capture.js','jd-activity-capture.js','jd-splash.js'])await test(name+': saves hardware claim with current page signing ID',async()=>{
+  const h=host(),r=request('hardware',true),p=api.jsParams(r);
+  await capture(h,'hardware');
+  p.h5st=sig('b4c9d');
+  r.url='https://api.m.jd.com/api?'+form(p);
+  await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('capture timeout')),1500);
+   vm.runInNewContext(fs.readFileSync(path.join(root,name),'utf8'),{
+    $request:r,$response:reply(award('hardware')),$script:{startTime:new Date().toISOString()},
+    $persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:()=>{}},
+    console:{log:()=>{}},$done:()=>{clearTimeout(timer);resolve();}
+   });
+  });
+  assert.equal(h.read(C.hardware.key).signing.appId,'b4c9d');
+  let n=0;
+  h.reply=()=>reply(++n===1?page('hardware'):n===2?award('hardware'):page('hardware',true));
+  assert.equal((await run(h,'hardware')).status,'signed_confirmed');
+  assert.deepEqual(h.signs.map(x=>x.a),['b4c9d']);
+ });
  await test('hardware no sign row never asserts already signed or confirms disappearance',async()=>{const h=await ready('hardware'),empty=page('hardware');empty.data.assignmentList=[];h.reply=()=>reply(empty);assert.equal((await run(h,'hardware')).status,'no_chance');let n=0;h.reply=()=>reply(++n===1?page('hardware'):n===2?award('hardware'):empty);assert.equal((await run(h,'hardware')).status,'pending');});
  await test('hardware server risk or changed template prevents a mutation',async()=>{const h=await ready('hardware'),j=page('hardware');j.data.hasRisk=true;h.reply=()=>reply(j);await assert.rejects(()=>run(h,'hardware'));assert.equal(h.calls.length,1);const r=request('hardware',true),p=api.jsParams(r),b=JSON.parse(p.body),inner=JSON.parse(b.body);inner.taskType=8;b.body=JSON.stringify(inner);p.body=JSON.stringify(b);r.method='get';r.url='https://api.m.jd.com/api?'+form(p);assert.throws(()=>api.jsTarget('hardware',r));});
  await test('reward parsing never uses offered prizes or assigns non-beans to beans',()=>{const g=award('gameDaily');g.data.awardResultVO.prizeType=2;assert.deepEqual(api.jbReward('gameDaily',g),{});const q=award('gear');q.data.prizeInfos=[{prizeType:1,discount:100}];assert.deepEqual(api.jbReward('gear',q),{});const h=award('hardware');h.data.successReward={'浏览任务奖励':100};assert.deepEqual(api.jbReward('hardware',h),{});assert.deepEqual(api.jbReward('wallet',award('wallet')),{});});
