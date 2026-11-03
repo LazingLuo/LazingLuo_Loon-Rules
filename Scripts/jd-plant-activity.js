@@ -26,9 +26,10 @@ function plPrepare(a){
  if(!t['apTaskList:0']&&t['apTaskList:6']){t['apTaskList:0']=plClone(t['apTaskList:6']);t['apTaskList:0'].body.queryType=0;t['apTaskList:0'].derivedFrom=6;}
  return out;
 }
-function plCaptureResult(host,record,fn,result,updated=false,first=false){
+function plCaptureResult(host,record,fn,result,updated=false,first=false,phase='response'){
  const s=plCredentialStatus(record),message=result+'；'+s.text,key=PL_KEY+'.capture',old=host.read(key,null);
- host.write(key,{at:host.observedAt||Date.now(),fn,result,status:s});
+ const at=host.observedAt||Date.now(),byFunction={...(old?.byFunction||{})};byFunction[fn]={at,result,phase};
+ host.write(key,{at,fn,result,status:s,byFunction});
  return {updated:updated?[PL_KEY]:[],first,plantStatus:message,plantNotify:old?.status?.text!==s.text||old?.result!==result};
 }
 const PL_LANDINGS={
@@ -48,28 +49,37 @@ function plItem(t){
  return t.taskItemList.find(i=>i&&plLanding(i.itemId)&&!i.clickUrl&&!i.itemUrl&&typeof i.pipeExt?.itemId==='string'&&i.pipeExt.itemId&&['1',1].includes(i.itemType))||null;
 }
 function plCapture(host,request,response,decode){
- if(request?.method!=='POST'||Number(response?.status)!==200||['X-Lazing-Plant-Run','X-Lazing-Signin-Run','X-Lazing-Farm-Run','X-Lazing-Activity-Run'].some(k=>plHeader(request.headers,k)==='1'))return null;
+ const requestOnly=response===undefined||response===null,phase=requestOnly?'request':'response';
+ if(request?.method!=='POST'||!requestOnly&&Number(response?.status)!==200||['X-Lazing-Plant-Run','X-Lazing-Signin-Run','X-Lazing-Farm-Run','X-Lazing-Activity-Run'].some(k=>plHeader(request.headers,k)==='1'))return null;
  const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?)(?:\?([^#]*))?$/);if(!m)return null;
  const q=plForm(m[2]),p=plForm(request.body);for(const k of Object.keys(p)){if(k in q&&q[k]!==p[k])throw Error('种豆请求参数冲突');q[k]=p[k];}
  const f=q.functionId;if(!['apTaskList',...Object.keys(PL_APPS)].includes(f))return null;
  const b=JSON.parse(q.body||'{}'),platform=f.startsWith('ap'),kind=platform?'platform':'root';
- if(platform&&(b.linkId!==PL_LINK||q.appid!==(f==='apStartTaskTime'?'activity_platform_se':'activities_platform'))||!platform&&(q.appid!=='signed_wh5'||b.monitor_source!=='plant_m_plant_index'))return null;
+ if(requestOnly&&!platform)return null; // Home credentials still require a real successful response.
+ const note=result=>plCaptureResult(host,host.read(PL_KEY,null),f,result,false,false,phase);
+ if(platform&&b.linkId!==PL_LINK)return plRef(plHeader(request.headers,'Referer'))?note(q.body?'任务活动标识不匹配':'请求正文缺失'):null;
+ if(platform&&q.appid!==(f==='apStartTaskTime'?'activity_platform_se':'activities_platform'))return note('任务客户端标识不匹配');
+ if(!platform&&(q.appid!=='signed_wh5'||b.monitor_source!=='plant_m_plant_index'))return null;
  if(platform&&!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(m[1])||!platform&&m[1]!=='https://api.m.jd.com/')return null;
- if(!plRef(plHeader(request.headers,'Referer'))&&!(platform&&plHeader(request.headers,'Referer')==='https://pro.m.jd.com/'))return plCaptureResult(host,host.read(PL_KEY,null),f,'页面来源未通过检查');
+ if(!plRef(plHeader(request.headers,'Referer'))&&!(platform&&plHeader(request.headers,'Referer')==='https://pro.m.jd.com/'))return note('页面来源未通过检查');
  if(f==='apTaskList'&&![0,6].includes(b.queryType))return null;
- const j=JSON.parse(response.body||'{}');if(!plAccepted(j))return plCaptureResult(host,host.read(PL_KEY,null),f,'接口未成功，未更新');if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);
+ if(!requestOnly){const j=JSON.parse(response.body||'{}');if(!plAccepted(j))return note('接口未成功，未更新');if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);}
  let ck=plHeader(request.headers,'Cookie');const canonical=host.read('JD_SIGNIN_LOGIN_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
  const directPin=plCookie(ck,'pt_pin'),directKey=plCookie(ck,'pt_key');
  // The native webview in HAR492 sends only its page cookie. Reuse a captured
  // canonical login; a signed environment must still match that account below.
- if(!directPin&&!directKey&&canonical?.cookie){ck=canonical.cookie+ck;}
- const pin=plCookie(ck,'pt_pin');if(!pin||!plCookie(ck,'pt_key')||!plHeader(request.headers,'User-Agent'))return plCaptureResult(host,host.read(PL_KEY,null),f,'Cookie或设备信息缺失');
+ if((!directPin||!directKey)&&canonical?.cookie){
+  const values=ck.split(';').map(x=>x.trim());if(values.filter(x=>x.startsWith('pt_pin=')).length>1||values.filter(x=>x.startsWith('pt_key=')).length>1)return note('Cookie字段重复');
+  if(directPin&&directPin!==canonical.pin||directKey&&directKey!==plCookie(canonical.cookie,'pt_key'))return note('页面Cookie与共享Cookie不一致');
+  ck=canonical.cookie+values.filter(x=>x&&!/^pt_(?:pin|key)=/.test(x)).join('; ')+';';
+ }
+ const pin=plCookie(ck,'pt_pin');if(!pin||!plCookie(ck,'pt_key')||!plHeader(request.headers,'User-Agent'))return note('Cookie或设备信息缺失');
  const old=host.read(PL_KEY,null),bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null);
  if(old?.pin&&old.pin!==pin||bound?.pin&&bound.pin!==pin||canonical?.pin&&canonical.pin!==pin)return null;
  const at=host.observedAt||Date.now(),record=old?plClone(old):{pin,templates:{},signing:{}};record.templates=record.templates||{};record.signing=record.signing||{};
  const key=f==='apTaskList'?f+':'+b.queryType:f;if(at<Number(record.templates[key]?.at||0))return null;
  const headers={Cookie:ck};for(const k of ['User-Agent','Referer','Origin','request-from','x-referer-page','x-rp-client']){const v=plHeader(request.headers,k);if(v)headers[k]=v;}
- if(PL_APPS[f]){const parts=String(q.h5st||'').split(';');if(parts.length!==10||parts[2]!==PL_APPS[f]||parts[5]!=='5.3'||parts[9]!==PL_ENCODING[kind])return plCaptureResult(host,old,f,'签名格式未通过检查');if(!q['x-api-eid-token'])return plCaptureResult(host,old,f,'签名设备标识缺失');let env;try{env=decode(parts[7]);}catch(_){return plCaptureResult(host,old,f,'签名环境未通过检查');}if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))return null;
+ if(PL_APPS[f]){const parts=String(q.h5st||'').split(';');if(parts.length!==10||parts[2]!==PL_APPS[f]||parts[5]!=='5.3'||parts[9]!==PL_ENCODING[kind])return note('签名格式未通过检查');if(!q['x-api-eid-token'])return note('签名设备标识缺失');let env;try{env=decode(parts[7]);}catch(_){return note('签名环境未通过检查');}if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))return null;
   if(at>=Number(record.signing[kind]?.at||0))record.signing[kind]={environment:parts[7],encoding:parts[9],at,eidToken:q['x-api-eid-token']};
  }
  const params=plClone(q);delete params.h5st;delete params.t;delete params.body;
@@ -77,12 +87,12 @@ function plCapture(host,request,response,decode){
  let base={};if(f==='apTaskList')base={linkId:PL_LINK,queryType:b.queryType,channel:4,...(typeof b.area==='string'?{area:b.area}:{})};
  if(f==='plantBeanIndex')base={wxHeadImgUrl:'',shareUuid:'',channel:String(b.channel||''),plantUpdateV1:'v1',monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
  if(f==='cultureBean')base={monitor_source:'plant_m_plant_index',monitor_refer:'plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- record.templates[key]={endpoint:m[1],params,headers,body:base,at};record.updatedAt=Math.max(at,Number(record.updatedAt||0));host.write(PL_KEY,record);
- return plCaptureResult(host,record,f,plCredentialStatus(record).ready?'凭据已齐':'已保存部分凭据',true,!old);
+ record.templates[key]={endpoint:m[1],params,headers,body:base,at,capturePhase:phase};record.updatedAt=Math.max(at,Number(record.updatedAt||0));host.write(PL_KEY,record);
+ return plCaptureResult(host,record,f,plCredentialStatus(record).ready?'已获取所需参数':'已保存部分参数',true,!old,phase);
 }
 function createPlantActivity(host,crypto,account,login){
  account=account?plPrepare(account):account;
- const day=host.day(),report={version:'2026-11-03.2',rows:[],completed:0,collected:0,bubbles:0,stopped:false};
+ const day=host.day(),report={version:'2026-11-03.3',rows:[],completed:0,collected:0,bubbles:0,stopped:false};
  const jkey='journal.'+crypto.hash(account?.pin||'').slice(0,24),old=host.read(jkey,null),journal=old?.day===day?old:{day,actions:{}};
  let session=null,calls=0,roundId=null;
  const guard=()=>{host.guard();if(day!==host.day())throw Error('种豆执行跨过零点，请重新运行');};
@@ -479,10 +489,10 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    });}
    const host={read:localRead,write:localWrite,now:()=>Date.now(),day:()=>new Date(Date.now()+28800000).toISOString().slice(0,10),guard,progress,setTimeout,clearTimeout,
     request:o=>request(o,false),requestAlgo:o=>request(o,true),pause:async ms=>{guard();await new Promise(r=>setTimeout(r,ms));guard();},sleep:async ms=>{guard();if(Date.now()+ms+25000>=deadline)throw Error('种豆本轮时间不足');await new Promise(r=>setTimeout(r,ms));guard();}};
-   localWrite('lock',{runId,until:deadline});owned=true;progress('版本 2026-11-03.2；仅处理已核实的购物页浏览与绿色气泡');
+   localWrite('lock',{runId,until:deadline});owned=true;progress('版本 2026-11-03.3；仅处理已核实的购物页浏览与绿色气泡');
    const status=plCredentialStatus(account);progress('凭据检查：'+status.text);
    const lastCapture=read(PL_KEY+'.capture',null);if(lastCapture?.result)progress('最近获取：'+lastCapture.result);
-   if(!status.ready)throw Error('种豆缺少：'+status.missing.join('、')+'；尚未发送活动请求');
+   if(!status.ready){for(const [fn,name] of [['apTaskList','任务列表'],['apStartTaskTime','开始计时'],['apDoLimitTimeTask','提交计时']]){const e=lastCapture?.byFunction?.[fn];progress(name+'获取记录：'+(e?(e.phase==='request'?'请求阶段；':'响应阶段；')+e.result:'0'));}throw Error('种豆缺少：'+status.missing.join('、')+'；尚未发送活动请求');}
    const r=await createPlantActivity(host,createFarmCrypto(host),account,login).run();localWrite('last',r);console.log('[种豆得豆] '+plReport(r));notify(r.stopped?'执行停止':'执行完成',r.stopped?r.error:'完成 '+r.completed+' 次；收取 '+r.collected+' 收获值');
   }catch(e){const text=/^种豆/.test(String(e.message))?String(e.message).slice(0,180):'种豆执行未完成，已停止';console.log('[种豆得豆] '+text);notify('未继续',text);}
   finally{if(owned&&localRead('lock',null)?.runId===runId)$persistentStore.write('',PL_PREFIX+'lock');$done({});}
