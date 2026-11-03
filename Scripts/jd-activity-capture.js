@@ -1,4 +1,4 @@
-// Shared capture 20261103-3: own sign-ins and activities only.
+// Shared capture 20261103-4: own sign-ins and activities only.
 // Shared credential capture 20261101-1: medical daily sign-in only.
 // Shared credential capture 20261030-1; retired finance/medical activities removed.
 // Medical daily capture integration 20261029-5.
@@ -1272,35 +1272,61 @@ const plText=s=>String(s||'未命名任务').replace(/[\r\n]/g,' ').slice(0,80);
 const plId=t=>String(t?.pipeExt?.assignmentId||'');
 function plList(d){if(!Array.isArray(d)||d.length>200)throw Error('种豆任务列表结构变化');const seen=new Set();for(const t of d){if(!t||!plId(t)||seen.has(plId(t))||!Number.isInteger(t.taskDoTimes)||t.taskDoTimes<0||!Number.isInteger(t.taskLimitTimes)||t.taskLimitTimes<1||t.taskDoTimes>t.taskLimitTimes||typeof t.taskType!=='string')throw Error('种豆任务状态不完整');seen.add(plId(t));}return d;}
 const plFinished=t=>t.taskFinished===true||t.taskDoTimes>=t.taskLimitTimes;
+function plCredentialStatus(a){
+ const t=a?.templates||{},s=a?.signing||{},parts=[['主页',!!t.plantBeanIndex],['任务列表',!!(t['apTaskList:0']||t['apTaskList:6'])],['主页签名',!!(s.root?.environment&&s.root?.eidToken)],['计时签名',!!(s.platform?.environment&&s.platform?.eidToken)]];
+ return {ready:parts.every(x=>x[1]),missing:parts.filter(x=>!x[1]).map(x=>x[0]),text:parts.map(x=>x[0]+'：'+(x[1]?'有':'缺')).join('；')};
+}
+function plPrepare(a){
+ const out=plClone(a),t=out.templates||{};
+ // queryType=6 and queryType=0 use the same captured account/page parameters.
+ // The complete-list request body is independently observed in HAR492.
+ if(!t['apTaskList:0']&&t['apTaskList:6']){t['apTaskList:0']=plClone(t['apTaskList:6']);t['apTaskList:0'].body.queryType=0;t['apTaskList:0'].derivedFrom=6;}
+ return out;
+}
+function plCaptureResult(host,record,fn,result,updated=false,first=false){
+ const s=plCredentialStatus(record),message=result+'；'+s.text,key=PL_KEY+'.capture',old=host.read(key,null);
+ host.write(key,{at:host.observedAt||Date.now(),fn,result,status:s});
+ return {updated:updated?[PL_KEY]:[],first,plantStatus:message,plantNotify:old?.status?.text!==s.text||old?.result!==result};
+}
+const PL_LANDINGS={
+ 'https://pro.m.jd.com/mall/active/3fQ6Xs3McAgEgnJkYhL8qQdy9xNg/index.html':['babelChannel'],
+ 'https://pro.m.jd.com/mall/active/4JRfHorUDXgL77E9YdNxSCNMKwkJ/index.html':['pageNum','rankId','queryType','fromName','preSrc','bbtf','rankType','preventPV','forceCurrentView']
+};
+function plLanding(url){
+ const m=String(url||'').match(/^(https:\/\/pro\.m\.jd\.com\/mall\/active\/[A-Za-z0-9]+\/index\.html)(?:\?([^#]*))?$/),allowed=m&&PL_LANDINGS[m[1]];if(!allowed)return false;
+ try{const q=plForm(m[2]);return Object.keys(q).every(k=>allowed.includes(k)&&/^[A-Za-z0-9_-]{1,40}$/.test(q[k]));}catch(_){return false;}
+}
 function plRound(j){const a=j?.data?.roundList;if(!Array.isArray(a))throw Error('种豆主页面结构变化');const current=a.filter(x=>String(x.roundState)==='2');if(current.length!==1||typeof current[0].roundId!=='string'||!current[0].roundId||!/^\d+$/.test(String(current[0].growth)))throw Error('种豆本轮进度不明确');const r=current[0];if(r.bubbleInfos!==undefined&&!Array.isArray(r.bubbleInfos))throw Error('种豆气泡结构变化');const seen=new Set();for(const b of r.bubbleInfos||[]){if(typeof b.nutrientsType!=='string'||!b.nutrientsType||seen.has(b.nutrientsType)||!Number.isInteger(b.nutrNum)||b.nutrNum<=0||b.nutrNum>100000)throw Error('种豆气泡数据不完整');seen.add(b.nutrientsType);}return r;}
 function plItem(t){
  if(t.taskType!=='BROWSE_CHANNEL'||![1,2].includes(t.timeLimitSwitch)||!Number.isInteger(t.timeLimitPeriod)||t.timeLimitPeriod<1||t.timeLimitPeriod>180||!Array.isArray(t.taskItemList))return null;
- // Game, video, external-app, order and subscription tasks stay in the App.
+ // Titles and a five-second timer do not establish the landing-page behavior.
+ // Only the two ordinary shopping paths manually completed in HAR492 are used.
  if(/视频|直播|小游戏|玩AI|邀请|助力|下单|组件|提醒/.test(plText(t.taskShowTitle)))return null;
- return t.taskItemList.find(i=>i&&typeof i.itemId==='string'&&/^https:\/\/(?:pro\.m\.jd\.com\/mall\/active\/|(?:u|member)\.jr\.jd\.com\/)/.test(i.itemId)&&!i.clickUrl&&!i.itemUrl&&typeof i.pipeExt?.itemId==='string'&&i.pipeExt.itemId&&['1',1].includes(i.itemType))||null;
+ return t.taskItemList.find(i=>i&&plLanding(i.itemId)&&!i.clickUrl&&!i.itemUrl&&typeof i.pipeExt?.itemId==='string'&&i.pipeExt.itemId&&['1',1].includes(i.itemType))||null;
 }
 function plCapture(host,request,response,decode){
  if(request?.method!=='POST'||Number(response?.status)!==200||['X-Lazing-Plant-Run','X-Lazing-Signin-Run','X-Lazing-Farm-Run','X-Lazing-Activity-Run'].some(k=>plHeader(request.headers,k)==='1'))return null;
- const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?)(?:\?([^#]*))?$/);if(!m||!plRef(plHeader(request.headers,'Referer')))return null;
+ const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?)(?:\?([^#]*))?$/);if(!m)return null;
  const q=plForm(m[2]),p=plForm(request.body);for(const k of Object.keys(p)){if(k in q&&q[k]!==p[k])throw Error('种豆请求参数冲突');q[k]=p[k];}
  const f=q.functionId;if(!['apTaskList',...Object.keys(PL_APPS)].includes(f))return null;
  const b=JSON.parse(q.body||'{}'),platform=f.startsWith('ap'),kind=platform?'platform':'root';
  if(platform&&(b.linkId!==PL_LINK||q.appid!==(f==='apStartTaskTime'?'activity_platform_se':'activities_platform'))||!platform&&(q.appid!=='signed_wh5'||b.monitor_source!=='plant_m_plant_index'))return null;
- if(platform&&m[1]!=='https://api.m.jd.com/api'||!platform&&m[1]!=='https://api.m.jd.com/')return null;
+ if(platform&&!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(m[1])||!platform&&m[1]!=='https://api.m.jd.com/')return null;
+ if(!plRef(plHeader(request.headers,'Referer'))&&!(platform&&plHeader(request.headers,'Referer')==='https://pro.m.jd.com/'))return plCaptureResult(host,host.read(PL_KEY,null),f,'页面来源未通过检查');
  if(f==='apTaskList'&&![0,6].includes(b.queryType))return null;
- const j=JSON.parse(response.body||'{}');if(!plAccepted(j))return null;if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);
+ const j=JSON.parse(response.body||'{}');if(!plAccepted(j))return plCaptureResult(host,host.read(PL_KEY,null),f,'接口未成功，未更新');if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);
  let ck=plHeader(request.headers,'Cookie');const canonical=host.read('JD_SIGNIN_LOGIN_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
  const directPin=plCookie(ck,'pt_pin'),directKey=plCookie(ck,'pt_key');
  // The native webview in HAR492 sends only its page cookie. Reuse a captured
  // canonical login; a signed environment must still match that account below.
  if(!directPin&&!directKey&&canonical?.cookie){ck=canonical.cookie+ck;}
- const pin=plCookie(ck,'pt_pin');if(!pin||!plCookie(ck,'pt_key')||!plHeader(request.headers,'User-Agent'))return null;
+ const pin=plCookie(ck,'pt_pin');if(!pin||!plCookie(ck,'pt_key')||!plHeader(request.headers,'User-Agent'))return plCaptureResult(host,host.read(PL_KEY,null),f,'Cookie或设备信息缺失');
  const old=host.read(PL_KEY,null),bound=host.read('JD_SIGNIN_ACCOUNT_V1',null)||host.read('QL_BRIDGE_ACCOUNT_V1',null);
  if(old?.pin&&old.pin!==pin||bound?.pin&&bound.pin!==pin||canonical?.pin&&canonical.pin!==pin)return null;
  const at=host.observedAt||Date.now(),record=old?plClone(old):{pin,templates:{},signing:{}};record.templates=record.templates||{};record.signing=record.signing||{};
  const key=f==='apTaskList'?f+':'+b.queryType:f;if(at<Number(record.templates[key]?.at||0))return null;
  const headers={Cookie:ck};for(const k of ['User-Agent','Referer','Origin','request-from','x-referer-page','x-rp-client']){const v=plHeader(request.headers,k);if(v)headers[k]=v;}
- if(PL_APPS[f]){const parts=String(q.h5st||'').split(';');if(parts.length!==10||parts[2]!==PL_APPS[f]||parts[5]!=='5.3'||parts[9]!==PL_ENCODING[kind]||!q['x-api-eid-token'])return null;const env=decode(parts[7]);if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))return null;
+ if(PL_APPS[f]){const parts=String(q.h5st||'').split(';');if(parts.length!==10||parts[2]!==PL_APPS[f]||parts[5]!=='5.3'||parts[9]!==PL_ENCODING[kind])return plCaptureResult(host,old,f,'签名格式未通过检查');if(!q['x-api-eid-token'])return plCaptureResult(host,old,f,'签名设备标识缺失');let env;try{env=decode(parts[7]);}catch(_){return plCaptureResult(host,old,f,'签名环境未通过检查');}if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))return null;
   if(at>=Number(record.signing[kind]?.at||0))record.signing[kind]={environment:parts[7],encoding:parts[9],at,eidToken:q['x-api-eid-token']};
  }
  const params=plClone(q);delete params.h5st;delete params.t;delete params.body;
@@ -1309,7 +1335,7 @@ function plCapture(host,request,response,decode){
  if(f==='plantBeanIndex')base={wxHeadImgUrl:'',shareUuid:'',channel:String(b.channel||''),plantUpdateV1:'v1',monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
  if(f==='cultureBean')base={monitor_source:'plant_m_plant_index',monitor_refer:'plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
  record.templates[key]={endpoint:m[1],params,headers,body:base,at};record.updatedAt=Math.max(at,Number(record.updatedAt||0));host.write(PL_KEY,record);
- return {updated:[PL_KEY],first:!old};
+ return plCaptureResult(host,record,f,plCredentialStatus(record).ready?'凭据已齐':'已保存部分凭据',true,!old);
 }
 
 async function jsCapture(host,request,response,parsers,decode){
@@ -1381,11 +1407,12 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
    const names={...Object.fromEntries(Object.values(JB_CONFIG).map(c=>[c.key,c.label])),[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_PLANT_CHECKIN_ACCOUNT_V1':'种豆', [PL_KEY]:'种豆活动','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,plant:runPlantCapture,farm:farmCapture},farmDecodeEnvironment);
-   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
+   if(r?.plantStatus){console.log('[种豆凭据] '+r.plantStatus);if(r.plantNotify)$notification.post('种豆得豆','凭据获取',r.plantStatus);}
+   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(!r.plantStatus&&(r.updated.includes(JS_KEYS.login)||r.first))$notification.post('京东签到','凭据已更新',text);}
   }catch(_){console.log('[签到凭据] 获取未完成，保留原记录');}
   finally{$done({});}
  })();
 }
 
-if(typeof module!=="undefined")module.exports={PL_KEY,plCapture,JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={PL_KEY,plCapture,plCredentialStatus,JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,runPlantCapture,farmCapture};
 
