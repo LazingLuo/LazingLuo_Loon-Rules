@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..'),api=require(path.join(root,'Scripts/jd-signin.js'));
-assert.deepEqual(api.JS_TASKS.map(x=>x[0]),['daily','scratch','blindbox','jxzy','finance','home','index','medical','gameDaily','gear','wallet','hardware']);
+assert.deepEqual(api.JS_TASKS.map(x=>x[0]),['daily','scratch','blindbox','jxzy','finance','home','index','medical','gameDaily','gear','wallet','hardware','used']);
 for(const dir of ['Scripts','Plugins','Docs'])for(const name of fs.readdirSync(path.join(root,dir))){
  const s=fs.readFileSync(path.join(root,dir,name),'utf8');
  assert(!/JD_SPECIAL_CHANNEL|createSpecialClient|tjCapture|特价频道|特价签到|jd-special-activity|\bspecial:/.test(s),dir+'/'+name);
@@ -18,5 +18,5 @@ assert.throws(()=>api.jsTarget('special',{url:'https://api.m.jd.com/',body:'func
    assert.equal(result,null);
   }
  }
- console.log('Removed channel: twelve retained sign-ins, no menu/client/capture, retired request rejected; zero live requests.');
+ console.log('Removed channel: thirteen retained sign-ins, no menu/client/capture, retired request rejected; zero live requests.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

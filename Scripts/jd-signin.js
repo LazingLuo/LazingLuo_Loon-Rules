@@ -1,8 +1,8 @@
-// 京东合并签到 2026-11-03.1; fixed check-in scope, local credentials.
+// 京东合并签到 2026-11-03.2; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-03.1';
+const JS_VERSION='2026-11-03.2';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到'],['used','特价二手签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
 const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
 const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
@@ -58,7 +58,21 @@ function jsForm(text){const out={};for(const part of String(text||'').split('&')
 const jsEncode=p=>Object.keys(p).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(p[k])).join('&');
 function jsParams(request){const url=String(request.url||''),query=url.includes('?')?jsForm(url.split('?')[1].split('#')[0]):{},body=jsForm(request.body),p={...query,...body};for(const k of Object.keys(query))if(body[k]!==undefined&&query[k]!==body[k])throw Error('请求参数不一致');return p;}
 function jsEndpoint(url){const s=String(url||'').split('?')[0];if(!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(s))throw Error('接口地址不符');return s;}
-function jsSettings(value){let p=value;if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){throw Error('等待参数格式错误');}}if(!p||typeof p!=='object'||Array.isArray(p))throw Error('请从签到插件运行');const gap=Number(p.gapSeconds===undefined?15:p.gapSeconds);if(!Number.isInteger(gap)||gap<0||gap>120||gap>0&&gap<5)throw Error('随机等待须填0或5–120秒');return {gap};}
+function jsSettings(value){
+ let p=value;if(typeof p==='string'){try{p=JSON.parse(p);}catch(_){throw Error('等待参数格式错误');}}
+ if(!p||typeof p!=='object'||Array.isArray(p))throw Error('请从签到插件运行');
+ const gap=Number(p.gapSeconds===undefined?15:p.gapSeconds);
+ if(!Number.isInteger(gap)||gap<0||gap>120||gap>0&&gap<5)throw Error('随机等待须填0或5–120秒');
+ // Only the scheduled entry passes autoEnabled. Manual entry receives gapSeconds only.
+ if(!Object.prototype.hasOwnProperty.call(p,'autoEnabled'))return {gap};
+ if(typeof p.autoEnabled!=='boolean')throw Error('自动签到开关参数错误');
+ const raw=p.startDelaySeconds===undefined?0:p.startDelaySeconds;
+ if(typeof raw!=='number'&&(typeof raw!=='string'||!/^\d+$/.test(raw)))throw Error('自动启动延迟须填0–1800秒');
+ const startDelaySeconds=Number(raw);
+ if(!Number.isInteger(startDelaySeconds)||startDelaySeconds<0||startDelaySeconds>1800)throw Error('自动启动延迟须填0–1800秒');
+ return {gap,automatic:true,autoEnabled:p.autoEnabled,startDelaySeconds};
+}
+
 function jsProfiles(read){const retail=read('JD_CHECKIN_TEST_ACCOUNT_V1',null),jx=read('JXZY_CHECKIN_ACCOUNT_V1',null),plant=read('JD_PLANT_CHECKIN_ACCOUNT_V1',null),finance=read('JD_JR_CHECKIN_ACCOUNT_V1',null);return {retail,jx,plant,finance};}
 function jsLogin(read){
  const profiles=jsProfiles(read),bound=read(JS_KEYS.bound,null),candidates=[];
@@ -113,6 +127,7 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
  gameDaily:{key:'JD_GAME_DAILY_ACCOUNT_V1',label:'互动游戏签到',page:'https://pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',appid:'wegame-hub',query:'weGameHome',claim:'weGameLottery',apps:{weGameHome:'101aa',weGameLottery:'730a6'},link:'MWC_-5cWq-JH1wrPPteH4w'},
+ used:{key:'JD_USED_DAILY_ACCOUNT_V1',label:'特价二手签到',page:'https://pro.m.jd.com/mall/active/3cH14YvzzeJEicxrjzhz1JqE9jgK/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69e98e5792e74fba21d62494'},
  gear:{key:'JD_GEAR_DAILY_ACCOUNT_V1',label:'装备馆签到',page:'https://pro.m.jd.com/mall/active/FEtAd86BW8TpiRKshRZX8PPEjpo/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a6890eaa0c21743163fe444'},
  wallet:{key:'JD_WALLET_DAILY_ACCOUNT_V1',label:'赚话费签到',page:'https://prodev.m.jd.com/mall/active/eEcYM32eezJB7YX4SBihziJCiGV/index.html',appid:'h5-sep',query:'DATAWALLET_USER_SIGN_INFO',claim:'DATAWALLET_USER_SIGN',apps:{DATAWALLET_USER_SIGN_INFO:'60d0e',DATAWALLET_USER_SIGN:'60d0e'}},
  hardware:{key:'JD_HARDWARE_DAILY_ACCOUNT_V1',label:'五金城签到',page:'https://pro.m.jd.com/mall/active/4RYbb8NtVAegmT35SuM2N3KKYLWt/index.html',appid:'i-home_fe',query:'bom_queryInteractiveInfo',claim:'bom_doInteractiveAssignment',apps:{bom_doInteractiveAssignment:'3c653'},activity:'4RYbb8NtVAegmT35SuM2N3KKYLWt'}
@@ -122,7 +137,7 @@ function jbInner(b){return typeof b.body==='string'?JSON.parse(b.body):null;}
 function jbScope(task,p,b){
  const c=JB_CONFIG[task],f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
  if(task==='gameDaily')return b.linkId===c.link&&b.envType===1&&(f!==c.claim||b.status===1&&typeof b.markStr==='string'&&b.markStr.length>0&&b.markStr.length<4096);
- if(task==='gear')return b.craftId===c.craft&&b.source==='jxzy'&&b.sceneval===2&&b.buid===325&&b.appCode==='ms1888ebbf'&&(f!==c.claim||b.itemId==='1');
+ if(c.craft)return b.craftId===c.craft&&b.source==='jxzy'&&b.sceneval===2&&b.buid===325&&b.appCode==='ms1888ebbf'&&(f!==c.claim||b.itemId==='1');
  if(task==='wallet')return Object.keys(b).sort().join(',')==='encStr,t'&&Number.isSafeInteger(b.t)&&b.encStr===jbMd5(String(b.t)+'e9c398ffcb2d4824b4d0a703e38yffdd');
  if(f===c.query)return typeof b.client==='string'&&typeof b.clientVersion==='string'&&Object.keys(b).sort().join(',')==='client,clientVersion';
  const x=jbInner(b);return b.appid===c.appid&&b.sign===11&&Number.isSafeInteger(b.t)&&x?.activity_id===c.activity&&x.template_id==='00043621'&&x.floor_id==='133505424'&&x.taskType===0&&typeof x.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(x.encryptAssignmentId)&&!Object.prototype.hasOwnProperty.call(x,'actionType')&&x.extParam?.sceneid==='babel_'+c.activity;
@@ -132,7 +147,7 @@ function jbData(task,j){
  if(!ok||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('签到接口未通过');return j.data;
 }
 function jbState(task,j,day){
- const d=jbData(task,j);
+ const c=JB_CONFIG[task],d=jbData(task,j);
  if(task==='gameDaily'){
   const a=d.signMainVo,list=d.signListVo;if(!a||!Array.isArray(list)||list.length>32||![1,3].includes(a.currentStatus)||a.beforeTaskVo)throw Error('签到状态变化');
   const today=list.filter(x=>x?.todayFlag===1&&x.signDate===day&&x.status===3);
@@ -140,7 +155,7 @@ function jbState(task,j,day){
   if(a.currentStatus===1&&today.length===0&&list.filter(x=>x?.signableTodayFlag===1&&x.status===1&&!x.signDate).length===1&&typeof a.markStr==='string'&&a.markStr.length>0&&a.markStr.length<4096)return {done:false,markStr:a.markStr};
   throw Error('签到状态不一致');
  }
- if(task==='gear'){
+ if(c.craft){
   const signed=Array.isArray(d.signList)&&d.signList.some(s=>typeof s==='string'&&s.startsWith(day+'_'));
   if(d.status===2&&signed&&d.itemId==='1')return {done:true};
   if(d.status===1&&!signed&&d.itemId==='1'&&(!d.signList||Array.isArray(d.signList)))return {done:false};throw Error('签到状态不一致');
@@ -157,11 +172,11 @@ function jbState(task,j,day){
  if(t.completionFlag===false&&t.completionCnt===0&&t.canParticipation===true&&!t.reachUpperLimit&&t.status===1)return {done:false,id:t.encryptAssignmentId};throw Error('签到状态不一致');
 }
 function jbReward(task,j){
- const d=jbData(task,j),num=v=>{if(typeof v==='string'&&!/^\d+(?:\.\d+)?$/.test(v))return null;const n=Number(v);return (typeof v==='number'||typeof v==='string')&&Number.isFinite(n)&&n>=0&&n<=100000?n:null;};
+ const c=JB_CONFIG[task],d=jbData(task,j),num=v=>{if(typeof v==='string'&&!/^\d+(?:\.\d+)?$/.test(v))return null;const n=Number(v);return (typeof v==='number'||typeof v==='string')&&Number.isFinite(n)&&n>=0&&n<=100000?n:null;};
  if(task==='gameDaily'){
   const a=d.awardVo,b=d.awardResultVO,n=num(b?.amount);return a?.awardName==='BEAN'&&b?.prizeType===3&&b.sendResult===true&&n!==null&&Number.isInteger(n)&&num(a.awardGivenNumber)===n?{beanQuantity:n}:{};
  }
- if(task==='gear'){
+ if(c.craft){
   if(!Array.isArray(d.prizeInfos)||!d.prizeInfos.length)return {};let n=0,found=false;for(const x of d.prizeInfos){if(x.prizeType!==2)continue;const v=num(x.discount);if(v===null||!Number.isInteger(v))return {};n+=v;found=true;}return found&&n<=100000?{beanQuantity:n}:{};
  }
  if(task==='hardware'){
@@ -2146,16 +2161,16 @@ function createExtraSignins(host,crypto){
    const safe=()=>{check();if(host.login()?.pin!==pin||host.login()?.cookie!==login.cookie||host.read(JS_KEYS.login,null)?.pin&&host.read(JS_KEYS.login,null).pin!==pin||JSON.stringify(host.read(c.key,null))!==snapshot)throw Error('日期或账号资料变化');};
    async function options(f,action){
     safe();const claim=f===c.claim;
-    const t=profile.templates[claim?'claim':'query']||((task==='gameDaily'||task==='gear'||task==='wallet')?profile.templates.query:null);
+    const t=profile.templates[claim?'claim':'query']||((task==='gameDaily'||c.craft||task==='wallet')?profile.templates.query:null);
     if(!t?.params)throw Error('缺少签到页面参数，请手动签到一次获取');
     const p={...t.params,functionId:f},now=Date.now();let b;
     if(task==='gameDaily')b=claim?{envType:1,linkId:c.link,status:1,markStr:action.markStr}:{envType:1,linkId:c.link,babelChannel:profile.templates.query?.body.babelChannel||''};
-    else if(task==='gear'){b={...t.body};delete b.tttId;if(!claim&&profile.templates.query?.body.tttId)b.tttId=profile.templates.query.body.tttId;if(claim)b.itemId='1';b.time=now;b.signStr=jbBodySign(b);}
+    else if(c.craft){b={...t.body};delete b.tttId;if(!claim&&profile.templates.query?.body.tttId)b.tttId=profile.templates.query.body.tttId;if(claim)b.itemId='1';b.time=now;b.signStr=jbBodySign(b);}
     else if(task==='wallet')b={t:now,encStr:jbMd5(String(now)+'e9c398ffcb2d4824b4d0a703e38yffdd')};
     else if(!claim)b={...t.body};
     else b={appid:c.appid,body:JSON.stringify({encryptAssignmentId:action.id,taskType:0,...t.body}),sign:11,t:now};
     p.body=JSON.stringify(b);
-    if(task==='gameDaily'||task==='gear'||task==='hardware'&&!claim){p.t=String(now);if(task==='hardware')p.sign='11';}
+    if(task==='gameDaily'||c.craft||task==='hardware'&&!claim){p.t=String(now);if(task==='hardware')p.sign='11';}
     if(c.apps[f]){
      const input={};for(const k of ['functionId','appid','client','body','clientVersion','sign','t','jsonp'])if(p[k])input[k]=k==='body'?crypto.hash(p.body):p[k];
      p.h5st=await crypto.signOnline(c.apps[f],{pin,headers},env,input);safe();
@@ -2348,17 +2363,32 @@ function createSignins(host,legacy,crypto){
  }
  async function run(options){
   const settings=jsSettings(options),results=[],pauses=[];
+  if(settings.automatic&&!settings.autoEnabled)return {disabled:true};
   const existing=read(JS_KEYS.lock,null),now=host.now();
-  if(existing?.expires>now)return {busy:true,remainingSeconds:Math.ceil((existing.expires-now)/1000),legacyLock:![2,3].includes(existing.version),name:existing.name||'',taskRemainingSeconds:existing.taskDeadline?Math.max(0,Math.ceil((existing.taskDeadline-now)/1000)):null};
+  if(existing?.expires>now)return {busy:true,remainingSeconds:Math.ceil((existing.expires-now)/1000),legacyLock:![2,3].includes(existing.version),name:existing.name||'',...(existing.phase==='waiting'?{waiting:true,startupRemainingSeconds:Math.max(0,Math.ceil((existing.scheduledFor-now)/1000))}:{}),taskRemainingSeconds:existing.taskDeadline?Math.max(0,Math.ceil((existing.taskDeadline-now)/1000)):null};
   const state=jsLogin(read);pin=state.pin;login=state.login;date=host.day();
   if(!pin)throw Error('缺少京东登录凭据');
+  const startupDelaySeconds=settings.automatic?Math.floor(host.random()*(settings.startDelaySeconds+1)):0;
   const startedAt=host.now();leaseError=null;
-  lockToken={version:3,id:startedAt+':'+host.random(),startedAt,heartbeatAt:startedAt,expires:startedAt+LEASE_MS,deadline:startedAt+RUN_LIMIT_MS};
+  lockToken={version:3,id:startedAt+':'+host.random(),startedAt,heartbeatAt:startedAt,expires:startedAt+LEASE_MS,deadline:startedAt+startupDelaySeconds*1000+RUN_LIMIT_MS};
   write(JS_KEYS.lock,lockToken);owned=true;
   let stopped=false,mayPublish=false;
   try{
    if(!read(JS_KEYS.bound,null))write(JS_KEYS.bound,{pin});
    heartbeatTimer=host.setTimeout(heartbeat,HEARTBEAT_MS);
+   if(startupDelaySeconds>0){
+    lockToken={...lockToken,name:'自动启动等待',phase:'waiting',scheduledFor:startedAt+startupDelaySeconds*1000,task:'',taskDeadline:null};write(JS_KEYS.lock,lockToken);
+    write(JS_KEYS.last,{version:JS_VERSION,date,finished:false,phase:'waiting',startupDelaySeconds,scheduledFor:startedAt+startupDelaySeconds*1000,results:[],pauses:[]});
+    host.log('自动签到：随机等待 '+startupDelaySeconds+' 秒后开始');
+    // The same renewable lease owns both waiting and execution. Another run cannot
+    // occupy the wait period; cancelled or expired runs cannot send late requests.
+    for(let left=startupDelaySeconds*1000;left>0;){
+     guard();const step=Math.min(left,30000);await host.sleep(step);guard();left-=step;
+    }
+    const began=host.now();lockToken={...lockToken,name:'',phase:'executing',scheduledFor:null,heartbeatAt:began,expires:began+LEASE_MS,deadline:began+RUN_LIMIT_MS};write(JS_KEYS.lock,lockToken);
+    host.log('自动签到：等待结束，开始执行');
+   }
+
    for(let i=0;i<JS_TASKS.length;i++){
     guard();const [task,name]=JS_TASKS[i];host.log('第 '+(i+1)+'/'+JS_TASKS.length+' 项：'+name);
     const row=await runTask(task,name);
@@ -2380,7 +2410,7 @@ function createSignins(host,legacy,crypto){
    if(mayPublish&&!host.rawWrite('',JS_KEYS.lock))host.log('执行锁清理失败，停止续期后2分钟内释放');
    owned=false;
   }
-  const report={version:JS_VERSION,date,finished:!stopped,results,pauses,message:results.map(jsLine).join('\n')};
+  const report={version:JS_VERSION,date,finished:!stopped,results,pauses,...(settings.automatic?{startupDelaySeconds}:{}),message:results.map(jsLine).join('\n')};
   if(mayPublish){write(JS_KEYS.last,report);const h=read(JS_KEYS.history,[]);write(JS_KEYS.history,(Array.isArray(h)?h:[]).concat(report).slice(-20));}return report;
  }
  return {run};
@@ -2410,8 +2440,9 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    const crypto=createSigninCrypto({...host,requestAlgo:o=>{jsTarget('signer',o);return host.request('signer',o);},progress:()=>{}});
    const runner=createSignins(host,{retail:runRetailSignin,jxzy:runJxSignin,home:runHomeSignin,index:runIndexSignin,finance:runFinanceSignin},crypto);
    const r=await runner.run(typeof $argument==='undefined'?{}:$argument);
-   if(r.busy){
-    const text=r.legacyLock?'上次签到占用尚未到期，剩余约 '+Math.ceil(r.remainingSeconds/60)+' 分钟。':r.taskRemainingSeconds!==null?'正在执行'+r.name+'，本项最多还等 '+r.taskRemainingSeconds+' 秒。':'上次签到仍在占用，当前租约剩余 '+r.remainingSeconds+' 秒；后台续期时会延长。';
+   if(r.disabled){host.log('自动签到已关闭');}
+   else if(r.busy){
+    const text=r.waiting?'自动签到正在等待，约 '+r.startupRemainingSeconds+' 秒后开始。':r.legacyLock?'上次签到占用尚未到期，剩余约 '+Math.ceil(r.remainingSeconds/60)+' 分钟。':r.taskRemainingSeconds!==null?'正在执行'+r.name+'，本项最多还等 '+r.taskRemainingSeconds+' 秒。':'上次签到仍在占用，当前租约剩余 '+r.remainingSeconds+' 秒；后台续期时会延长。';
     host.log(text);$notification.post('京东签到','暂未执行',text);
    }
    else $notification.post('京东签到',r.finished?'本次签到结果':'执行停止',r.message);

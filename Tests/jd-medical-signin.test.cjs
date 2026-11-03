@@ -27,7 +27,7 @@ const run=h=>api.createExtraSignins(h,h.crypto).run('medical');
 const capture=(h,r,j)=>cap.jsCapture(h,r,reply(j),{},cap.farmDecodeEnvironment);
 let total=0;async function test(name,f){await f();total++;console.log('OK '+name);}
 (async()=>{
- await test('medical is separate from both existing kit sign-ins',()=>{assert.deepEqual(api.JS_TASKS.slice(7,8),[['medical','看病买药签到']]);assert.equal(api.JS_TASKS.length,12);assert(!api.JS_TASKS.some(x=>['hs','ys','delivery','game'].includes(x[0])));assert(!api.JS_TASKS.some(x=>x[0]==='plant'));});
+ await test('medical is separate from both existing kit sign-ins',()=>{assert.deepEqual(api.JS_TASKS.slice(7,8),[['medical','看病买药签到']]);assert.equal(api.JS_TASKS.length,13);assert(!api.JS_TASKS.some(x=>['hs','ys','delivery','game'].includes(x[0])));assert(!api.JS_TASKS.some(x=>x[0]==='plant'));});
  await test('already signed today makes one query and no claim',async()=>{const h=host();h.reply=()=>reply(page(true));const r=await run(h);assert.equal(r.status,'already_done');assert.equal(r.beanQuantity,undefined);assert.equal(h.calls.length,1);});
  await test('fresh ID, exact claim scope, fresh Cookie and explicit one-bean reward',async()=>{
   const h=host();let done=false;h.reply=o=>{const p=api.jsParams(o),b=JSON.parse(p.body);assert.equal(p.appid,'jdh-middle');assert.equal(p.h5st.split(';')[2],'4b818');assert(o.headers.Cookie.includes('FRESH'));assert(o.headers.Cookie.includes('page=kept'));assert(!o.headers.Cookie.includes('FAKE_SECRET'));
