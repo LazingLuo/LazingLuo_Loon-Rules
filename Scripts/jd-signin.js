@@ -1,8 +1,8 @@
-// 京东合并签到 2026-11-02.1; fixed check-in scope, local credentials.
+// 京东合并签到 2026-11-03.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-02.3';
+const JS_VERSION='2026-11-03.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
 const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
 const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
@@ -64,6 +64,7 @@ function jsLogin(read){
  const profiles=jsProfiles(read),bound=read(JS_KEYS.bound,null),candidates=[];
  const add=(p,headers,time)=>{const pair=jsPair(jsHeader(headers,'cookie'));if(pair&&(!p||p===pair.pin))candidates.push({...pair,headers,time:Number(time)||0});};
  for(const k of [JS_KEYS.login,'QL_BRIDGE_CREDENTIAL_V1']){const p=read(k,null);if(p?.pin&&p.cookie)add(p.pin,p.headers||{Cookie:p.cookie},p.capturedAt);}
+ for(const c of Object.values(JB_CONFIG)){const p=read(c.key,null);if(p)add(p.pin,p.headers,p.capturedAt);}
  for(const p of Object.values(profiles.retail?.modes||{}))add(profiles.retail.pin,p.headers,p.loginUpdatedAt||p.capturedAt);
  if(profiles.jx)add(profiles.jx.pin,profiles.jx.headers,profiles.jx.loginUpdatedAt||profiles.jx.capturedAt);
  if(profiles.plant?.query)add(profiles.plant.pin,profiles.plant.query.headers,profiles.plant.query.loginUpdatedAt||profiles.plant.query.capturedAt);
@@ -94,12 +95,83 @@ function jsTarget(task,o){
   if(!['https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/queryWeekSignMain','https://ms.jr.jd.com/gw2/generic/jrSign/h5/m/dailyCashSignReceive','https://ms.jr.jd.com/gw2/generic/legogw/h5/m/getPageInfoDoubleSignInForH5','https://ms.jr.jd.com/gw2/generic/DoubleSign/h5/m/jrSendSignAward'].includes(url))throw Error('金融接口地址不符');return;
  }
  jsEndpoint(url);const p=jsParams(o),f=p.functionId,b=JSON.parse(p.body||'{}');
+ if(JB_CONFIG[task]){const claim=p.functionId===JB_CONFIG[task].claim,method=String(o.method||'post').toLowerCase(),get=task==='hardware'&&claim,endpoint=task==='hardware'&&!claim?'client.action':'api';if(!jbScope(task,p,b)||method!==(get?'get':'post')||url.split('?')[0]!=='https://api.m.jd.com/'+endpoint)throw Error('签到参数结构变化');return;}
  const allowed={daily:['findBeanSceneNew','bff_rightsCenter_interaction'],scratch:['bff_rightsCenter_jdInteractTask','bff_rightsCenter_interaction'],blindbox:['bff_marketing_interaction'],jxzy:['jxzy_active_querySign','jxzy_active_drawSign'],home:['jxzy_active_querySign','jxzy_active_drawSign'],index:['jxzy_active_querySign','jxzy_active_drawSign'],medical:['market_daily_pageIndex','market_daily_doCompleteTask']}[task];
  if(!allowed||!allowed.includes(f))throw Error('签到接口不符');
  if(task==='home'&&(b.craftId!=='69ae8eb86a31c802e19f9f8f'||p.appid!=='jx_h5_babel'))throw Error('家电家居签到活动不符');
  if(task==='index'&&(b.craftId!=='6a8270f9a65ae0dacfa38042'||p.appid!=='jx_h5_babel'))throw Error('京东指数签到活动不符');
  if(task==='medical'&&!jsMedicalScope(p,b))throw Error('看病买药签到参数不符');
 }
+function jbMd5(text){
+
+function Ae(e,t){var n=(65535&e)+(65535&t);return(e>>16)+(t>>16)+(n>>16)<<16|65535&n}function He(e,t,n,r,o,i){return Ae((a=Ae(Ae(t,e),Ae(r,i)))<<(c=o)|a>>>32-c,n);var a,c}function Ne(e,t,n,r,o,i,a){return He(t&n|~t&r,e,t,o,i,a)}function Le(e,t,n,r,o,i,a){return He(t&r|n&~r,e,t,o,i,a)}function Je(e,t,n,r,o,i,a){return He(t^n^r,e,t,o,i,a)}function Be(e,t,n,r,o,i,a){return He(n^(t|~r),e,t,o,i,a)}function Me(e,t){var n,r,o,i,a;e[t>>5]|=128<<t%32,e[14+(t+64>>>9<<4)]=t;var c=1732584193,u=-271733879,s=-1732584194,l=271733878;for(n=0;n<e.length;n+=16)r=c,o=u,i=s,a=l,c=Ne(c,u,s,l,e[n],7,-680876936),l=Ne(l,c,u,s,e[n+1],12,-389564586),s=Ne(s,l,c,u,e[n+2],17,606105819),u=Ne(u,s,l,c,e[n+3],22,-1044525330),c=Ne(c,u,s,l,e[n+4],7,-176418897),l=Ne(l,c,u,s,e[n+5],12,1200080426),s=Ne(s,l,c,u,e[n+6],17,-1473231341),u=Ne(u,s,l,c,e[n+7],22,-45705983),c=Ne(c,u,s,l,e[n+8],7,1770035416),l=Ne(l,c,u,s,e[n+9],12,-1958414417),s=Ne(s,l,c,u,e[n+10],17,-42063),u=Ne(u,s,l,c,e[n+11],22,-1990404162),c=Ne(c,u,s,l,e[n+12],7,1804603682),l=Ne(l,c,u,s,e[n+13],12,-40341101),s=Ne(s,l,c,u,e[n+14],17,-1502002290),c=Le(c,u=Ne(u,s,l,c,e[n+15],22,1236535329),s,l,e[n+1],5,-165796510),l=Le(l,c,u,s,e[n+6],9,-1069501632),s=Le(s,l,c,u,e[n+11],14,643717713),u=Le(u,s,l,c,e[n],20,-373897302),c=Le(c,u,s,l,e[n+5],5,-701558691),l=Le(l,c,u,s,e[n+10],9,38016083),s=Le(s,l,c,u,e[n+15],14,-660478335),u=Le(u,s,l,c,e[n+4],20,-405537848),c=Le(c,u,s,l,e[n+9],5,568446438),l=Le(l,c,u,s,e[n+14],9,-1019803690),s=Le(s,l,c,u,e[n+3],14,-187363961),u=Le(u,s,l,c,e[n+8],20,1163531501),c=Le(c,u,s,l,e[n+13],5,-1444681467),l=Le(l,c,u,s,e[n+2],9,-51403784),s=Le(s,l,c,u,e[n+7],14,1735328473),c=Je(c,u=Le(u,s,l,c,e[n+12],20,-1926607734),s,l,e[n+5],4,-378558),l=Je(l,c,u,s,e[n+8],11,-2022574463),s=Je(s,l,c,u,e[n+11],16,1839030562),u=Je(u,s,l,c,e[n+14],23,-35309556),c=Je(c,u,s,l,e[n+1],4,-1530992060),l=Je(l,c,u,s,e[n+4],11,1272893353),s=Je(s,l,c,u,e[n+7],16,-155497632),u=Je(u,s,l,c,e[n+10],23,-1094730640),c=Je(c,u,s,l,e[n+13],4,681279174),l=Je(l,c,u,s,e[n],11,-358537222),s=Je(s,l,c,u,e[n+3],16,-722521979),u=Je(u,s,l,c,e[n+6],23,76029189),c=Je(c,u,s,l,e[n+9],4,-640364487),l=Je(l,c,u,s,e[n+12],11,-421815835),s=Je(s,l,c,u,e[n+15],16,530742520),c=Be(c,u=Je(u,s,l,c,e[n+2],23,-995338651),s,l,e[n],6,-198630844),l=Be(l,c,u,s,e[n+7],10,1126891415),s=Be(s,l,c,u,e[n+14],15,-1416354905),u=Be(u,s,l,c,e[n+5],21,-57434055),c=Be(c,u,s,l,e[n+12],6,1700485571),l=Be(l,c,u,s,e[n+3],10,-1894986606),s=Be(s,l,c,u,e[n+10],15,-1051523),u=Be(u,s,l,c,e[n+1],21,-2054922799),c=Be(c,u,s,l,e[n+8],6,1873313359),l=Be(l,c,u,s,e[n+15],10,-30611744),s=Be(s,l,c,u,e[n+6],15,-1560198380),u=Be(u,s,l,c,e[n+13],21,1309151649),c=Be(c,u,s,l,e[n+4],6,-145523070),l=Be(l,c,u,s,e[n+11],10,-1120210379),s=Be(s,l,c,u,e[n+2],15,718787259),u=Be(u,s,l,c,e[n+9],21,-343485551),c=Ae(c,r),u=Ae(u,o),s=Ae(s,i),l=Ae(l,a);return[c,u,s,l]}function qe(e){var t,n="",r=32*e.length;for(t=0;t<r;t+=8)n+=String.fromCharCode(e[t>>5]>>>t%32&255);return n}function Ue(e){var t,n=[];for(n[(e.length>>2)-1]=void 0,t=0;t<n.length;t+=1)n[t]=0;var r=8*e.length;for(t=0;t<r;t+=8)n[t>>5]|=(255&e.charCodeAt(t/8))<<t%32;return n}function Fe(e){return qe(Me(Ue(e),8*e.length))}function Ge(e){var t,n,r="";for(n=0;n<e.length;n+=1)t=e.charCodeAt(n),r+="0123456789abcdef".charAt(t>>>4&15)+"0123456789abcdef".charAt(15&t);return r}function Ve(e){return unescape(encodeURIComponent(e))}function ze(e){return Fe(Ve(e))}function Ke(e,t){return function(e,t){var n,r,o=Ue(e),i=[],a=[];for(i[15]=a[15]=void 0,o.length>16&&(o=Me(o,8*e.length)),n=0;n<16;n+=1)i[n]=909522486^o[n],a[n]=1549556828^o[n];return r=Me(i.concat(Ue(t)),512+8*t.length),qe(Me(a.concat(r),640))}(Ve(e),Ve(t))}var $e=function(e,t,n,r){return r?Fe(e):t?n?Ke(t,e):Ge(Ke(t,e)):n?ze(e):Ge(ze(e))};return $e(String(text));
+}
+function jbBodySign(body){
+function Ae(e,t){var n=(65535&e)+(65535&t);return(e>>16)+(t>>16)+(n>>16)<<16|65535&n}function He(e,t,n,r,o,i){return Ae((a=Ae(Ae(t,e),Ae(r,i)))<<(c=o)|a>>>32-c,n);var a,c}function Ne(e,t,n,r,o,i,a){return He(t&n|~t&r,e,t,o,i,a)}function Le(e,t,n,r,o,i,a){return He(t&r|n&~r,e,t,o,i,a)}function Je(e,t,n,r,o,i,a){return He(t^n^r,e,t,o,i,a)}function Be(e,t,n,r,o,i,a){return He(n^(t|~r),e,t,o,i,a)}function Me(e,t){var n,r,o,i,a;e[t>>5]|=128<<t%32,e[14+(t+64>>>9<<4)]=t;var c=1732584193,u=-271733879,s=-1732584194,l=271733878;for(n=0;n<e.length;n+=16)r=c,o=u,i=s,a=l,c=Ne(c,u,s,l,e[n],7,-680876936),l=Ne(l,c,u,s,e[n+1],12,-389564586),s=Ne(s,l,c,u,e[n+2],17,606105819),u=Ne(u,s,l,c,e[n+3],22,-1044525330),c=Ne(c,u,s,l,e[n+4],7,-176418897),l=Ne(l,c,u,s,e[n+5],12,1200080426),s=Ne(s,l,c,u,e[n+6],17,-1473231341),u=Ne(u,s,l,c,e[n+7],22,-45705983),c=Ne(c,u,s,l,e[n+8],7,1770035416),l=Ne(l,c,u,s,e[n+9],12,-1958414417),s=Ne(s,l,c,u,e[n+10],17,-42063),u=Ne(u,s,l,c,e[n+11],22,-1990404162),c=Ne(c,u,s,l,e[n+12],7,1804603682),l=Ne(l,c,u,s,e[n+13],12,-40341101),s=Ne(s,l,c,u,e[n+14],17,-1502002290),c=Le(c,u=Ne(u,s,l,c,e[n+15],22,1236535329),s,l,e[n+1],5,-165796510),l=Le(l,c,u,s,e[n+6],9,-1069501632),s=Le(s,l,c,u,e[n+11],14,643717713),u=Le(u,s,l,c,e[n],20,-373897302),c=Le(c,u,s,l,e[n+5],5,-701558691),l=Le(l,c,u,s,e[n+10],9,38016083),s=Le(s,l,c,u,e[n+15],14,-660478335),u=Le(u,s,l,c,e[n+4],20,-405537848),c=Le(c,u,s,l,e[n+9],5,568446438),l=Le(l,c,u,s,e[n+14],9,-1019803690),s=Le(s,l,c,u,e[n+3],14,-187363961),u=Le(u,s,l,c,e[n+8],20,1163531501),c=Le(c,u,s,l,e[n+13],5,-1444681467),l=Le(l,c,u,s,e[n+2],9,-51403784),s=Le(s,l,c,u,e[n+7],14,1735328473),c=Je(c,u=Le(u,s,l,c,e[n+12],20,-1926607734),s,l,e[n+5],4,-378558),l=Je(l,c,u,s,e[n+8],11,-2022574463),s=Je(s,l,c,u,e[n+11],16,1839030562),u=Je(u,s,l,c,e[n+14],23,-35309556),c=Je(c,u,s,l,e[n+1],4,-1530992060),l=Je(l,c,u,s,e[n+4],11,1272893353),s=Je(s,l,c,u,e[n+7],16,-155497632),u=Je(u,s,l,c,e[n+10],23,-1094730640),c=Je(c,u,s,l,e[n+13],4,681279174),l=Je(l,c,u,s,e[n],11,-358537222),s=Je(s,l,c,u,e[n+3],16,-722521979),u=Je(u,s,l,c,e[n+6],23,76029189),c=Je(c,u,s,l,e[n+9],4,-640364487),l=Je(l,c,u,s,e[n+12],11,-421815835),s=Je(s,l,c,u,e[n+15],16,530742520),c=Be(c,u=Je(u,s,l,c,e[n+2],23,-995338651),s,l,e[n],6,-198630844),l=Be(l,c,u,s,e[n+7],10,1126891415),s=Be(s,l,c,u,e[n+14],15,-1416354905),u=Be(u,s,l,c,e[n+5],21,-57434055),c=Be(c,u,s,l,e[n+12],6,1700485571),l=Be(l,c,u,s,e[n+3],10,-1894986606),s=Be(s,l,c,u,e[n+10],15,-1051523),u=Be(u,s,l,c,e[n+1],21,-2054922799),c=Be(c,u,s,l,e[n+8],6,1873313359),l=Be(l,c,u,s,e[n+15],10,-30611744),s=Be(s,l,c,u,e[n+6],15,-1560198380),u=Be(u,s,l,c,e[n+13],21,1309151649),c=Be(c,u,s,l,e[n+4],6,-145523070),l=Be(l,c,u,s,e[n+11],10,-1120210379),s=Be(s,l,c,u,e[n+2],15,718787259),u=Be(u,s,l,c,e[n+9],21,-343485551),c=Ae(c,r),u=Ae(u,o),s=Ae(s,i),l=Ae(l,a);return[c,u,s,l]}function qe(e){var t,n="",r=32*e.length;for(t=0;t<r;t+=8)n+=String.fromCharCode(e[t>>5]>>>t%32&255);return n}function Ue(e){var t,n=[];for(n[(e.length>>2)-1]=void 0,t=0;t<n.length;t+=1)n[t]=0;var r=8*e.length;for(t=0;t<r;t+=8)n[t>>5]|=(255&e.charCodeAt(t/8))<<t%32;return n}function Fe(e){return qe(Me(Ue(e),8*e.length))}function Ge(e){var t,n,r="";for(n=0;n<e.length;n+=1)t=e.charCodeAt(n),r+="0123456789abcdef".charAt(t>>>4&15)+"0123456789abcdef".charAt(15&t);return r}function Ve(e){return unescape(encodeURIComponent(e))}function ze(e){return Fe(Ve(e))}function Ke(e,t){return function(e,t){var n,r,o=Ue(e),i=[],a=[];for(i[15]=a[15]=void 0,o.length>16&&(o=Me(o,8*e.length)),n=0;n<16;n+=1)i[n]=909522486^o[n],a[n]=1549556828^o[n];return r=Me(i.concat(Ue(t)),512+8*t.length),qe(Me(a.concat(r),640))}(Ve(e),Ve(t))}var $e=function(e,t,n,r){return r?Fe(e):t?n?Ke(t,e):Ge(Ke(t,e)):n?ze(e):Ge(ze(e))};function Xe(e){var t=function(e){var t="";for(var n in e){var r=e[n];r instanceof Object&&(r=JSON.stringify(r)),null!=r&&null!=r&&("number"==typeof r||"boolean"==typeof r||""!=r)&&(t+="&"+r)}return t=t.substring(1,t.length)}(function(e){var t=[],n=0;for(var r in e)t[n]=r,n++;var o=t.sort(),i={};for(var a in o)i[o[a]]=e[o[a]];return i}(e=JSON.parse(e)));return function(e){var t=arguments.length>1&&void 0!==arguments[1]?arguments[1]:{},n=t.key,r=void 0===n?null:n,o=t.raw,i=void 0!==o&&o;return $e(e,r,i)}(t=t.toString(),{key:"xtl_sqg_mall-^&*-damai_(789)_@#$"})}
+const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify(clean));
+}
+// Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
+const JB_CONFIG={
+ gameDaily:{key:'JD_GAME_DAILY_ACCOUNT_V1',label:'互动游戏签到',page:'https://pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',appid:'wegame-hub',query:'weGameHome',claim:'weGameLottery',apps:{weGameHome:'101aa',weGameLottery:'730a6'},link:'MWC_-5cWq-JH1wrPPteH4w'},
+ gear:{key:'JD_GEAR_DAILY_ACCOUNT_V1',label:'装备馆签到',page:'https://pro.m.jd.com/mall/active/FEtAd86BW8TpiRKshRZX8PPEjpo/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a6890eaa0c21743163fe444'},
+ wallet:{key:'JD_WALLET_DAILY_ACCOUNT_V1',label:'赚话费签到',page:'https://prodev.m.jd.com/mall/active/eEcYM32eezJB7YX4SBihziJCiGV/index.html',appid:'h5-sep',query:'DATAWALLET_USER_SIGN_INFO',claim:'DATAWALLET_USER_SIGN',apps:{DATAWALLET_USER_SIGN_INFO:'60d0e',DATAWALLET_USER_SIGN:'60d0e'}},
+ hardware:{key:'JD_HARDWARE_DAILY_ACCOUNT_V1',label:'五金城签到',page:'https://pro.m.jd.com/mall/active/4RYbb8NtVAegmT35SuM2N3KKYLWt/index.html',appid:'i-home_fe',query:'bom_queryInteractiveInfo',claim:'bom_doInteractiveAssignment',apps:{bom_doInteractiveAssignment:'3c653'},activity:'4RYbb8NtVAegmT35SuM2N3KKYLWt'}
+};
+function jbBody(p){let b=JSON.parse(p.body||'{}');if(!b||typeof b!=='object'||Array.isArray(b))throw Error('签到参数格式变化');return b;}
+function jbInner(b){return typeof b.body==='string'?JSON.parse(b.body):null;}
+function jbScope(task,p,b){
+ const c=JB_CONFIG[task],f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
+ if(task==='gameDaily')return b.linkId===c.link&&b.envType===1&&(f!==c.claim||b.status===1&&typeof b.markStr==='string'&&b.markStr.length>0&&b.markStr.length<4096);
+ if(task==='gear')return b.craftId===c.craft&&b.source==='jxzy'&&b.sceneval===2&&b.buid===325&&b.appCode==='ms1888ebbf'&&(f!==c.claim||b.itemId==='1');
+ if(task==='wallet')return Object.keys(b).sort().join(',')==='encStr,t'&&Number.isSafeInteger(b.t)&&b.encStr===jbMd5(String(b.t)+'e9c398ffcb2d4824b4d0a703e38yffdd');
+ if(f===c.query)return typeof b.client==='string'&&typeof b.clientVersion==='string'&&Object.keys(b).sort().join(',')==='client,clientVersion';
+ const x=jbInner(b);return b.appid===c.appid&&b.sign===11&&Number.isSafeInteger(b.t)&&x?.activity_id===c.activity&&x.template_id==='00043621'&&x.floor_id==='133505424'&&x.taskType===0&&typeof x.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(x.encryptAssignmentId)&&!Object.prototype.hasOwnProperty.call(x,'actionType')&&x.extParam?.sceneid==='babel_'+c.activity;
+}
+function jbData(task,j){
+ const ok=task==='wallet'?j?.code===200:task==='hardware'?j?.success===true&&j.resultCode===0&&j.data?.subCode==='0'&&j.data.hasRisk!==true&&j.data.login!==false:j?.success!==false&&j?.code===0;
+ if(!ok||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('签到接口未通过');return j.data;
+}
+function jbState(task,j,day){
+ const d=jbData(task,j);
+ if(task==='gameDaily'){
+  const a=d.signMainVo,list=d.signListVo;if(!a||!Array.isArray(list)||list.length>32||![1,3].includes(a.currentStatus)||a.beforeTaskVo)throw Error('签到状态变化');
+  const today=list.filter(x=>x?.todayFlag===1&&x.signDate===day&&x.status===3);
+  if(a.currentStatus===3&&today.length===1)return {done:true};
+  if(a.currentStatus===1&&today.length===0&&list.filter(x=>x?.signableTodayFlag===1&&x.status===1&&!x.signDate).length===1&&typeof a.markStr==='string'&&a.markStr.length>0&&a.markStr.length<4096)return {done:false,markStr:a.markStr};
+  throw Error('签到状态不一致');
+ }
+ if(task==='gear'){
+  const signed=Array.isArray(d.signList)&&d.signList.some(s=>typeof s==='string'&&s.startsWith(day+'_'));
+  if(d.status===2&&signed&&d.itemId==='1')return {done:true};
+  if(d.status===1&&!signed&&d.itemId==='1'&&(!d.signList||Array.isArray(d.signList)))return {done:false};throw Error('签到状态不一致');
+ }
+ if(task==='wallet'){
+  if(d.noLogin||![0,1].includes(d.signInfo?.signStatus)||!Number.isFinite(d.totalNum)||!Number.isInteger(d.signInfo.continueDay))throw Error('签到状态变化');
+  return {done:d.signInfo.signStatus===1,total:d.totalNum};
+ }
+ if(!Array.isArray(d.assignmentList)||d.assignmentList.length>100)throw Error('签到列表结构变化');
+ const rows=d.assignmentList.filter(t=>t?.assignmentType===5&&t.assignmentTypeEnum===0&&t.assignmentName==='签到领京豆');
+ if(!rows.length)return {done:null};if(rows.length!==1)throw Error('签到项目不明确');const t=rows[0];
+ if(t.assignmentTimesLimit!==1||!/^[-_A-Za-z0-9]{1,256}$/.test(t.encryptAssignmentId)||!t.rewards?.some(x=>x.rewardType===3&&x.rewardName==='五金城每日签到领京豆'))throw Error('签到任务结构变化');
+ if(t.completionFlag===true||t.completionCnt===1)return {done:true,id:t.encryptAssignmentId};
+ if(t.completionFlag===false&&t.completionCnt===0&&t.canParticipation===true&&!t.reachUpperLimit&&t.status===1)return {done:false,id:t.encryptAssignmentId};throw Error('签到状态不一致');
+}
+function jbReward(task,j){
+ const d=jbData(task,j),num=v=>{if(typeof v==='string'&&!/^\d+(?:\.\d+)?$/.test(v))return null;const n=Number(v);return (typeof v==='number'||typeof v==='string')&&Number.isFinite(n)&&n>=0&&n<=100000?n:null;};
+ if(task==='gameDaily'){
+  const a=d.awardVo,b=d.awardResultVO,n=num(b?.amount);return a?.awardName==='BEAN'&&b?.prizeType===3&&b.sendResult===true&&n!==null&&Number.isInteger(n)&&num(a.awardGivenNumber)===n?{beanQuantity:n}:{};
+ }
+ if(task==='gear'){
+  if(!Array.isArray(d.prizeInfos)||!d.prizeInfos.length)return {};let n=0,found=false;for(const x of d.prizeInfos){if(x.prizeType!==2)continue;const v=num(x.discount);if(v===null||!Number.isInteger(v))return {};n+=v;found=true;}return found&&n<=100000?{beanQuantity:n}:{};
+ }
+ if(task==='hardware'){
+  if(d.subCode!=='0'||!d.successReward||typeof d.successReward!=='object'||Array.isArray(d.successReward))return {};let n=0,found=false;
+  for(const k of ['五金城每日签到领京豆','五金城连续签到领京豆'])if(Object.prototype.hasOwnProperty.call(d.successReward,k)){const v=num(d.successReward[k]);if(v===null||!Number.isInteger(v))return {};n+=v;found=true;}
+  return found&&n<=100000?{beanQuantity:n}:{};
+ }
+ return {};
+}
+
 function jsSharedMakeSigner(appId, browser, diagnostics, referenceEnvironment,timers) {
   const setTimeout=timers.setTimeout,clearTimeout=timers.clearTimeout;
   const globalThis = browser;
@@ -2063,6 +2135,52 @@ function createExtraSignins(host,crypto){
   if(typeof v!=='number'&&typeof v!=='string'||typeof v==='string'&&!/^\d+$/.test(v))return null;
   const n=Number(v);return Number.isInteger(n)&&n>=0&&n<=100000?n:null;
  }
+  async function batch(task){
+   const c=JB_CONFIG[task],login=identity(),profile=host.read(c.key,null);
+   if(!profile?.headers||!profile.signing||!profile.templates)throw Error('缺少签到页面凭据');
+   const pair=jsPair(jsHeader(profile.headers,'Cookie'));
+   if(profile.pin!==pin||pair?.pin!==pin)throw Error('签到资料属于其他账号');
+   const env=crypto.decodeEnvironment(profile.signing.environment);if(![pin,decodeURIComponent(pin)].includes(env?.pp?.p1))throw Error('签名账号不一致');
+   const snapshot=JSON.stringify(profile),headerCookie=jsMergeCookie(jsHeader(profile.headers,'Cookie'),login);
+   const headers={...profile.headers,Cookie:headerCookie,Referer:c.page,'X-Lazing-Signin-Run':'1','Content-Type':'application/x-www-form-urlencoded'};
+   const safe=()=>{check();if(host.login()?.pin!==pin||host.login()?.cookie!==login.cookie||host.read(JS_KEYS.login,null)?.pin&&host.read(JS_KEYS.login,null).pin!==pin||JSON.stringify(host.read(c.key,null))!==snapshot)throw Error('日期或账号资料变化');};
+   async function options(f,action){
+    safe();const claim=f===c.claim;
+    const t=profile.templates[claim?'claim':'query']||((task==='gameDaily'||task==='gear'||task==='wallet')?profile.templates.query:null);
+    if(!t?.params)throw Error('缺少签到页面参数，请手动签到一次获取');
+    const p={...t.params,functionId:f},now=Date.now();let b;
+    if(task==='gameDaily')b=claim?{envType:1,linkId:c.link,status:1,markStr:action.markStr}:{envType:1,linkId:c.link,babelChannel:profile.templates.query?.body.babelChannel||''};
+    else if(task==='gear'){b={...t.body};delete b.tttId;if(!claim&&profile.templates.query?.body.tttId)b.tttId=profile.templates.query.body.tttId;if(claim)b.itemId='1';b.time=now;b.signStr=jbBodySign(b);}
+    else if(task==='wallet')b={t:now,encStr:jbMd5(String(now)+'e9c398ffcb2d4824b4d0a703e38yffdd')};
+    else if(!claim)b={...t.body};
+    else b={appid:c.appid,body:JSON.stringify({encryptAssignmentId:action.id,taskType:0,...t.body}),sign:11,t:now};
+    p.body=JSON.stringify(b);
+    if(task==='gameDaily'||task==='gear'||task==='hardware'&&!claim){p.t=String(now);if(task==='hardware')p.sign='11';}
+    if(c.apps[f]){
+     const input={};for(const k of ['functionId','appid','client','body','clientVersion','sign','t','jsonp'])if(p[k])input[k]=k==='body'?crypto.hash(p.body):p[k];
+     p.h5st=await crypto.signOnline(c.apps[f],{pin,headers},env,input);safe();
+     const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!==c.apps[f]||sig[5]!=='5.3')throw Error('签到签名字段变化');
+     if(profile.signing.eidToken)p['x-api-eid-token']=profile.signing.eidToken;
+    }
+    if(!jbScope(task,p,b))throw Error('签到参数结构变化');
+    if(task==='hardware'&&claim)return {method:'get',url:'https://api.m.jd.com/api?'+jsEncode(p),headers};
+    return {url:'https://api.m.jd.com/'+(task==='hardware'&&!claim?'client.action':'api')+'?functionId='+f,headers,body:jsEncode(p)};
+   }
+   const query=async()=>{const o=await options(c.query);safe();const j=await http(task,o);safe();return jbState(task,j,date);};
+   const before=await query(),old=prior(task),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:old&&Number.isFinite(old.creditQuantity)&&old.creditQuantity>=0&&old.creditQuantity<=100000?{creditQuantity:old.creditQuantity}:{};
+   if(before.done===true){mark(task,'confirmed',known);return {status:'already_done',...known};}
+   if(before.done===null)return {status:old?'pending':'no_chance',detail:old?'今天已提交，去页面确认':'当前没有待签项目',...known};
+   if(old)return {status:'pending',detail:'今天已提交，去页面确认',...known};
+   const o=await options(c.claim,before);safe();mark(task,'pending');
+   const j=await http(task,o);safe();jbData(task,j);const quantity=jbReward(task,j);mark(task,'accepted',quantity);
+   try{
+    const after=await query();let confirmed=after.done===true;
+    if(task==='wallet'&&confirmed){const delta=Math.round((after.total-before.total)*1000000)/1000000;if(delta>=0&&delta<=100000)quantity.creditQuantity=delta;}
+    if(confirmed){mark(task,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}
+   }catch(_){}
+   return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
+  }
+
  async function medical(){
   const task='medical',login=identity(),profile=host.read(JSM_KEY,null)||host.read('JD_MEDICAL_ACTIVITY_ACCOUNT_V1',null);
   if(!profile)throw Error('缺少看病买药签到凭据，请打开对应签到页');
@@ -2093,7 +2211,7 @@ function createExtraSignins(host,crypto){
   return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
  }
 
- return {run:task=>{if(task==='medical')return medical();throw Error('签到项目已移除');}};
+ return {run:task=>{if(task==='medical')return medical();if(JB_CONFIG[task])return batch(task);throw Error('签到项目已移除');}};
 }
 function jsError(e){
  const s=String(e?.message||'');const http=/HTTP (\d{1,3})/.exec(s);if(http)return 'HTTP '+http[1];
@@ -2112,7 +2230,7 @@ const JS_LEGACY={
 function jsResult(task,r){
  if(!r||typeof r.status!=='string')return {task,status:'stopped',detail:'正在执行或没有新结果'};
  const row={task,status:r.status};
- for(const k of ['beanQuantity','continuousDays','roundDays','couponCount'])if(Number.isFinite(r[k])&&r[k]>=0)row[k]=r[k];
+ for(const k of ['beanQuantity','creditQuantity','continuousDays','roundDays','couponCount'])if(Number.isFinite(r[k])&&r[k]>=0)row[k]=r[k];
  if(r.amount!==undefined&&/^\d+(?:\.\d+)?$/.test(String(r.amount)))row.amount=String(r.amount);
  if(r.doubleSign)row.doubleSign=jsResult('double',r.doubleSign);
  if(['stopped','manual_required'].includes(r.status))row.detail=jsError({message:r.message});
@@ -2129,6 +2247,7 @@ function jsLine(r){
   else if(r.beanQuantity>0&&r.detail)detail+='，接口返回 '+r.beanQuantity+' 京豆';
   else if(r.beanQuantity===undefined&&r.status==='signed_confirmed')detail+='，接口未返回京豆数量';
  }
+ if(r.creditQuantity!==undefined)detail+='，'+r.creditQuantity+' 充值金';
  if(r.amount!==undefined)detail+='，现金 '+r.amount+' 元';
  if(r.couponCount>0)detail+='，优惠券 '+r.couponCount+' 张';
  return name+'：'+detail+(r.doubleSign?'\n'+jsLine(r.doubleSign):'');
@@ -2301,4 +2420,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={JSM_KEY,JSM_PAGE,JSM_QUERY,JSM_CLAIM,jsMedicalScope,jsMedicalData,jsMedicalTask,jsMedicalState,jsMedicalReward,jsLoonHost,createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS};
+if(typeof module!=="undefined")module.exports={JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,JSM_KEY,JSM_PAGE,JSM_QUERY,JSM_CLAIM,jsMedicalScope,jsMedicalData,jsMedicalTask,jsMedicalState,jsMedicalReward,jsLoonHost,createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS};
