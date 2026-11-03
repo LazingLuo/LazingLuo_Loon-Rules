@@ -19,9 +19,9 @@ const links = {
   xianyu: 'https://h5.m.goofish.com/wow/moyu/moyu-project/coin/pages/coinCallApp?taskCode=FAKE',
   alipayMember: 'alipays://platformapi/startapp?appId=FAKE_MEMBER',
   alipayGold: 'alipays://platformapi/startapp?appId=FAKE_GOLD',
-  mtContent: 'imeituan://www.meituan.com/mmp?appId=FAKE&targetPath=FAKE',
-  mtPig: 'imeituan://www.meituan.com/mrn?mrn_biz=game&mrn_entry=mtb-home&mrn_component=mtb-home&inner_source=FAKE',
-  mtOrchard: 'imeituan://www.meituan.com/mgc?mgc_id=mgckmf3q8yx9d72b&inner_source=FAKE&query=FAKE'
+  baiduLite: 'https://activity.baidu.com/mbox/4a89aa9163/matrixInvoke?token=OFFLINE&taskCode=FAKE_CODE&playId=1480',
+  taobaoLite: 'https://huodong.taobao.com/wow/z/sale/static/meituan?token=OFFLINE&taskCode=FAKE_CODE&playId=1568',
+  diantao: 'https://market.m.taobao.com/app/tb-zhibo-app/callapp-mid-center/home.html?token=OFFLINE&taskCode=FAKE_CODE&playId=1483' 
 };
 function envelope(account = 'FAKE_ACCOUNT') {
   return [{uid: account, package_tm: now, lx_dict: false, evs: JSON.stringify(MT_TASKS.map(t => ({stm: now,
@@ -69,26 +69,38 @@ check(!bridge('probe').antManor, 'probe never returns task URLs');
 check(bridge('tasks').code === 'PAIRING_FAILED', 'unpaired read refused');
 check(bridge('tasks', {'X-Lazing-Export-Key': key}).count === 7, 'paired read returns plan');
 const extended = bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v1'});
-check(extended.count === 11 && extended.xianyu && extended.alipayMember && extended.alipayGold && extended.mtContent, 'extended Shortcut receives all eleven entries');
-const latest = bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v2'});
-check(latest.count === 13 && latest.mtPig && latest.mtOrchard, 'v0.3 receives mini-app additions');
-check(!extended.mtPig && !extended.mtOrchard, 'old eleven-entry Shortcut has no inaccessible additions');
-const tagged = envelope();
-const tagEvents = JSON.parse(tagged[0].evs).filter(x => ['金猪','小美果园'].some(n => x.val_lab.title.includes(n)));
-tagged[0].evs = JSON.stringify(tagEvents.map(ev => ({stm: now-1000, tag: {game: {context: ev.val_lab}}})));
-const tagRecord = mtObserve(JSON.stringify(tagged), null, now).record;
-check(Object.keys(tagRecord.tasks).sort().join(',') === 'mtOrchard,mtPig', 'mini-app task context is read from tag.game');
-check(tagRecord.tasks.mtPig.sourceTime === now-1000, 'nested task inherits the real event time');
-const staleTags = JSON.parse(JSON.stringify(tagged));
-const staleEvents = JSON.parse(staleTags[0].evs);staleEvents.forEach(x => x.stm = now-2000);staleTags[0].evs = JSON.stringify(staleEvents);
-check(mtObserve(JSON.stringify(staleTags), tagRecord, now).record.tasks.mtPig.sourceTime === now-1000, 'older nested event cannot overwrite a newer task');
-check(!mtValidLink(MT_TASKS.find(x => x.key === 'mtPig'), 'imeituan://www.meituan.com/mrn?mrn_biz=other&mrn_entry=mtb-home&mrn_component=mtb-home'), 'unrelated MRN component rejected');
-check(!mtValidLink(MT_TASKS.find(x => x.key === 'mtOrchard'), 'imeituan://www.meituan.com/mgc?mgc_id=OTHER_GAME'), 'unrelated mini-game rejected');
+check(extended.count===10 && extended.xianyu && !extended.baiduLite && !extended.mtContent,'old eleven-entry client receives ten retained entries');
+const latest=bridge('tasks',{'X-Lazing-Export-Key':key,'X-Lazing-Jump-Plan':'extended-v2'});
+check(latest.count===10 && !latest.mtPig && !latest.mtOrchard && !latest.taobaoLite,'v0.3 skips removed mini-apps and does not count new branches');
+const current=bridge('tasks',{'X-Lazing-Export-Key':key,'X-Lazing-Jump-Plan':'extended-v3'});
+check(current.count===13 && current.baiduLite && current.taobaoLite && current.diantao,'v0.4 receives all thirteen active branches');
+const tagged=envelope();
+const tagEvents=JSON.parse(tagged[0].evs).filter(x=>['点淘','百度极速版'].some(n=>x.val_lab.title.includes(n)));
+tagged[0].evs=JSON.stringify(tagEvents.map(ev=>({stm:now-1000,tag:{game:{context:ev.val_lab}}})));
+const tagRecord=mtObserve(JSON.stringify(tagged),null,now).record;
+check(Object.keys(tagRecord.tasks).sort().join(',')==='baiduLite,diantao','native task context read from tag.game');
+check(tagRecord.tasks.diantao.sourceTime===now-1000,'nested task inherits real event time');
+const staleTags=JSON.parse(JSON.stringify(tagged)),staleEvents=JSON.parse(staleTags[0].evs);staleEvents.forEach(x=>x.stm=now-2000);staleTags[0].evs=JSON.stringify(staleEvents);
+check(mtObserve(JSON.stringify(staleTags),tagRecord,now).record.tasks.diantao.sourceTime===now-1000,'older nested event cannot overwrite newer task');
+for(const key of ['mtContent','mtPig','mtOrchard'])check(!MT_TASKS.some(t=>t.key===key),'removed internal branch absent: '+key);
+const cached=JSON.parse(JSON.stringify(full.record));for(const key of ['mtContent','mtPig','mtOrchard'])cached.tasks[key]={url:'imeituan://www.meituan.com/old',capturedAt:now,sourceTime:now};
+const clean=mtObserve(JSON.stringify(envelope()),cached,now).record;
+check(['mtContent','mtPig','mtOrchard'].every(k=>!clean.tasks[k]),'retired task URLs removed from old cache');
+check(['mtContent','mtPig','mtOrchard'].every(k=>!current[k]),'retired task URLs never exported');
+for(const key of ['baiduLite','taobaoLite','diantao']){
+ const task=MT_TASKS.find(t=>t.key===key),url=links[key];
+ check(mtValidLink(task,url),'new landing path accepted: '+key);
+ check(!mtValidLink(task,url.replace('playId='+task.playId,'playId=WRONG')),'wrong task channel rejected: '+key);
+ check(!mtValidLink(task,url.replace('token=OFFLINE','token=')),'empty ticket rejected: '+key);
+ check(!mtValidLink(task,url+'&taskCode=OTHER'),'duplicate ticket parameter rejected: '+key);
+ const bad=envelope(),events=JSON.parse(bad[0].evs),event=events.find(e=>e.val_lab.title.startsWith(task.prefix));event.val_lab.task_detail.task_code='DIFFERENT';bad[0].evs=JSON.stringify(events);
+ check(!mtObserve(JSON.stringify(bad),null,now).record.tasks[key],'task code must match captured iOS link: '+key);
+ check(current[key]===url,'task URL preserved byte for byte: '+key);
+}
 check(!bridge('tasks', {'X-Lazing-Export-Key': key}).xianyu, 'old Shortcut receives no extra task links or inflated count');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'unknown'}).count === 7, 'unknown client preserves legacy plan');
 check(mtPlan(full.record, now).summary.includes('/13'), 'observer summary uses current task denominator');
 check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), 'https://h5.m.goofish.com/other?taskCode=FAKE'), 'Xianyu route constrained to observed task landing path');
-check(!mtValidLink(MT_TASKS.find(t => t.key === 'mtContent'), 'imeituan://www.meituan.com/other?appId=FAKE'), 'Meituan content route constrained to observed mini-app path');
 check(bridge('tasks', {origin: 'https://example.invalid', 'X-Lazing-Export-Key': key}).code === 'BROWSER_DENIED', 'browser read refused');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'x-lazing-export-key': key}).code === 'PAIRING_FAILED', 'duplicate auth header refused');
 check(bridge('tasks', {}, 'POST').code === 'BAD_REQUEST', 'export route is GET only');
@@ -128,7 +140,8 @@ for (const file of process.argv.slice(2)) {
   }
   const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
   const plan = mtPlan(record, current);
-  const expected = path.basename(file).startsWith('450_') ? ['mtPig', 'mtOrchard', 'xianyu', 'alipayMember', 'alipayGold'] : path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent', 'mtOrchard'];
+  const original = path.basename(file).startsWith('450_') ? ['mtPig', 'mtOrchard', 'xianyu', 'alipayMember', 'alipayGold'] : path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent', 'mtOrchard'];
+  const expected = path.basename(file).startsWith('491_') ? ['baiduLite','taobaoLite','diantao'] : original.filter(k=>!['mtContent','mtPig','mtOrchard'].includes(k));
   check(plan.count === expected.length, path.basename(file) + ': selected iOS links recovered');
   check(Object.keys(record.tasks).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
   check(expected.every(k => mtValidLink(MT_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
