@@ -1,6 +1,6 @@
-// 京东合并签到 2026-11-04.1; fixed check-in scope, local credentials.
+// 京东合并签到 2026-11-05.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-04.1';
+const JS_VERSION='2026-11-05.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居签到'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到'],['used','特价二手签到']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
@@ -132,10 +132,17 @@ const JB_CONFIG={
  wallet:{key:'JD_WALLET_DAILY_ACCOUNT_V1',label:'赚话费签到',page:'https://prodev.m.jd.com/mall/active/eEcYM32eezJB7YX4SBihziJCiGV/index.html',appid:'h5-sep',query:'DATAWALLET_USER_SIGN_INFO',claim:'DATAWALLET_USER_SIGN',apps:{DATAWALLET_USER_SIGN_INFO:'60d0e',DATAWALLET_USER_SIGN:'60d0e'}},
  hardware:{key:'JD_HARDWARE_DAILY_ACCOUNT_V1',label:'五金城签到',page:'https://pro.m.jd.com/mall/active/4RYbb8NtVAegmT35SuM2N3KKYLWt/index.html',appid:'i-home_fe',query:'bom_queryInteractiveInfo',claim:'bom_doInteractiveAssignment',apps:{bom_doInteractiveAssignment:'3c653'},activity:'4RYbb8NtVAegmT35SuM2N3KKYLWt'}
 };
+// Only the two page/craft pairs independently observed in HAR484 and HAR498.
+function jbConfig(task,body){
+ const c=JB_CONFIG[task];if(task!=='gear'||!c)return c;
+ if(body?.craftId===c.craft)return c;
+ if(body?.craftId==='6a66f5511177f59203da3347')return {...c,page:'https://pro.m.jd.com/mall/active/3skw64E2o8zoGcqm41gsewXHgdvR/index.html',craft:'6a66f5511177f59203da3347',label:'AI装备馆签到',requireObservedClaim:true};
+ return null;
+}
 function jbBody(p){let b=JSON.parse(p.body||'{}');if(!b||typeof b!=='object'||Array.isArray(b))throw Error('签到参数格式变化');return b;}
 function jbInner(b){return typeof b.body==='string'?JSON.parse(b.body):null;}
 function jbScope(task,p,b){
- const c=JB_CONFIG[task],f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
+ const c=jbConfig(task,b),f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
  if(task==='gameDaily')return b.linkId===c.link&&b.envType===1&&(f!==c.claim||b.status===1&&typeof b.markStr==='string'&&b.markStr.length>0&&b.markStr.length<4096);
  if(c.craft)return b.craftId===c.craft&&b.source==='jxzy'&&b.sceneval===2&&b.buid===325&&b.appCode==='ms1888ebbf'&&(f!==c.claim||b.itemId==='1');
  if(task==='wallet')return Object.keys(b).sort().join(',')==='encStr,t'&&Number.isSafeInteger(b.t)&&b.encStr===jbMd5(String(b.t)+'e9c398ffcb2d4824b4d0a703e38yffdd');
@@ -2151,7 +2158,10 @@ function createExtraSignins(host,crypto){
   const n=Number(v);return Number.isInteger(n)&&n>=0&&n<=100000?n:null;
  }
   async function batch(task){
-   const c=JB_CONFIG[task],login=identity(),profile=host.read(c.key,null);
+   const base=JB_CONFIG[task],login=identity(),profile=host.read(base.key,null);
+   if(['gear','hardware'].includes(task))host.log('凭据检查（2026-11-05.1）：'+base.label+'，查询'+(profile?.templates?.query?'有':'缺少')+'，签到参数'+(profile?.templates?.claim?'有':'缺少')+'，签名'+(profile?.signing?'有':'缺少')+'；最近获取版本 '+(profile?.captureVersion||'未记录'));
+   const c=jbConfig(task,profile?.templates?.query?.body||profile?.templates?.claim?.body);
+   if(!c&&profile)throw Error('装备馆页面参数不匹配，请重新进入对应页面');
    if(!profile?.headers||!profile.templates)throw Error('缺少签到页面凭据');
    if(!profile.templates.query)throw Error('缺少签到查询参数，请打开对应签到页');
    const pair=jsPair(jsHeader(profile.headers,'Cookie'));
@@ -2187,16 +2197,17 @@ function createExtraSignins(host,crypto){
     return {url:'https://api.m.jd.com/'+(task==='hardware'&&!claim?'client.action':'api')+'?functionId='+f,headers,body:jsEncode(p)};
    }
    const query=async()=>{const o=await options(c.query);safe();const j=await http(task,o);safe();return jbState(task,j,date);};
-   const before=await query(),old=prior(task),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:old&&Number.isFinite(old.creditQuantity)&&old.creditQuantity>=0&&old.creditQuantity<=100000?{creditQuantity:old.creditQuantity}:{};
-   if(before.done===true){mark(task,'confirmed',known);return {status:'already_done',...known};}
+   const journalTask=c.craft?task+':'+c.craft:task;
+   const before=await query(),old=prior(journalTask)||(!c.requireObservedClaim?prior(task):null),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:old&&Number.isFinite(old.creditQuantity)&&old.creditQuantity>=0&&old.creditQuantity<=100000?{creditQuantity:old.creditQuantity}:{};
+   if(before.done===true){mark(journalTask,'confirmed',known);return {status:'already_done',...known};}
    if(before.done===null)return {status:old?'pending':'no_chance',detail:old?'今天已提交，去页面确认':'当前没有待签项目',...known};
    if(old)return {status:'pending',detail:'今天已提交，去页面确认',...known};
-   const o=await options(c.claim,before);safe();mark(task,'pending');
-   const j=await http(task,o);safe();jbData(task,j);const quantity=jbReward(task,j);mark(task,'accepted',quantity);
+   const o=await options(c.claim,before);safe();mark(journalTask,'pending');
+   const j=await http(task,o);safe();jbData(task,j);const quantity=jbReward(task,j);mark(journalTask,'accepted',quantity);
    try{
     const after=await query();let confirmed=after.done===true;
     if(task==='wallet'&&confirmed){const delta=Math.round((after.total-before.total)*1000000)/1000000;if(delta>=0&&delta<=100000)quantity.creditQuantity=delta;}
-    if(confirmed){mark(task,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}
+    if(confirmed){mark(journalTask,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}
    }catch(_){}
    return {status:'pending',detail:'已提交，签到状态待确认',...quantity};
   }
@@ -2457,4 +2468,4 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
  })();
 }
 
-if(typeof module!=="undefined")module.exports={JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,JSM_KEY,JSM_PAGE,JSM_QUERY,JSM_CLAIM,jsMedicalScope,jsMedicalData,jsMedicalTask,jsMedicalState,jsMedicalReward,jsLoonHost,createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS};
+if(typeof module!=="undefined")module.exports={JB_CONFIG,jbConfig,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,JSM_KEY,JSM_PAGE,JSM_QUERY,JSM_CLAIM,jsMedicalScope,jsMedicalData,jsMedicalTask,jsMedicalState,jsMedicalReward,jsLoonHost,createSignins,createExtraSignins,createSigninCrypto,jsSettings,jsLogin,jsLegacyAccount,jsTarget,jsPair,jsParams,jsMergeCookie,jsResult,jsLine,jsError,runRetailSignin,runJxSignin,runHomeSignin,runIndexSignin,runFinanceSignin,JS_KEYS,JS_TASKS};

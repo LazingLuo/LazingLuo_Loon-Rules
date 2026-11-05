@@ -1,3 +1,4 @@
+// Shared capture 2026-11-05.1: observed AI gear page and precise gear/hardware logging.
 // Shared capture 20261103-6: own sign-ins and activities only.
 // Shared credential capture 20261101-1: medical daily sign-in only.
 // Shared credential capture 20261030-1; retired finance/medical activities removed.
@@ -937,10 +938,17 @@ const JB_CONFIG={
  wallet:{key:'JD_WALLET_DAILY_ACCOUNT_V1',label:'赚话费签到',page:'https://prodev.m.jd.com/mall/active/eEcYM32eezJB7YX4SBihziJCiGV/index.html',appid:'h5-sep',query:'DATAWALLET_USER_SIGN_INFO',claim:'DATAWALLET_USER_SIGN',apps:{DATAWALLET_USER_SIGN_INFO:'60d0e',DATAWALLET_USER_SIGN:'60d0e'}},
  hardware:{key:'JD_HARDWARE_DAILY_ACCOUNT_V1',label:'五金城签到',page:'https://pro.m.jd.com/mall/active/4RYbb8NtVAegmT35SuM2N3KKYLWt/index.html',appid:'i-home_fe',query:'bom_queryInteractiveInfo',claim:'bom_doInteractiveAssignment',apps:{bom_doInteractiveAssignment:'3c653'},activity:'4RYbb8NtVAegmT35SuM2N3KKYLWt'}
 };
+// Only the two page/craft pairs independently observed in HAR484 and HAR498.
+function jbConfig(task,body){
+ const c=JB_CONFIG[task];if(task!=='gear'||!c)return c;
+ if(body?.craftId===c.craft)return c;
+ if(body?.craftId==='6a66f5511177f59203da3347')return {...c,page:'https://pro.m.jd.com/mall/active/3skw64E2o8zoGcqm41gsewXHgdvR/index.html',craft:'6a66f5511177f59203da3347',label:'AI装备馆签到',requireObservedClaim:true};
+ return null;
+}
 function jbBody(p){let b=JSON.parse(p.body||'{}');if(!b||typeof b!=='object'||Array.isArray(b))throw Error('签到参数格式变化');return b;}
 function jbInner(b){return typeof b.body==='string'?JSON.parse(b.body):null;}
 function jbScope(task,p,b){
- const c=JB_CONFIG[task],f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
+ const c=jbConfig(task,b),f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
  if(task==='gameDaily')return b.linkId===c.link&&b.envType===1&&(f!==c.claim||b.status===1&&typeof b.markStr==='string'&&b.markStr.length>0&&b.markStr.length<4096);
  if(c.craft)return b.craftId===c.craft&&b.source==='jxzy'&&b.sceneval===2&&b.buid===325&&b.appCode==='ms1888ebbf'&&(f!==c.claim||b.itemId==='1');
  if(task==='wallet')return Object.keys(b).sort().join(',')==='encStr,t'&&Number.isSafeInteger(b.t)&&b.encStr===jbMd5(String(b.t)+'e9c398ffcb2d4824b4d0a703e38yffdd');
@@ -997,7 +1005,7 @@ function jbCapture(host,request,response,decode){
  const p=jsParams(request),b=jbBody(p),f=p.functionId;
  const task=Object.keys(JB_CONFIG).find(k=>jbScope(k,p,b));if(!task)return null;
  if(request.method==='GET'&&(task!=='hardware'||f!==JB_CONFIG.hardware.claim))return null;
- const c=JB_CONFIG[task],j=JSON.parse(response.body||'{}');jbData(task,j);
+ const c=jbConfig(task,b),j=JSON.parse(response.body||'{}');jbData(task,j);
  if(f===c.query)jbState(task,j,jsDay());
  const ref=jsHeader(request.headers,'x-referer-page')||jsHeader(request.headers,'Referer');
  if(typeof ref!=='string'||ref.split('?')[0]!==c.page)return null;
@@ -1011,7 +1019,9 @@ function jbCapture(host,request,response,decode){
  if(!h['User-Agent'])return null;
  const fresh=direct&&(!canonical||at>=canonical.time);
  h.Cookie=(fresh?direct:canonical||pair).cookie+rawCookie.split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x)).join(';')+';';
- const profile=old?jsClone(old):{pin:pair.pin,templates:{}};
+ const priorCraft=old?.templates?.query?.body?.craftId||old?.templates?.claim?.body?.craftId;
+ const scopeChanged=!!(old&&c.craft&&priorCraft!==c.craft);
+ const profile=old&&!scopeChanged?jsClone(old):{pin:pair.pin,templates:{}};
  if(c.apps[f]){
   const sig=String(p.h5st||'').split(';');
   const appId=sig[2], validApp=appId===c.apps[f]||task==='hardware'&&f===c.claim&&appId==='b4c9d';
@@ -1020,7 +1030,7 @@ function jbCapture(host,request,response,decode){
   profile.signing={environment:sig[7],encoding:sig[9],eidToken:p['x-api-eid-token']||'',capturedAt:at,...(task==='hardware'?{appId}:{})};
  }
  if(c.craft&&typeof b.signStr==='string'&&b.signStr!==jbBodySign(b))return null;
- if(!profile.signing&&c.craft){
+ if(!profile.signing&&c.craft&&!c.requireObservedClaim){
   for(const k of ['JD_HOME_CHECKIN_ACCOUNT_V1','JD_INDEX_CHECKIN_ACCOUNT_V1',JB_CONFIG.gear.key]){const v=host.read(k,null);if(v?.pin!==pair.pin||!v.signing?.environment)continue;const env=decode(v.signing.environment);if([pair.pin,decodeURIComponent(pair.pin)].includes(env?.pp?.p1)){profile.signing=jsClone(v.signing);break;}}
  }
  const params={};for(const k of ['appid','client','clientVersion','platform','loginType','loginWQBiz','uuid','build','screen','networkType','d_brand','d_model','lang','osVersion','partner','wg-sdk-token','ext','cthr','channel'])if(p[k]!==undefined)params[k]=p[k];
@@ -1031,7 +1041,7 @@ function jbCapture(host,request,response,decode){
  else if(f===c.query)body={client:b.client,clientVersion:b.clientVersion};
  else {const x=jbInner(b);body={};for(const k of ['client','clientVersion','extParam','activity_id','template_id','floor_id','enc'])if(x[k]!==undefined)body[k]=x[k];if(typeof body.enc!=='string'||body.enc.length>4096)return null;}
  profile.templates=profile.templates||{};profile.templates[f===c.query?'query':'claim']={params,body};
- profile.headers=h;profile.capturedAt=at;
+ profile.headers=h;profile.capturedAt=at;profile.captureVersion='2026-11-05.1';
  host.write(c.key,profile);if(!bound)host.write(JS_KEYS.bound,{pin:pair.pin});
  const updated=[c.key],previous=host.read(JS_KEYS.login,null);
  if(fresh&&(!previous||at>=Number(previous.capturedAt||0))){
@@ -1039,7 +1049,7 @@ function jbCapture(host,request,response,decode){
   host.write('QL_BRIDGE_CREDENTIAL_V1',{...direct,capturedAt:at,source:'combined-signin'});
   if(previous?.cookie!==direct.cookie)updated.push(JS_KEYS.login);
  }
- return {updated,first:!old};
+ return {updated,first:!old||scopeChanged||old.captureVersion!=='2026-11-05.1'};
 }
 
 function jsMedicalCapture(host,request,response,decode){
@@ -1081,7 +1091,7 @@ async function jsCapture(host,request,response,parsers,decode){
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
  if(!jd&&!finance)return null;
  const p=jd?jsParams(request):{},f=p.functionId,body=jd?JSON.parse(p.body||'{}'):{};
- if(Object.values(JB_CONFIG).some(c=>c.craft?body.craftId===c.craft:[c.query,c.claim].includes(f)))return jbCapture(host,request,response,decode);
+ if(Object.entries(JB_CONFIG).some(([k,c])=>c.craft?typeof body.craftId==='string'&&jbConfig(k,body)?.craft===body.craftId:[c.query,c.claim].includes(f)))return jbCapture(host,request,response,decode);
  if(body.craftId===JDI_CRAFT||body.pageId===JDI_PAGE)return jsIndexCapture(host,request,response,decode);
  if(f==='start')return null; // Leave the splash rewrite to its own plugin.
  if([JSM_QUERY,JSM_CLAIM].includes(f))return jsMedicalCapture(host,request,response,decode);
@@ -1142,11 +1152,13 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
    const names={...Object.fromEntries(Object.values(JB_CONFIG).map(c=>[c.key,c.label])),[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,farm:farmCapture},farmDecodeEnvironment);
-   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据] 已更新：'+text);if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
+   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据 2026-11-05.1] 已更新：'+text);
+    for(const task of ['gear','hardware'])if(r.updated.includes(JB_CONFIG[task].key)){const p=read(JB_CONFIG[task].key,null),c=jbConfig(task,p?.templates?.query?.body||p?.templates?.claim?.body);console.log('[签到凭据] '+(c?.label||names[JB_CONFIG[task].key])+'：查询'+(p?.templates?.query?'已保存':'缺少')+'，签到参数'+(p?.templates?.claim?'已保存':'待获取')+'，签名'+(p?.signing?'已保存':'待获取'));}
+    if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
   }catch(_){console.log('[签到凭据] 获取未完成，保留原记录');}
   finally{$done({});}
  })();
 }
 
-if(typeof module!=="undefined")module.exports={JB_CONFIG,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,farmCapture};
+if(typeof module!=="undefined")module.exports={JB_CONFIG,jbConfig,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,farmCapture};
 

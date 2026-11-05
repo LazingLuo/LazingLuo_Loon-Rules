@@ -40,6 +40,8 @@ function host(){const map=new Map(),calls=[],signs=[];const h={map,calls,signs,p
 async function capture(h,task,claim=false,req=request(task,claim),j=claim?award(task):page(task)){return cap.jsCapture(h,req,reply(j),{},cap.farmDecodeEnvironment);}
 async function ready(task){const h=host();await capture(h,task);if(!!C[task].craft&&!h.read(C[task].key)?.signing)h.write('JD_HOME_CHECKIN_ACCOUNT_V1',{pin:'offline',signing:{environment:encode(env()),eidToken:'OFFLINE_DEVICE'}});await capture(h,task,true);return h;}
 const run=(h,t)=>api.createExtraSignins(h,h.crypto).run(t);let total=0;
+const ai={craft:'6a66f5511177f59203da3347',page:'https://pro.m.jd.com/mall/active/3skw64E2o8zoGcqm41gsewXHgdvR/index.html'};
+function aiRequest(claim=false){const r=request('gear',claim),p=api.jsParams(r),b=JSON.parse(p.body);b.craftId=ai.craft;b.signStr=api.jbBodySign(b);p.body=JSON.stringify(b);r.body=form(p);r.headers.Referer=ai.page;r.headers['x-referer-page']=ai.page;return r;}
 async function test(name,f){await f();total++;console.log('OK '+name);}
 (async()=>{
  await test('thirteen unique tasks; no retired Faker or special-channel entry',()=>{assert.equal(api.JS_TASKS.length,13);assert.equal(new Set(api.JS_TASKS.map(x=>x[0])).size,13);assert(!api.JS_TASKS.some(x=>['hs','ys','delivery','game','plant','special'].includes(x[0])));for(const t of Object.keys(C))assert(api.JS_TASKS.some(x=>x[0]===t));});
@@ -104,6 +106,38 @@ async function test(name,f){await f();total++;console.log('OK '+name);}
  await test('combined runner executes all batch additions within its lock and clears the lock',async()=>{const h=host();Object.assign(h,{now:()=>Date.now(),random:()=>0.5,sleep:async()=>{},setTimeout,clearTimeout});for(const task of Object.keys(C)){await capture(h,task);await capture(h,task,true);}const done=new Set();h.reply=o=>{const p=api.jsParams(o),task=Object.keys(C).find(t=>[C[t].query,C[t].claim].includes(p.functionId)&&(!C[t].craft||JSON.parse(p.body).craftId===C[t].craft));assert(task,'unexpected request outside new daily scopes');if(p.functionId===C[task].query)return reply(page(task,done.has(task)));done.add(task);return reply(award(task));};const r=await api.createSignins(h,{},h.crypto).run({gapSeconds:0});assert(r.finished);assert.equal(r.results.length,13);for(const task of Object.keys(C))assert.equal(r.results.find(x=>x.task===task).status,'signed_confirmed');assert(!h.rawRead(K.lock));});
  for(const task of Object.keys(C))await test('embedded SDK supports exact signed field set: '+task,async()=>{const cache=new Map(),c=api.createSigninCrypto({read:(k,f)=>cache.get(k)||f,write:(k,v)=>cache.set(k,v),setTimeout:()=>0,clearTimeout:()=>{},progress:()=>{},requestAlgo:async o=>{assert(!Object.keys(o.headers).some(k=>/cookie|authorization/i.test(k)));const b=JSON.parse(o.body);return reply({status:200,data:{ts:Date.now(),result:{fp:b.fp,tk:'tk03'+'a'.repeat(88),algo:'function test(tk,fp,ts,ai,algo){return algo.HmacSHA256(tk+fp+ts+ai,"offline");}'}}});}});
   for(const claim of [false,true]){const p=params(task,claim),app=C[task].apps[p.functionId];if(!app)continue;const input={};for(const k of ['functionId','appid','client','body','clientVersion','sign','t','jsonp'])if(p[k])input[k]=k==='body'?c.hash(p.body):p[k];const s=(await c.signOnline(app,{pin:'offline',headers:header(task)},env(),input)).split(';');assert.equal(s.length,10);assert.equal(s[2],app);assert.equal(s[5],'5.3');assert.equal(s[3],'tk03'+'a'.repeat(88));assert(s[9]);}
+ });
+ await test('AI gear query has an exact page/craft scope; arbitrary crafts are rejected',async()=>{
+  const r=aiRequest(),p=api.jsParams(r);assert(api.jbScope('gear',p,JSON.parse(p.body)));
+  const b=JSON.parse(p.body);b.craftId='unobserved';assert(!api.jbScope('gear',p,b));
+  const h=host();r.headers.Referer=C.gear.page;r.headers['x-referer-page']=C.gear.page;assert.equal(await capture(h,'gear',false,r),null);assert(!h.read(C.gear.key));
+ });
+ await test('AI unsigned query saves profile and confirms today without borrowing claim material',async()=>{
+  const h=host();h.write('JD_HOME_CHECKIN_ACCOUNT_V1',{pin:'offline',signing:{environment:encode(env())}});
+  assert((await capture(h,'gear',false,aiRequest(),page('gear',true))).updated.includes(C.gear.key));
+  const p=h.read(C.gear.key);assert(p.templates.query);assert(!p.templates.claim);assert(!p.signing);assert.equal(p.captureVersion,'2026-11-05.1');
+  h.reply=o=>{assert.equal(o.headers.Referer,ai.page);assert.equal(JSON.parse(api.jsParams(o).body).craftId,ai.craft);return reply(page('gear',true));};
+  assert.equal((await run(h,'gear')).status,'already_done');assert.equal(h.calls.length,1);assert(!h.signs.length);
+  h.map.delete(K.attempts);h.reply=()=>reply(page('gear',false));await assert.rejects(()=>run(h,'gear'),/缺少签名环境/);assert.equal(h.calls.length,2);assert(!h.signs.length);
+ });
+ await test('observed AI claim enables only the same AI page flow',async()=>{
+  const h=host();await capture(h,'gear',false,aiRequest(),page('gear'));await capture(h,'gear',true,aiRequest(true),award('gear'));
+  let done=false;h.reply=o=>{const p=api.jsParams(o);assert.equal(JSON.parse(p.body).craftId,ai.craft);assert.equal(o.headers.Referer,ai.page);if(p.functionId===C.gear.query)return reply(page('gear',done));done=true;return reply(award('gear'));};
+  assert.equal((await run(h,'gear')).status,'signed_confirmed');assert.equal(h.calls.length,3);assert.equal(h.signs[0].a,'c50cc');
+ });
+ await test('switching gear pages discards prior claim and signer instead of mixing scopes',async()=>{
+  const h=await ready('gear');assert(h.read(C.gear.key).signing);assert(h.read(C.gear.key).templates.claim);
+  const r=await capture(h,'gear',false,aiRequest(),page('gear',true));assert(r.first);const p=h.read(C.gear.key);assert.equal(p.templates.query.body.craftId,ai.craft);assert(!p.templates.claim);assert(!p.signing);
+  h.observedAt-=1000;assert.equal(await capture(h,'gear'),null);assert.equal(h.read(C.gear.key).templates.query.body.craftId,ai.craft);
+ });
+ await test('old gear pending journal cannot block the separately captured AI scope',async()=>{
+  const h=host();h.write(K.attempts,{[day()+':'+h.crypto.hash('offline').slice(0,24)+':gear']:{state:'pending',time:Date.now()}});
+  await capture(h,'gear',false,aiRequest(),page('gear'));await capture(h,'gear',true,aiRequest(true),award('gear'));
+  let n=0;h.reply=()=>reply(++n===1?page('gear'):n===2?award('gear'):page('gear',true));assert.equal((await run(h,'gear')).status,'signed_confirmed');assert.equal(h.calls.length,3);
+ });
+ for(const name of ['jd-signin-capture.js','jd-activity-capture.js','jd-splash.js'])await test(name+': real wrapper saves AI query and reports exact partial fields',async()=>{
+  const h=host(),logs=[];let out;await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(Error('capture timeout')),1500);vm.runInNewContext(fs.readFileSync(path.join(root,name),'utf8'),{$request:aiRequest(),$response:reply(page('gear',true)),$script:{startTime:new Date().toISOString()},$persistentStore:{read:h.rawRead,write:h.rawWrite},$notification:{post:()=>{}},console:{log:x=>logs.push(x)},$done:r=>{out=r;clearTimeout(t);resolve();}},{timeout:3000});});
+  assert(h.read(C.gear.key).templates.query);assert(!out.body);assert(logs.some(x=>x.includes('AI装备馆签到：查询已保存，签到参数待获取，签名待获取')));assert(logs.some(x=>x.includes('2026-11-05.1')));
  });
  console.log(total+' batch sign-in checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
