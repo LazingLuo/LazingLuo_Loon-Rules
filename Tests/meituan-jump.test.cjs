@@ -7,7 +7,7 @@ const core = require('../Scripts/meituan-jump.js');
 const {MT_TASKS, MT_BASE, MT_KEY, MT_TTL, mtObserve, mtDecode, mtPlan, mtBridge, mtValidLink} = core;
 let checks = 0;
 function check(ok, label) { assert.ok(ok, label); checks += 1; }
-const now = Date.now(), key = 'a'.repeat(64), proof = 'b'.repeat(64);
+const now = Date.parse('2026-11-06T13:00:00+08:00'), key = 'a'.repeat(64), proof = 'b'.repeat(64);
 const links = {
   antManor: 'alipays://platformapi/startapp?appId=20000067&url=FAKE',
   antForest: 'alipays://platformapi/startapp?appId=20000067&url=FAKE_FOREST',
@@ -16,7 +16,7 @@ const links = {
   etao: 'https://market.m.taobao.com/app/etao/test?fake=1',
   cmcc: 'cn.10086.app://url=https%3A%2F%2Fwx.10086.cn%2Ffake',
   weibo: 'sinaweibo://changegroup?groupid=FAKE',
-  xianyu: 'https://h5.m.goofish.com/wow/moyu/moyu-project/coin/pages/coinCallApp?taskCode=FAKE',
+  xianyu: 'https://h5.m.goofish.com/wow/moyu/moyu-project/coin/pages/coinCallApp?taskCode=FAKE_CODE&channel=meituanCoin&userToken=OFFLINE&playId=1723',
   alipayMember: 'alipays://platformapi/startapp?appId=FAKE_MEMBER',
   alipayGold: 'alipays://platformapi/startapp?appId=FAKE_GOLD',
   baiduLite: 'https://activity.baidu.com/mbox/4a89aa9163/matrixInvoke?token=OFFLINE&taskCode=FAKE_CODE&playId=1480',
@@ -78,10 +78,10 @@ const tagged=envelope();
 const tagEvents=JSON.parse(tagged[0].evs).filter(x=>['点淘','百度极速版'].some(n=>x.val_lab.title.includes(n)));
 tagged[0].evs=JSON.stringify(tagEvents.map(ev=>({stm:now-1000,tag:{game:{context:ev.val_lab}}})));
 const tagRecord=mtObserve(JSON.stringify(tagged),null,now).record;
-check(Object.keys(tagRecord.tasks).sort().join(',')==='baiduLite,diantao','native task context read from tag.game');
-check(tagRecord.tasks.diantao.sourceTime===now-1000,'nested task inherits real event time');
+check(Object.keys(tagRecord.jumpTasks).sort().join(',')==='baiduLite,diantao','native task context read from tag.game');
+check(tagRecord.jumpTasks.diantao.sourceTime===now-1000,'nested task inherits real event time');
 const staleTags=JSON.parse(JSON.stringify(tagged)),staleEvents=JSON.parse(staleTags[0].evs);staleEvents.forEach(x=>x.stm=now-2000);staleTags[0].evs=JSON.stringify(staleEvents);
-check(mtObserve(JSON.stringify(staleTags),tagRecord,now).record.tasks.diantao.sourceTime===now-1000,'older nested event cannot overwrite newer task');
+check(mtObserve(JSON.stringify(staleTags),tagRecord,now).record.jumpTasks.diantao.sourceTime===now-1000,'older nested event cannot overwrite newer task');
 for(const key of ['mtContent','mtPig','mtOrchard'])check(!MT_TASKS.some(t=>t.key===key),'removed internal branch absent: '+key);
 const cached=JSON.parse(JSON.stringify(full.record));for(const key of ['mtContent','mtPig','mtOrchard'])cached.tasks[key]={url:'imeituan://www.meituan.com/old',capturedAt:now,sourceTime:now};
 const clean=mtObserve(JSON.stringify(envelope()),cached,now).record;
@@ -114,6 +114,7 @@ const source = fs.readFileSync(path.join(__dirname, '../Scripts/meituan-jump.js'
 function run(request, record, arg) {
   let done, written, notification;
   vm.runInNewContext(source, {
+    Date: class extends Date { static now() { return now; } },
     $request: request, $argument: arg, $done: x => { done = x; }, console: {log() {}},
     $persistentStore: {read: () => record ? JSON.stringify(record) : null, write: (v, k) => { written = {v, k}; return true; }},
     $notification: {post: (...x) => { notification = x; }}
@@ -126,6 +127,39 @@ check(passthrough.written.k === MT_KEY, 'writes dedicated cache only');
 check(passthrough.notification && !JSON.stringify(passthrough.notification).includes('alipays:'), 'notification contains names only');
 const foreign = run({url: 'https://other.example/', method: 'POST', body: JSON.stringify(envelope())});
 check(JSON.stringify(foreign.done) === '{}' && !foreign.written, 'other destinations not captured');
+const fallbackKeys = ['xianyu', 'baiduLite', 'taobaoLite', 'diantao'];
+const seedEvents = JSON.parse(envelope()[0].evs);
+const fallbackEvents = seedEvents.filter(event => fallbackKeys.some(k => event.val_lab.task_detail.task_url.iosDeeplink === links[k]));
+const listEvents = seedEvents.filter(event => !fallbackEvents.includes(event));
+const capture = (events, prior = null, time = now, uid = 'FAKE_ACCOUNT') =>
+  mtObserve(JSON.stringify([{uid, package_tm: time, evs: events}]), prior, time).record;
+const nine = capture(listEvents);
+check(mtPlan(nine, now).count === 9, 'list only has nine links');
+const clicks = fallbackEvents.map(event => ({...event, nm: 'MC'}));
+const thirteen = capture(clicks, nine);
+const fallbackPlan = mtPlan(thirteen, now);
+check(fallbackPlan.count === 13 && fallbackKeys.every(k => fallbackPlan[k] === links[k]), 'nine list links OR four local jump records');
+check(fallbackPlan.fallbackSummary.includes('闲鱼') && !fallbackPlan.fallbackSummary.includes('OFFLINE'), 'fallback names without URL data');
+const preferred = structuredClone(fallbackEvents[0]);
+const preferredKey = fallbackKeys.find(k => preferred.val_lab.task_detail.task_url.iosDeeplink === links[k]);
+preferred.val_lab.task_detail.task_url.iosDeeplink += '&from=LATEST_LIST';
+const afterRefresh = capture([preferred], thirteen);
+check(mtPlan(afterRefresh, now)[preferredKey].endsWith('&from=LATEST_LIST'), 'current valid list URL wins over jump cache');
+const sameCodeNoUrl = structuredClone(preferred);
+delete sameCodeNoUrl.val_lab.task_detail.task_url;
+check(mtPlan(capture([sameCodeNoUrl], thirteen), now)[preferredKey] === links[preferredKey], 'missing list URL falls back to matching click');
+sameCodeNoUrl.val_lab.task_detail.task_code = 'NEW_CODE';
+check(!mtPlan(capture([sameCodeNoUrl], thirteen), now)[preferredKey], 'new list code prevents old ticket reuse');
+const midnight = Date.parse('2026-11-07T00:00:00+08:00');
+check(mtPlan(thirteen, midnight).count === 9, 'only the four fallback paths enforce same-day event date');
+check(!mtPlan(capture([], thirteen, now + 1, 'OTHER_ACCOUNT'), now + 1)[preferredKey], 'account change removes fallback');
+const legacy = structuredClone(thirteen);
+legacy.tasks[preferredKey] = legacy.jumpTasks[preferredKey];
+delete legacy.tasks[preferredKey].source;
+delete legacy.jumpTasks[preferredKey];
+check(mtPlan(legacy, now)[preferredKey] === links[preferredKey], 'valid same-day pre-update cache remains usable');
+check(!mtPlan(capture(clicks.map(e => ({...e, stm: now - 3600000})), nine), now)[preferredKey], 'old telemetry cannot refresh a click ticket');
+check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), links.xianyu.replace('userToken=OFFLINE','userToken=')), 'Xianyu ticket must contain a token');
 let harChecks = 0;
 for (const file of process.argv.slice(2)) {
   const entries = JSON.parse(fs.readFileSync(file, 'utf8')).log.entries.slice().sort((a, b) => Date.parse(a.startedDateTime) - Date.parse(b.startedDateTime));
@@ -141,9 +175,10 @@ for (const file of process.argv.slice(2)) {
   const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
   const plan = mtPlan(record, current);
   const original = path.basename(file).startsWith('450_') ? ['mtPig', 'mtOrchard', 'xianyu', 'alipayMember', 'alipayGold'] : path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent', 'mtOrchard'];
-  const expected = path.basename(file).startsWith('491_') ? ['baiduLite','taobaoLite','diantao'] : original.filter(k=>!['mtContent','mtPig','mtOrchard'].includes(k));
+  const expected = path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
+    /^(491|496)_/.test(path.basename(file)) ? ['baiduLite','taobaoLite','diantao'] : original.filter(k=>!['mtContent','mtPig','mtOrchard'].includes(k));
   check(plan.count === expected.length, path.basename(file) + ': selected iOS links recovered');
-  check(Object.keys(record.tasks).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
+  check(Object.keys({...record.tasks, ...record.jumpTasks}).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
   check(expected.every(k => mtValidLink(MT_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
   check(!JSON.stringify(record).includes('iosDeeplink'), path.basename(file) + ': no full telemetry saved');
   console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; ' + plan.count + ' task links recovered (URLs withheld).');

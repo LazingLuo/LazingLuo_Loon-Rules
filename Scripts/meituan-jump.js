@@ -1,9 +1,11 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.4.0';
+const MT_VERSION = '0.4.2';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
+const MT_CLICK_FALLBACK = new Set(['xianyu', 'baiduLite', 'taobaoLite', 'diantao']);
+const mtDay = time => Math.floor((time + 8 * 60 * 60 * 1000) / MT_TTL);
 const MT_TASKS = [
   {key: 'antManor', name: '蚂蚁庄园', prefix: '浏览蚂蚁庄园', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'antForest', name: '蚂蚁森林', prefix: '浏览蚂蚁森林', route: /^alipays:\/\/platformapi\/startapp\?/},
@@ -39,10 +41,14 @@ function mtLinkParams(url){
 }
 function mtNewLink(task,url){const p=mtLinkParams(url);return !!p&&p.playId===task.playId&&typeof p.taskCode==='string'&&p.taskCode.length>0&&typeof p.token==='string'&&p.token.length>0;}
 
+function mtXianyuLink(url) {
+  const params = mtLinkParams(url);
+  return !!params?.taskCode && !!params.userToken && /^\d+$/.test(params.playId || '') && params.channel === 'meituanCoin';
+}
 function mtValidLink(task, url) {
   return typeof url === 'string' && url.length > 20 && url.length <= 16384 &&
     !/[\x00-\x20\x7f<>"`\\]/.test(url) && task.route.test(url) &&
-    !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url));
+    !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url)) && (task.key !== 'xianyu' || mtXianyuLink(url));
 }
 function mtObserve(body, old, now) {
   const result = {record: old, changed: [], parsed: 0, invalid: 0, accountChanged: false};
@@ -76,9 +82,9 @@ function mtObserve(body, old, now) {
       changed.clear();
     }
     record.lastPackageTime = Math.max(Number(record.lastPackageTime) || 0, packageTime);
-    function walk(value, depth, eventTime) {
+    function walk(value, depth, eventTime, sourceType) {
       if (depth > 18 || !value || typeof value !== 'object') return;
-      if (Array.isArray(value)) { value.forEach(x => walk(x, depth + 1, eventTime)); return; }
+      if (Array.isArray(value)) { value.forEach(x => walk(x, depth + 1, eventTime, sourceType)); return; }
       const title = typeof value.title === 'string' ? value.title : '';
       const task = MT_TASKS.find(x => title.startsWith(x.prefix));
       const detail = value.task_detail;
@@ -87,17 +93,30 @@ function mtObserve(body, old, now) {
         // Object form: only iOS, never substitute Android when iOS is missing.
         const url = typeof source === 'string' ? source : source && source.iosDeeplink;
         const stamp = Number(value.stm) || eventTime || packageTime;
-        if (mtValidLink(task, url) && typeof detail.task_code === 'string' && detail.task_code && (!task.playId || mtLinkParams(url)?.taskCode===detail.task_code)) {
-          const prior = record.tasks[task.key];
+        const tracked = MT_CLICK_FALLBACK.has(task.key);
+        const code = detail.task_code;
+        const params = tracked && typeof url === 'string' ? mtLinkParams(url) : null;
+        const validCode = typeof code === 'string' && code.length > 0 && code.length <= 512;
+        const freshEvent = Math.abs(now - stamp) <= 15 * 60 * 1000;
+        if (tracked && sourceType === 'list' && validCode && freshEvent) {
+          const hints = record.listHints ||= {};
+          if (!hints[task.key] || stamp >= hints[task.key].sourceTime) {
+            hints[task.key] = {code, sourceTime: stamp};
+          }
+        }
+        if (validCode && mtValidLink(task, url) && (!tracked || (freshEvent && params?.taskCode === code))) {
+          const items = tracked && sourceType !== 'list' ? (record.jumpTasks ||= {}) : record.tasks;
+          const prior = items[task.key];
           if (!prior || stamp >= Number(prior.sourceTime || 0)) {
-            if (!prior || prior.url !== url) changed.add(task.key);
-            record.tasks[task.key] = {name: task.name, url, capturedAt: now, sourceTime: stamp};
+            const kind = prior?.url === url && prior.source === 'click' && sourceType === 'jump' ? 'click' : sourceType;
+            if (!prior || prior.url !== url || (kind === 'click' && prior.source !== 'click')) changed.add(task.key);
+            items[task.key] = {name: task.name, url, capturedAt: now, sourceTime: stamp, source: kind};
             record.updatedAt = now;
           }
         } else if (source) result.invalid += 1;
       }
       Object.keys(value).forEach(key => {
-        if (key !== 'task_detail') walk(value[key], depth + 1, eventTime);
+        if (key !== 'task_detail') walk(value[key], depth + 1, eventTime, sourceType);
       });
     }
     events.forEach(ev => {
@@ -105,12 +124,12 @@ function mtObserve(body, old, now) {
       const lab = ev && ev.val_lab;
       if (lab && typeof lab === 'object') {
         const copy = Object.assign({}, lab, {stm: ev.stm});
-        walk(copy, 0, Number(ev.stm) || packageTime);
+        walk(copy, 0, Number(ev.stm) || packageTime, ev.nm === 'MC' ? 'click' : 'list');
       }
       // Native mini-app transitions put the same task object under tag.game.
       // Only inspect this observed task context, not arbitrary page URLs.
       if (ev && ev.tag && ev.tag.game && typeof ev.tag.game === 'object') {
-        walk(ev.tag.game, 0, Number(ev.stm) || packageTime);
+        walk(ev.tag.game, 0, Number(ev.stm) || packageTime, 'jump');
       }
     });
   });
@@ -120,18 +139,35 @@ function mtObserve(body, old, now) {
 }
 function mtPlan(record, now, tasks = MT_TASKS) {
   const plan = {schema: 'lazing-meituan-jump-plan-v1', count: 0, message: '', summary: ''};
-  const missing = [], ready = [];
+  const missing = [], ready = [], fallback = [];
   tasks.forEach(task => {
     plan[task.key] = '';
-    const item = record && record.tasks && record.tasks[task.key];
-    const age = item && now - Number(item.capturedAt);
-    if (item && Number.isFinite(age) && age >= -60000 && age <= MT_TTL && mtValidLink(task, item.url)) {
+    const tracked = MT_CLICK_FALLBACK.has(task.key);
+    const hint = record?.listHints?.[task.key];
+    const currentCode = tracked && mtDay(hint?.sourceTime) === mtDay(now) ? hint.code : '';
+    function usable(item) {
+      if (!item) return false;
+      const age = now - Number(item.capturedAt);
+      if (!Number.isFinite(age) || age < -60000 || age > MT_TTL || !mtValidLink(task, item.url)) return false;
+      if (!tracked) return true;
+      const stamp = Number(item.sourceTime || item.capturedAt);
+      const code = mtLinkParams(item.url)?.taskCode;
+      return stamp <= now + 60000 && mtDay(stamp) === mtDay(now) && !!code && (!currentCode || currentCode === code);
+    }
+    const saved = record?.tasks?.[task.key];
+    const jump = record?.jumpTasks?.[task.key];
+    const list = usable(saved) && (!tracked || saved.source === 'list') ? saved : null;
+    const item = list || (usable(jump) ? jump : (usable(saved) ? saved : null));
+    if (item) {
       plan[task.key] = item.url;
       plan.count += 1;
       ready.push(task.name);
+      if (tracked && !list) fallback.push(task.name);
     } else missing.push(task.name);
   });
+  plan.fallbackSummary = fallback.length ? '跳转记录补齐：' + fallback.join('、') : '';
   plan.summary = '本次准备 ' + plan.count + '/' + tasks.length + ' 项：' + ready.join('、') +
+    (plan.fallbackSummary ? '。' + plan.fallbackSummary : '') +
     (missing.length ? '。缺少：' + missing.join('、') : '');
   plan.message = plan.count ? plan.summary : '还没记录到任务链接。请打开美团金币任务列表，停留几秒后再运行。';
   return plan;
@@ -169,7 +205,7 @@ if (typeof $done === 'function') {
   const read = () => mtObject($persistentStore.read(MT_KEY));
   if (typeof $request === 'undefined') {
     const p = mtPlan(read(), now);
-    const content = p.message + '\n配套v0.4.0快捷指令一淘、中国移动停留10秒，其余5秒；这里只显示链接记录，不判断金币到账。';
+    const content = p.message + '\n配套快捷指令一淘、中国移动停留10秒，其余5秒；这里只显示链接记录，不判断金币到账。';
     console.log('[美团任务] ' + content);
     $done({title: '美团任务链接记录', content});
   } else if (String($request.url).startsWith(MT_BASE)) {
@@ -187,7 +223,7 @@ if (typeof $done === 'function') {
         const names = found.changed.map(k => MT_TASKS.find(t => t.key === k).name);
         const p = mtPlan(found.record, now);
         console.log('[美团任务] 已记录 ' + p.count + '/' + MT_TASKS.length + ' 项：' + names.join('、'));
-        $notification.post('美团任务链接', '已记录 ' + p.count + '/' + MT_TASKS.length + ' 项', names.join('、') || '账号已切换，请重新打开任务列表');
+        $notification.post('美团任务链接', '已记录 ' + p.count + '/' + MT_TASKS.length + ' 项', [names.join('、'), p.fallbackSummary].filter(Boolean).join('。') || '账号已切换，请重新打开任务列表');
       }
       if (found.invalid) console.log('[美团任务] ' + found.invalid + ' 条地址未通过检查，已跳过');
     } catch (_) { console.log('[美团任务] 本次记录未完成，原请求继续'); }
