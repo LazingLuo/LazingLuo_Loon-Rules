@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..'),api=require(path.join(root,'Scripts/jd-signin.js'));
-assert.deepEqual(api.JS_TASKS.map(x=>x[0]),['daily','scratch','blindbox','jxzy','finance','home','index','medical','gameDaily','gear','wallet','hardware','used']);
+assert.deepEqual(api.JS_TASKS.map(x=>x[0]),['daily','scratch','blindbox','jxzy','finance','home','index','medical','gameDaily','gear','gearAI','wallet','hardware','used','furnishing','service','campus']);
 for(const dir of ['Scripts','Plugins','Docs'])for(const name of fs.readdirSync(path.join(root,dir))){
  const s=fs.readFileSync(path.join(root,dir,name),'utf8');
  assert(!/JD_SPECIAL_CHANNEL|createSpecialClient|tjCapture|特价频道|特价签到|jd-special-activity|\bspecial:/.test(s),dir+'/'+name);

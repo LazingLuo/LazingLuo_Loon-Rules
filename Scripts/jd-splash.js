@@ -5,7 +5,7 @@ function jdSplashCapture(request,response){return new Promise(resolve=>{
  (function(context){
  const {$request,$response,$persistentStore,$notification,$script,$done,console,$argument}=context;
  const module=undefined;
-// Shared capture 2026-11-05.1: observed AI gear page and precise gear/hardware logging.
+// Shared capture 2026-11-06.1: separate gear entrances and capture furnishing, service and campus.
 // Shared capture 20261103-6: own sign-ins and activities only.
 // Shared credential capture 20261101-1: medical daily sign-in only.
 // Shared credential capture 20261030-1; retired finance/medical activities removed.
@@ -939,23 +939,113 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ gearAI:{key:'JD_GEAR_AI_DAILY_ACCOUNT_V1',label:'AI装备馆签到',page:'https://pro.m.jd.com/mall/active/3skw64E2o8zoGcqm41gsewXHgdvR/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a66f5511177f59203da3347',requireObservedClaim:true},
+ furnishing:{key:'JD_FURNISHING_DAILY_ACCOUNT_V1',label:'京东家居馆签到',page:'https://pro.m.jd.com/mall/active/FxaS5JGmuJH65DB4HxF7rCRRewb/index.html',appid:'home-marketing',query:'jjg_queryInteractiveInfoV3',claim:'jjg_doInteractiveAssignment',apps:{jjg_queryInteractiveInfoV3:'91a93',jjg_doInteractiveAssignment:'91a93'}},
+ service:{key:'JD_SERVICE_DAILY_ACCOUNT_V1',label:'京东服务签到',page:'https://pro.m.jd.com/mall/active/jpeZLX5Lb3gpwH98tAaB8Y1HY99/index.html',appid:'JDHOME_TARO',endpoint:'',query:'checkInTaskList',claim:'checkInTaskDo',apps:{checkInTaskList:'35fa0',checkInTaskDo:'35fa0'}},
+ campus:{key:'JD_CAMPUS_DAILY_ACCOUNT_V1',label:'京东校园签到',page:'https://pro.m.jd.com/mall/active/3B6CgwugAyBR67P3MSNhykj5Eqyr/index.html',appid:'schoolChannelHome',endpoint:'client.action',query:'campusTask_interact_load',claim:'campusTask_interact_invoke',apps:{}},
  gameDaily:{key:'JD_GAME_DAILY_ACCOUNT_V1',label:'互动游戏签到',page:'https://pro.m.jd.com/mall/active/3fcyrvLZALNPWCEDRvaZJVrzek8v/index.html',appid:'wegame-hub',query:'weGameHome',claim:'weGameLottery',apps:{weGameHome:'101aa',weGameLottery:'730a6'},link:'MWC_-5cWq-JH1wrPPteH4w'},
  used:{key:'JD_USED_DAILY_ACCOUNT_V1',label:'特价二手签到',page:'https://pro.m.jd.com/mall/active/3cH14YvzzeJEicxrjzhz1JqE9jgK/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69e98e5792e74fba21d62494'},
  gear:{key:'JD_GEAR_DAILY_ACCOUNT_V1',label:'装备馆签到',page:'https://pro.m.jd.com/mall/active/FEtAd86BW8TpiRKshRZX8PPEjpo/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a6890eaa0c21743163fe444'},
  wallet:{key:'JD_WALLET_DAILY_ACCOUNT_V1',label:'赚话费签到',page:'https://prodev.m.jd.com/mall/active/eEcYM32eezJB7YX4SBihziJCiGV/index.html',appid:'h5-sep',query:'DATAWALLET_USER_SIGN_INFO',claim:'DATAWALLET_USER_SIGN',apps:{DATAWALLET_USER_SIGN_INFO:'60d0e',DATAWALLET_USER_SIGN:'60d0e'}},
  hardware:{key:'JD_HARDWARE_DAILY_ACCOUNT_V1',label:'五金城签到',page:'https://pro.m.jd.com/mall/active/4RYbb8NtVAegmT35SuM2N3KKYLWt/index.html',appid:'i-home_fe',query:'bom_queryInteractiveInfo',claim:'bom_doInteractiveAssignment',apps:{bom_doInteractiveAssignment:'3c653'},activity:'4RYbb8NtVAegmT35SuM2N3KKYLWt'}
 };
-// Only the two page/craft pairs independently observed in HAR484 and HAR498.
+const JD_CAMPAIGN_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function jbCampusBase(body) {
+ return body.interactActId === '93' && body.clientChannel === 0 &&
+  /^ttt[0-9]+$/.test(body.babelChannel);
+}
+
+function jbCampusResponse(response) {
+ const data = response?.data;
+ if (response?.success !== true || response.code !== '11000' || data?.businessCode !== '11000') {
+  throw Error('校园接口未通过');
+ }
+ return data;
+}
+
+function jbCampusSignState(response) {
+ const sign = jbCampusResponse(response).signBeanModule;
+ if (sign?.taskType !== 5 || sign.itemId !== '1' || !JD_CAMPAIGN_ID.test(sign.taskId || '') ||
+     ![1, 2].includes(sign.todaySignStatus)) throw Error('校园签到状态变化');
+ return {done: sign.todaySignStatus === 2, id: sign.taskId, itemId: sign.itemId};
+}
+
+function jbServiceState(response, day) {
+ const rows = response.checkInTaskList;
+ if (!Array.isArray(rows)) throw Error('服务签到列表结构变化');
+ const matches = rows.filter(row => row.assignmentType === 5 && row.assignmentName === '签到得京豆');
+ if (matches.length !== 1) throw Error('服务签到项目不明确');
+ const row = matches[0];
+ const reward = row.rewardsList?.find(x => x.rewardName === '京东服务频道签到活动');
+ if (row.assignmentTimesLimit !== 1 || row.itemId !== '1' || !JD_CAMPAIGN_ID.test(row.encryptAssignmentId || '') ||
+     !Number.isSafeInteger(reward?.whtPoolId) || !Array.isArray(row.signList)) throw Error('服务签到字段变化');
+ const signed = row.signList.some(x => typeof x === 'string' && x.startsWith(day + '_'));
+ if (signed && row.todayCheckInState === 1 && row.completionFlag === true && row.status === 2) return {done: true};
+ if (!signed && row.todayCheckInState === null && row.completionFlag === false && row.status === 1) {
+  return {done: false, id: row.encryptAssignmentId, itemId: row.itemId, pool: reward.whtPoolId};
+ }
+ throw Error('服务签到状态不一致');
+}
+
+function jbFurnishingState(response, day) {
+ const panel = response.data?.hdInteractiveInfoDtoMap?.firstPageSignID;
+ if (panel?.login !== true || panel.hasRisk !== false || !Array.isArray(panel.assignmentList)) {
+  throw Error('家居馆签到列表未通过');
+ }
+ const rows = panel.assignmentList.filter(row => row.assignmentType === 5 && row.assignmentName === '签到' &&
+  row.assignmentDesc === '首页签到' && row.ext?.outerTaskType === 13 && row.ext.extraType === 'sign');
+ if (rows.length !== 1) throw Error('家居馆签到项目不明确');
+ const row = rows[0], sign = row.ext.sign;
+ if (!JD_CAMPAIGN_ID.test(row.encryptAssignmentId || '') || row.assignmentTimesLimit !== 1 ||
+     sign?.itemId !== '1' || !Array.isArray(sign.signList) ||
+     !row.rewards?.some(x => x.rewardType === 3 && x.rewardName === '京豆')) throw Error('家居馆签到字段变化');
+ const signed = sign.signList.some(x => typeof x === 'string' && x.startsWith(day + '_'));
+ if (signed && row.completionFlag === true && sign.status === 2) return {done: true};
+ if (!signed && row.completionFlag === false && sign.status === 1) {
+  return {done: false, id: row.encryptAssignmentId, itemId: sign.itemId};
+ }
+ throw Error('家居馆签到状态不一致');
+}
+
 function jbConfig(task,body){
- const c=JB_CONFIG[task];if(task!=='gear'||!c)return c;
- if(body?.craftId===c.craft)return c;
- if(body?.craftId==='6a66f5511177f59203da3347')return {...c,page:'https://pro.m.jd.com/mall/active/3skw64E2o8zoGcqm41gsewXHgdvR/index.html',craft:'6a66f5511177f59203da3347',label:'AI装备馆签到',requireObservedClaim:true};
+ const c=JB_CONFIG[task];
+ return c && (!c.craft || body?.craftId===c.craft) ? c : null;
+}
+function jbProfile(task,read){
+ const c=JB_CONFIG[task], current=read(c.key,null);
+ if(!c.craft)return current;
+ const matches=p=>p?.templates?.query?.body?.craftId===c.craft || p?.templates?.claim?.body?.craftId===c.craft;
+ if(matches(current))return current;
+ if(task==='gearAI'){
+  const legacy=read(JB_CONFIG.gear.key,null);
+  if(matches(legacy))return legacy;
+ }
  return null;
+}
+function jbEndpoint(task,claim){
+ return 'https://api.m.jd.com/'+(task==='hardware'&&!claim?'client.action':JB_CONFIG[task].endpoint??'api');
 }
 function jbBody(p){let b=JSON.parse(p.body||'{}');if(!b||typeof b!=='object'||Array.isArray(b))throw Error('签到参数格式变化');return b;}
 function jbInner(b){return typeof b.body==='string'?JSON.parse(b.body):null;}
 function jbScope(task,p,b){
  const c=jbConfig(task,b),f=p.functionId;if(!c||p.appid!==c.appid||![c.query,c.claim].includes(f))return false;
+ if(task==='furnishing'){
+  if(b.activityId!=='4'||b.isDistinguishReceivedNewUserAward!==false)return false;
+  return f===c.query?b.reqSource===1:b.type===13&&b.itemId==='1'&&
+   JD_CAMPAIGN_ID.test(b.encryptAssignmentId||'')&&b.assignId===b.encryptAssignmentId&&b.encryptAssignId===b.encryptAssignmentId;
+ }
+ if(task==='service'){
+  const m=b.checkInTaskParamMap;
+  if(!JD_CAMPAIGN_ID.test(p.x_app_key||'')||b.source!=='38'||b.supportNewChannel!=='2'||m?.requestScene!==0)return false;
+  return f===c.query?b.isJdApp===true&&(m.showCustomTaskFlag===undefined||m.showCustomTaskFlag===false):
+   Object.keys(m).sort().join(',')==='encryptAssignmentId,itemId,requestScene,signDays,whtPoolId'&&
+   m.itemId==='1'&&m.signDays==='1'&&Number.isSafeInteger(m.whtPoolId)&&JD_CAMPAIGN_ID.test(m.encryptAssignmentId||'');
+ }
+ if(task==='campus'){
+  if(!jbCampusBase(b)||p.loginType!=='2'||p.loginWQBiz!==f)return false;
+  return b.requestType===0&&(f===c.query||b.optType===0&&b.taskType===5&&b.itemId==='1'&&JD_CAMPAIGN_ID.test(b.taskId||''));
+ }
  if(task==='gameDaily')return b.linkId===c.link&&b.envType===1&&(f!==c.claim||b.status===1&&typeof b.markStr==='string'&&b.markStr.length>0&&b.markStr.length<4096);
  if(c.craft)return b.craftId===c.craft&&b.source==='jxzy'&&b.sceneval===2&&b.buid===325&&b.appCode==='ms1888ebbf'&&(f!==c.claim||b.itemId==='1');
  if(task==='wallet')return Object.keys(b).sort().join(',')==='encStr,t'&&Number.isSafeInteger(b.t)&&b.encStr===jbMd5(String(b.t)+'e9c398ffcb2d4824b4d0a703e38yffdd');
@@ -963,11 +1053,27 @@ function jbScope(task,p,b){
  const x=jbInner(b);return b.appid===c.appid&&b.sign===11&&Number.isSafeInteger(b.t)&&x?.activity_id===c.activity&&x.template_id==='00043621'&&x.floor_id==='133505424'&&x.taskType===0&&typeof x.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(x.encryptAssignmentId)&&!Object.prototype.hasOwnProperty.call(x,'actionType')&&x.extParam?.sceneid==='babel_'+c.activity;
 }
 function jbData(task,j){
+ if(task==='furnishing'){
+  if(j?.success!==true||j.code!==0||!j.data||j.data.degradeFlag===true)throw Error('家居馆签到接口未通过');
+  return j.data;
+ }
+ if(task==='service'){
+  if(j?.resultCode!=='0'||j.code!=='0'||j.subCode!=null&&j.subCode!=='0')throw Error('服务签到接口未通过');
+  return j;
+ }
+ if(task==='campus'){
+  if(j?.code==='21034'&&j.success===true&&j.data?.businessCode==='21034'&&
+     j.data.getRewardStatus===1&&j.data.accomplishTaskStatus===1)return j.data;
+  return jbCampusResponse(j);
+ }
  const ok=task==='wallet'?j?.code===200:task==='hardware'?j?.success===true&&j.resultCode===0&&j.data?.subCode==='0'&&j.data.hasRisk!==true&&j.data.login!==false:j?.success!==false&&j?.code===0;
  if(!ok||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('签到接口未通过');return j.data;
 }
 function jbState(task,j,day){
  const c=JB_CONFIG[task],d=jbData(task,j);
+ if(task==='furnishing')return jbFurnishingState(j,day);
+ if(task==='service')return jbServiceState(d,day);
+ if(task==='campus')return jbCampusSignState(j);
  if(task==='gameDaily'){
   const a=d.signMainVo,list=d.signListVo;if(!a||!Array.isArray(list)||list.length>32||![1,3].includes(a.currentStatus)||a.beforeTaskVo)throw Error('签到状态变化');
   const today=list.filter(x=>x?.todayFlag===1&&x.signDate===day&&x.status===3);
@@ -993,6 +1099,14 @@ function jbState(task,j,day){
 }
 function jbReward(task,j){
  const c=JB_CONFIG[task],d=jbData(task,j),num=v=>{if(typeof v==='string'&&!/^\d+(?:\.\d+)?$/.test(v))return null;const n=Number(v);return (typeof v==='number'||typeof v==='string')&&Number.isFinite(n)&&n>=0&&n<=100000?n:null;};
+ if(['furnishing','service','campus'].includes(task)){
+  const rows=task==='furnishing'?d.rewardsInfo?.successRewards?.['3']:task==='service'?d.doTaskJdList:[d.rewardInfo];
+  if(!Array.isArray(rows)||rows.length>20)return {};
+  const beans=rows.filter(row=>row?.rewardType===3&&row.rewardName==='京豆').map(row=>num(row.quantity??row.rewardNum));
+  if(!beans.length||beans.some(x=>!Number.isSafeInteger(x)))return {};
+  const sum=beans.reduce((a,b)=>a+b,0);
+  return sum<=100000?{beanQuantity:sum}:{};
+ }
  if(task==='gameDaily'){
   const a=d.awardVo,b=d.awardResultVO,n=num(b?.amount);return a?.awardName==='BEAN'&&b?.prizeType===3&&b.sendResult===true&&n!==null&&Number.isInteger(n)&&num(a.awardGivenNumber)===n?{beanQuantity:n}:{};
  }
@@ -1012,23 +1126,25 @@ function jbCapture(host,request,response,decode){
  const p=jsParams(request),b=jbBody(p),f=p.functionId;
  const task=Object.keys(JB_CONFIG).find(k=>jbScope(k,p,b));if(!task)return null;
  if(request.method==='GET'&&(task!=='hardware'||f!==JB_CONFIG.hardware.claim))return null;
- const c=jbConfig(task,b),j=JSON.parse(response.body||'{}');jbData(task,j);
- if(f===c.query)jbState(task,j,jsDay());
+ const c=JB_CONFIG[task],claim=f===c.claim;
+ if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&['gear','gearAI','furnishing','service','campus'].includes(task))return null;
+ const j=JSON.parse(response.body||'{}');
+ jbData(task,j);
+ if(!claim)jbState(task,j,jsDay());
+ else if(task==='campus'&&j.code!=='21034')return null;
  const ref=jsHeader(request.headers,'x-referer-page')||jsHeader(request.headers,'Referer');
  if(typeof ref!=='string'||ref.split('?')[0]!==c.page)return null;
  const rawCookie=String(jsHeader(request.headers,'Cookie')||''),direct=jsPair(rawCookie),canonical=jsLogin(host.read).login;
  if(!direct&&rawCookie.split(';').some(s=>/^\s*pt_key=/.test(s)))return null;
  const pair=direct||canonical;if(!pair||canonical&&canonical.pin!==pair.pin)return null;
  const pins=rawCookie.split(';').map(x=>x.trim()).filter(x=>x.startsWith('pt_pin='));if(pins.length>1||pins.length===1&&pins[0].slice(7)!==pair.pin)return null;
- const bound=host.read(JS_KEYS.bound,null)?.pin,old=host.read(c.key,null),at=host.observedAt||Date.now();
+ const bound=host.read(JS_KEYS.bound,null)?.pin,old=jbProfile(task,host.read),at=host.observedAt||Date.now();
  if(bound&&bound!==pair.pin||old?.pin&&old.pin!==pair.pin||at<Number(old?.capturedAt||0))return null;
  const h={};for(const k of ['User-Agent','Referer','Origin','x-referer-page','request-from','x-rp-client','wg-sdk-token']){const v=jsHeader(request.headers,k);if(v)h[k]=v;}
  if(!h['User-Agent'])return null;
  const fresh=direct&&(!canonical||at>=canonical.time);
  h.Cookie=(fresh?direct:canonical||pair).cookie+rawCookie.split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x)).join(';')+';';
- const priorCraft=old?.templates?.query?.body?.craftId||old?.templates?.claim?.body?.craftId;
- const scopeChanged=!!(old&&c.craft&&priorCraft!==c.craft);
- const profile=old&&!scopeChanged?jsClone(old):{pin:pair.pin,templates:{}};
+ const profile=old?jsClone(old):{pin:pair.pin,templates:{}};
  if(c.apps[f]){
   const sig=String(p.h5st||'').split(';');
   const appId=sig[2], validApp=appId===c.apps[f]||task==='hardware'&&f===c.claim&&appId==='b4c9d';
@@ -1041,14 +1157,27 @@ function jbCapture(host,request,response,decode){
   for(const k of ['JD_HOME_CHECKIN_ACCOUNT_V1','JD_INDEX_CHECKIN_ACCOUNT_V1',JB_CONFIG.gear.key]){const v=host.read(k,null);if(v?.pin!==pair.pin||!v.signing?.environment)continue;const env=decode(v.signing.environment);if([pair.pin,decodeURIComponent(pair.pin)].includes(env?.pp?.p1)){profile.signing=jsClone(v.signing);break;}}
  }
  const params={};for(const k of ['appid','client','clientVersion','platform','loginType','loginWQBiz','uuid','build','screen','networkType','d_brand','d_model','lang','osVersion','partner','wg-sdk-token','ext','cthr','channel'])if(p[k]!==undefined)params[k]=p[k];
+ if(task==='furnishing'||task==='service'){
+  for(const k of ['openudid','area','gpsArea','x_app_key'])if(p[k]!==undefined)params[k]=p[k];
+ }
  let body;
- if(task==='gameDaily')body=f===c.query?{envType:1,linkId:c.link,babelChannel:typeof b.babelChannel==='string'?b.babelChannel:''}:{};
+ if(task==='furnishing')body=claim?{}:{activityId:'4',isDistinguishReceivedNewUserAward:false,reqSource:1};
+ else if(task==='service'){
+  body={gcLat:b.gcLat,gcLng:b.gcLng,lbsParamMap:b.lbsParamMap,supportNewChannel:'2',source:'38'};
+  if(!claim)Object.assign(body,{isJdApp:true,checkInTaskParamMap:{...b.checkInTaskParamMap}});
+ }else if(task==='campus')body={interactActId:'93',clientChannel:0,requestType:0,babelChannel:b.babelChannel};
+ else if(task==='gameDaily')body=f===c.query?{envType:1,linkId:c.link,babelChannel:typeof b.babelChannel==='string'?b.babelChannel:''}:{};
  else if(c.craft){body={source:'jxzy',craftId:c.craft,sceneval:2,buid:325,appCode:'ms1888ebbf'};if(typeof b.tttId==='string')body.tttId=b.tttId;}
  else if(task==='wallet')body={};
  else if(f===c.query)body={client:b.client,clientVersion:b.clientVersion};
  else {const x=jbInner(b);body={};for(const k of ['client','clientVersion','extParam','activity_id','template_id','floor_id','enc'])if(x[k]!==undefined)body[k]=x[k];if(typeof body.enc!=='string'||body.enc.length>4096)return null;}
- profile.templates=profile.templates||{};profile.templates[f===c.query?'query':'claim']={params,body};
- profile.headers=h;profile.capturedAt=at;profile.captureVersion='2026-11-05.1';
+ profile.templates=profile.templates||{};profile.templates[claim?'claim':'query']={params,body};
+ profile.headers=h;profile.capturedAt=at;profile.captureVersion='2026-11-06.1';
+ if(task==='gear'){
+  const legacy=host.read(c.key,null);
+  if(legacy?.pin===pair.pin && jbConfig('gearAI',legacy.templates?.query?.body||legacy.templates?.claim?.body) &&
+     !host.read(JB_CONFIG.gearAI.key,null))host.write(JB_CONFIG.gearAI.key,legacy);
+ }
  host.write(c.key,profile);if(!bound)host.write(JS_KEYS.bound,{pin:pair.pin});
  const updated=[c.key],previous=host.read(JS_KEYS.login,null);
  if(fresh&&(!previous||at>=Number(previous.capturedAt||0))){
@@ -1056,7 +1185,7 @@ function jbCapture(host,request,response,decode){
   host.write('QL_BRIDGE_CREDENTIAL_V1',{...direct,capturedAt:at,source:'combined-signin'});
   if(previous?.cookie!==direct.cookie)updated.push(JS_KEYS.login);
  }
- return {updated,first:!old||scopeChanged||old.captureVersion!=='2026-11-05.1'};
+ return {updated,first:!old||old.captureVersion!=='2026-11-06.1'};
 }
 
 function jsMedicalCapture(host,request,response,decode){
@@ -1096,8 +1225,9 @@ async function jsCapture(host,request,response,parsers,decode){
  if((request?.method!=='POST'&&!(request?.method==='GET'&&/[?&]functionId=bom_doInteractiveAssignment(?:&|$)/.test(String(request.url||''))))||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||''),jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
- if(!jd&&!finance)return null;
- const p=jd?jsParams(request):{},f=p.functionId,body=jd?JSON.parse(p.body||'{}'):{};
+ const service=/^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=checkInTask(?:List|Do)(?:&[^#]*)?$/.test(url);
+ if(!jd&&!finance&&!service)return null;
+ const p=jd||service?jsParams(request):{},f=p.functionId,body=jd||service?JSON.parse(p.body||'{}'):{};
  if(Object.entries(JB_CONFIG).some(([k,c])=>c.craft?typeof body.craftId==='string'&&jbConfig(k,body)?.craft===body.craftId:[c.query,c.claim].includes(f)))return jbCapture(host,request,response,decode);
  if(body.craftId===JDI_CRAFT||body.pageId===JDI_PAGE)return jsIndexCapture(host,request,response,decode);
  if(f==='start')return null; // Leave the splash rewrite to its own plugin.
@@ -1159,8 +1289,8 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
    const names={...Object.fromEntries(Object.values(JB_CONFIG).map(c=>[c.key,c.label])),[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,farm:farmCapture},farmDecodeEnvironment);
-   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据 2026-11-05.1] 已更新：'+text);
-    for(const task of ['gear','hardware'])if(r.updated.includes(JB_CONFIG[task].key)){const p=read(JB_CONFIG[task].key,null),c=jbConfig(task,p?.templates?.query?.body||p?.templates?.claim?.body);console.log('[签到凭据] '+(c?.label||names[JB_CONFIG[task].key])+'：查询'+(p?.templates?.query?'已保存':'缺少')+'，签到参数'+(p?.templates?.claim?'已保存':'待获取')+'，签名'+(p?.signing?'已保存':'待获取'));}
+   if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据 2026-11-06.1] 已更新：'+text);
+    for(const task of ['gear','gearAI','hardware'])if(r.updated.includes(JB_CONFIG[task].key)){const p=read(JB_CONFIG[task].key,null),c=jbConfig(task,p?.templates?.query?.body||p?.templates?.claim?.body);console.log('[签到凭据] '+(c?.label||names[JB_CONFIG[task].key])+'：查询'+(p?.templates?.query?'已保存':'缺少')+'，签到参数'+(p?.templates?.claim?'已保存':'待获取')+'，签名'+(p?.signing?'已保存':'待获取'));}
     if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
   }catch(_){console.log('[签到凭据] 获取未完成，保留原记录');}
   finally{$done({});}
@@ -1168,6 +1298,8 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
 }
 
 if(typeof module!=="undefined")module.exports={JB_CONFIG,jbConfig,jbBody,jbScope,jbData,jbState,jbReward,jbMd5,jbBodySign,jbCapture,JSM_KEY,JSM_PAGE,jsMedicalCapture,jsIndexCapture,jsIndexBodySign,JDI_KEY,JDI_PAGE,JDI_CRAFT,jsCapture,farmDecodeEnvironment,runRetailCapture,runJxCapture,runHomeCapture,jsCouponCapture,jsActivityTaskCapture,runFinanceCapture,farmCapture};
+
+
 })(context);
 });}
 
@@ -1288,7 +1420,7 @@ if(typeof module!=="undefined")module.exports={JB_CONFIG,jbConfig,jbBody,jbScope
     if(action==='assets')return;
     const f=apiFrom($request);
     if(!f){
-      if(typeof $response!=='undefined'&&($request.method==='POST'||$request.method==='GET'&&/[?&]functionId=bom_doInteractiveAssignment(?:&|$)/.test(String($request.url||'')))&&Number($response.status||$response.statusCode)===200&&/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?|$)/.test(String($request.url||''))){
+      if(typeof $response!=='undefined'&&($request.method==='POST'||$request.method==='GET'&&/[?&]functionId=bom_doInteractiveAssignment(?:&|$)/.test(String($request.url||'')))&&Number($response.status||$response.statusCode)===200&&/^https:\/\/api\.m\.jd\.com\/(?:(?:api|client\.action)(?:\?|$)|\?functionId=checkInTask(?:List|Do)(?:&|$))/.test(String($request.url||''))){
         deferred=true;jdSplashCapture($request,$response).then(()=>{$done({});},()=>{console.log('[京东凭据] 获取未完成，保留原记录');$done({});});
       }return;
     }
