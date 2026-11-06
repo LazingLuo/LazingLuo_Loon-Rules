@@ -16,10 +16,10 @@ generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-
 
 
 
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-index-activity.js?v=20261030-2") with tag="京东指数", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-index-activity.js?v=20261106-2") with tag="京东指数", timeout=600
 
 
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261106-1&entry=service", `{"activity":"service"}`) with tag="京东服务活动", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261106-2&entry=service", `{"activity":"service"}`) with tag="京东服务活动", timeout=600
 
 [Mitm]
 hostname = api.m.jd.com, ms.jr.jd.com

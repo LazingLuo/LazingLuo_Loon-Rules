@@ -1,4 +1,4 @@
-// Activity execution revision 20261030-2
+// Activity execution revision 20261106-2
 
 // Shared login and Jingxi adapters only. No retired activity clients.
 const actClone=x=>JSON.parse(JSON.stringify(x));
@@ -399,14 +399,17 @@ function createJxTaskClient(host, crypto) {
     const bt=t.extInfo?.browseTask,pg=t.taskProgress;
     if(Number(t.prizeType)!==2||!bt?.rewards?.some(r=>Number(r.rewardType)===3))return null;
     const target=bt?.shoppingActivityList?.[0]?.url;
-    if(bt?.extraType!=='shoppingActivity'||bt?.shoppingActivityList?.length!==1||typeof target!=='string'||!["https://pro.m.jd.com/mall/active/2LcucMHYX7aXz92Qh7JBHBo6DACH/index.html", "https://pro.m.jd.com/mall/active/Md9FMi1pJXg2q7qc8CmE9FNYDS4/index.html", "https://pro.m.jd.com/mall/active/2H8G6a7JecjqHH3t1ZWSoJjPtziP/index.html", "https://jdhm.jd.com/jdhhome/", "https://pro.m.jd.com/mall/active/2iqSwv1JiDHxAkHAikfU6XAECFmo/index.html", "https://pro.m.jd.com/mall/active/DvFPmKRas9GYjDPZjT9NT14BAv6/index.html"].includes(target.split('?')[0]))return null;
+    if(bt?.extraType!=='shoppingActivity'||bt?.shoppingActivityList?.length!==1||typeof target!=='string'||
+       /[\x00-\x20\x7f\\]/.test(target)||
+       !/^https:\/\/(?:pro\.m\.jd\.com\/mall\/active\/[a-z0-9_-]+\/index\.html|jdhm\.jd\.com\/jdhhome\/)(?:[?#]|$)/i.test(target)||
+       /下单|支付|关注|订阅|邀请|安装|分享|绑定|授权|玩游戏|看视频|看直播/.test(String(t.taskName||'')))return null;
+    const seconds=Number(bt.browseTime);
+    if(!Number.isInteger(seconds)||seconds<1||seconds>15)return null;
     if(!bt||!pg||typeof t.taskId!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(t.taskId)||typeof pg.itemId!=='string'||!/^[A-Za-z0-9_-]{1,100}$/.test(pg.itemId))throw Error('浏览任务数据结构变化');
-    const status=Number(t.taskStatus),seconds=Number(bt.browseTime),total=Number(pg.total),current=Number(pg.current);
-    if(![1,10,20,30].includes(status)||!Number.isInteger(seconds)||seconds<1||seconds>120||total!==1||![0,1].includes(current)||typeof bt.completionFlag!=='boolean')throw Error('浏览任务状态不明确');
+    const status=Number(t.taskStatus),total=Number(pg.total),current=Number(pg.current);
+    if(![1,10,20,30].includes(status)||total!==1||![0,1].includes(current)||typeof bt.completionFlag!=='boolean')throw Error('浏览任务状态不明确');
     if((status===1&&(current!==0||bt.completionFlag))||([10,20].includes(status)&&(current!==1||!bt.completionFlag)))throw Error('浏览任务进度与状态不一致');
-    const url=bt.shoppingActivityList?.[0]?.url;
-    return {id:t.taskId,itemId:pg.itemId,title:String(t.taskName||'浏览任务').slice(0,80),status,seconds,amount:Number(t.taskAmount)||0,
-      url:typeof url==='string'&&/^https:\/\/(?:[A-Za-z0-9-]+\.)*jd\.com\//.test(url)?url:''};
+    return {id:t.taskId,itemId:pg.itemId,title:String(t.taskName||'浏览任务').slice(0,80),status,seconds,amount:Number(t.taskAmount)||0,url:target};
   }
   function parseList(r) {
     if(!r||String(r.code)!=='0'||!r.data||!Array.isArray(r.data.taskInfoList))throw Error('任务列表查询失败或登录已失效');
@@ -566,7 +569,7 @@ function jxTaskSharedProfile(shared) {
     snapshot=rawRead(ACCOUNT);let shared;
     try{shared=JSON.parse(snapshot||'null');}catch(_){throw Error('京东指数共享凭据无法读取，请重新进入京东指数自营首页获取');}
     const profile=jxTaskSharedProfile(actJxProfile((k,f)=>{const s=rawRead(k);watched[k]=s;return s?JSON.parse(s):f;},createJxTaskCrypto({read,write,setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment));
-    console.log('[京东指数任务] 版本 20261030-2；使用同账号共享资料');
+    console.log('[京东指数任务] 版本 20261106-2；使用同账号共享资料');
     const host={now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),read,write,setTimeout,
       clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
       progress:(index,total,title)=>update('开始处理',{index,total,title}),

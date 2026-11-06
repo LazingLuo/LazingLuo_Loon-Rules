@@ -2567,24 +2567,34 @@ function createSignins(host,legacy,crypto){
  }
  return {run};
 }
-// HAR501 captured three browsing flows under service source 38.
-const JB_SERVICE_BROWSE = [
- {name:'逛省钱频道', title:'逛省钱频道', path:'https://eco.jr.jd.com/common-growth-page/index.html', subtype:null},
- {name:'浏览频道领京豆', title:'浏览京东校园', path:'https://pro.m.jd.com/mall/active/3B6CgwugAyBR67P3MSNhykj5Eqyr/index.html', subtype:null},
- {name:'点击商品领1京豆', title:'点击商品领1京豆', path:'https://lps.jd.com/page/interactad', subtype:112}
-];
+// Discover service browsing tasks from the current source 38 response.
+const JB_SERVICE_MAX_BROWSE_SECONDS=15;
 
-function jbServiceBrowseItem(row, rule) {
- const items=row?.subTaskList;
- if(row?.assignmentName!==rule.name || row.assignmentType!==1 || row.assignmentActionType!==-1 ||
-    (row.subTaskType??null)!==rule.subtype || !JD_CAMPAIGN_ID.test(row.encryptAssignmentId||'') ||
-    !Number.isInteger(row.completionCnt) || row.completionCnt<0 ||
-    !Number.isInteger(row.assignmentTimesLimit) || row.completionCnt>row.assignmentTimesLimit ||
-    !Number.isInteger(row.canReceiveTimes) || row.canReceiveTimes<0 ||
-    !row.rewardsList?.some(x=>x.rewardName==='京豆'&&x.manualReward===1) || !Array.isArray(items)||items.length>20) return false;
- const matching=items.filter(item=>typeof item?.url==='string'&&item.url.length<=4096&&
-  item.url.split(/[?#]/)[0]===rule.path&&JD_CAMPAIGN_ID.test(item.itemId||''));
- return matching.length===1?matching[0]:null;
+function jbServiceBrowseUrl(url) {
+ return typeof url==='string'&&url.length<=4096&&!/[\x00-\x20\x7f\\]/.test(url)&&
+  /^https:\/\/(?:[a-z0-9-]+\.)+jd\.com(?:[/?#]|$)/i.test(url)&&
+  !/^(?:https:\/\/[^/?#]*(?:game|live|video|ipay)[^/?#]*(?:[/?#]|$)|[^?#]*\/(?:video|live|game|miniprogram|cashier|checkout)(?:[/?#]|$))/i.test(url);
+}
+
+function jbServiceBrowsePlan(row) {
+ if(row?.assignmentType!==1||row.assignmentActionType!==-1||
+    ![null,112].includes(row.subTaskType??null)||row.appJumpType||
+    typeof row.encryptAssignmentId!=='string'||
+    !JD_CAMPAIGN_ID.test(row.encryptAssignmentId||'')||
+    !Number.isInteger(row.completionCnt)||row.completionCnt<0||
+    !Number.isInteger(row.assignmentTimesLimit)||row.assignmentTimesLimit<1||row.assignmentTimesLimit>30||
+    row.completionCnt>row.assignmentTimesLimit||typeof row.completionFlag!=='boolean'||
+    !Number.isInteger(row.canReceiveTimes)||row.canReceiveTimes<0||row.canReceiveTimes>row.assignmentTimesLimit||
+    !Array.isArray(row.rewardsList)||!row.rewardsList.some(x=>x?.rewardName==='京豆'&&x.manualReward===1)||
+    !Array.isArray(row.subTaskList)||row.subTaskList.length>30||
+    typeof row.timerId!=='string'||!row.timerId||
+    !Number.isInteger(row.waitDuration)||row.waitDuration<1||row.waitDuration>JB_SERVICE_MAX_BROWSE_SECONDS||
+    /下单|支付|关注|订阅|邀请|安装|分享|绑定|授权|玩游戏|看视频|看直播/.test(String(row.assignmentDesc||'')))return null;
+ const items=row.subTaskList.filter(item=>item?.status===1&&typeof item.itemId==='string'&&
+  JD_CAMPAIGN_ID.test(item.itemId)&&jbServiceBrowseUrl(item.url)&&
+  !/下单|支付|关注|订阅|邀请|安装|分享|绑定|授权|小游戏|玩游戏|看视频|看直播/.test(String(item.title||'')));
+ if(new Set(items.map(item=>item.itemId)).size!==items.length)return null;
+ return {row,items};
 }
 
 async function runServiceActivity(host,crypto) {
@@ -2647,37 +2657,59 @@ async function runServiceActivity(host,crypto) {
  host.write(lockKey,lock);
  try{
   let rows=await list();
-  for(const rule of JB_SERVICE_BROWSE){
-   const matches=rows.map(row=>({row,item:jbServiceBrowseItem(row,rule)})).filter(match=>match.item);
-   if(matches.length!==1){notes.push(rule.title+'：当前无已验证项目');continue;}
-   let {row,item}=matches[0];
-   const id=row.encryptAssignmentId, before=row.completionCnt;
-   if(row.canReceiveTimes===0&&row.completionFlag===false&&before<row.assignmentTimesLimit&&item.status===1&&
-      Number.isInteger(row.waitDuration)&&row.waitDuration>=5&&row.waitDuration<=30){
+  const ids=[...new Set(rows.map(row=>row?.encryptAssignmentId).filter(id=>typeof id==='string'&&JD_CAMPAIGN_ID.test(id)))];
+  const find=id=>{
+   const matches=rows.filter(row=>row?.encryptAssignmentId===id);
+   return matches.length===1?jbServiceBrowsePlan(matches[0]):null;
+  };
+  for(const id of ids){
+   let plan=find(id);
+   if(!plan)continue;
+   const name=String(plan.row.assignmentName||'浏览任务').replace(/[\r\n]/g,' ').slice(0,80);
+   while(plan){
+    const {row,items}=plan, before=row.completionCnt, pending=row.canReceiveTimes;
+    if(pending>0){
+     const rewardKey=id+':reward:'+before;
+     const key=pending===1?rewardKey:rewardKey+':'+pending;
+     if(journal[rewardKey]||journal[key]){
+      notes.push(name+'：领奖已提交，去页面确认');break;
+     }
+     const award=await call('checkInTaskLuckyDraw',{encryptAssignmentId:id,doReceiveRewards:1},'0',()=>once(key));
+     const beans=jbReward(task,award).beanQuantity;
+     rows=await list();
+     plan=find(id);
+     if(!plan||plan.row.completionCnt!==before||plan.row.canReceiveTimes>=pending){
+      notes.push(name+'：已提交领奖，结果待确认');break;
+     }
+     notes.push(name+(Number.isInteger(beans)?'：已领 '+beans+' 京豆':'：待领奖励已减少，京豆数量待确认'));
+     continue;
+    }
+    if(row.completionFlag||before>=row.assignmentTimesLimit){
+     notes.push(name+'：已完成 '+before+'/'+row.assignmentTimesLimit+'，暂无待领奖励');break;
+    }
+    const item=items[0];
+    if(!item){
+     notes.push(name+'：进度 '+before+'/'+row.assignmentTimesLimit+'，暂无可处理子项');break;
+    }
+    const startKey=id+':start:'+before;
+    if(journal[startKey]||journal[id+':finish:'+before]){
+     notes.push(name+'：进度 '+before+'/'+row.assignmentTimesLimit+'，已有提交记录');break;
+    }
     const params={encryptAssignmentId:id,itemId:item.itemId,jumpUrl:item.url};
-    const started=await call(c.claim,{...params,actionType:1},'1',()=>once(id+':start:'+before));
-    if(!started){notes.push(rule.title+'：已尝试，去页面确认');continue;}
+    await call(c.claim,{...params,actionType:1},'1',()=>once(startKey));
     await host.sleep(row.waitDuration*1000);
     await call(c.claim,{...params,actionType:0},'0',()=>once(id+':finish:'+before));
     rows=await list();
-    row=rows.find(x=>x.encryptAssignmentId===id);
-    if(!jbServiceBrowseItem(row,rule)||row.completionCnt!==before+1){notes.push(rule.title+'：已提交，进度待确认');continue;}
-    notes.push(rule.title+'：进度 '+row.completionCnt+'/'+row.assignmentTimesLimit);
+    plan=find(id);
+    if(plan?.row.completionCnt!==before+1){
+     notes.push(name+'：已提交，进度待确认');break;
+    }
+    const title=String(item.title||'').replace(/[\r\n]/g,' ').slice(0,48);
+    notes.push(name+(title?'（'+title+'）':'')+'：进度 '+plan.row.completionCnt+'/'+plan.row.assignmentTimesLimit);
    }
-   if(row.canReceiveTimes!==1){
-    if(row.completionFlag===true&&row.canReceiveTimes===0)notes.push(rule.title+'：已完成，暂无待领奖励');
-    continue;
-   }
-   const award=await call('checkInTaskLuckyDraw',{encryptAssignmentId:id,doReceiveRewards:1},'0',
-    ()=>once(id+':reward:'+row.completionCnt));
-   if(!award){notes.push(rule.title+'：已提交领奖，去页面确认');continue;}
-   const beans=jbReward(task,award).beanQuantity;
-   rows=await list();
-   const after=rows.find(x=>x.encryptAssignmentId===id);
-   if(after?.completionCnt===row.completionCnt&&after.canReceiveTimes===0&&Number.isInteger(beans)){
-    notes.push(rule.title+'：已领 '+beans+' 京豆');
-   }else notes.push(rule.title+'：已提交领奖，结果待确认');
   }
+  if(!notes.length)notes.push('当前列表没有符合条件的 15 秒以内浏览任务');
+
  }catch(e){
   const message=String(e?.message||'');
   notes.push(/^京东服务/.test(message)?message:'京东服务请求失败，已停止');
