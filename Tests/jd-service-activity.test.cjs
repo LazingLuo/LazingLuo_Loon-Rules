@@ -32,24 +32,32 @@ function row(id, items, seconds = 5) {
 
 function fixture(rows, {verifyProgress = true, initialError = false} = {}) {
   const storage = new Map([[JS_KEYS.login, {pin: 'offline', cookie, headers}], [config.key, profile]]);
-  const events = [], waits = [];
+  const events = [], waits = [], logs = [];
   let started, failure;
   const host = {
     read: (key, fallback) => storage.has(key) ? structuredClone(storage.get(key)) : fallback,
     write: (key, value) => storage.set(key, structuredClone(value)),
     rawWrite: (_, key) => storage.delete(key),
     now: () => 1, day: () => '2026-11-06', random: () => 0.5,
-    sleep: async ms => waits.push(ms),
+    log: message => logs.push(message),
+    sleep: async ms => {
+      assert.equal(logs.at(-1), '浏览计时 ' + (ms / 1000) + ' 秒');
+      waits.push(ms);
+    },
     request: async (_, options) => {
       try {
         const params = jsParams(options);
         const map = JSON.parse(params.body).checkInTaskParamMap;
         const success = {status: 200, body: ''};
         const reply = (subCode, fields) => ({...success, body: JSON.stringify({code: '0', resultCode: '0', subCode, ...fields})});
-        if (params.functionId === config.query) return reply(null, {browseTaskList: rows});
+        if (params.functionId === config.query) {
+          assert.equal(logs.at(-1), '查询任务列表');
+          return reply(null, {browseTaskList: rows});
+        }
         const task = rows.find(entry => entry.encryptAssignmentId === map.encryptAssignmentId);
         assert(task);
         if (params.functionId === 'checkInTaskLuckyDraw') {
+          assert.equal(logs.at(-1), '领取京豆');
           assert.equal(map.doReceiveRewards, 1);
           assert(task.canReceiveTimes > 0);
           task.canReceiveTimes--;
@@ -57,6 +65,7 @@ function fixture(rows, {verifyProgress = true, initialError = false} = {}) {
           return reply('0', {doTaskJdList: [{rewardType: 3, rewardName: '京豆', quantity: 1}]});
         }
         assert.equal(params.functionId, config.claim);
+        assert.equal(logs.at(-1), map.actionType === 1 ? '开始计时' : '提交浏览结果');
         const entry = task.subTaskList.find(candidate => candidate.itemId === map.itemId);
         assert.equal(map.jumpUrl, entry.url);
         assert.equal(entry.status, 1);
@@ -81,7 +90,7 @@ function fixture(rows, {verifyProgress = true, initialError = false} = {}) {
     },
   };
   return {
-    events, waits,
+    events, waits, logs,
     run: async () => {
       const report = await runServiceActivity(host, crypto);
       if (failure) throw failure;
@@ -111,6 +120,8 @@ function fixture(rows, {verifyProgress = true, initialError = false} = {}) {
     [1, 'same_title_different_id', 'new_15_seconds'], [0, 'same_title_different_id', 'new_15_seconds'], ['reward', 'same_title_different_id'],
   ]);
   assert.deepEqual(activity.waits, [5000, 5000, 15000]);
+  assert.deepEqual(activity.logs.slice(0, 3), ['开始执行，检查凭据', '查询任务列表', '任务列表返回 6 项']);
+  assert(activity.logs.includes('浏览频道领京豆：第 2/6 项'));
   assert.match(report, /进度 3\/6，暂无可处理子项/);
   assert.equal((report.match(/已领 1 京豆/g) || []).length, 3);
   await activity.run();

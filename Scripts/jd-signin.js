@@ -2600,6 +2600,7 @@ function jbServiceBrowsePlan(row) {
 async function runServiceActivity(host,crypto) {
  const task='service', c=JB_CONFIG[task], lockKey='JD_SERVICE_ACTIVITY_LOCK_V1';
  const journalKey='JD_SERVICE_ACTIVITY_ATTEMPTS_V1';
+ host.log('开始执行，检查凭据');
  const login=jsLogin(host.read).login, profile=host.read(c.key,null), template=profile?.templates?.query;
  const signing=profile?.signing;
  if(!login||!template||!signing?.environment||!signing.eidToken)throw Error('请先打开京东服务任务列表，获取活动凭据');
@@ -2607,7 +2608,7 @@ async function runServiceActivity(host,crypto) {
  const env=crypto.decodeEnvironment(signing.environment);
  if(![login.pin,decodeURIComponent(login.pin)].includes(env.pp?.p1))throw Error('京东服务签名账号不一致');
  const now=host.now(), day=host.day();
- if(host.read(lockKey,null)?.expires>now)throw Error('京东服务活动正在执行');
+ if(host.read(lockKey,null)?.expires>now)throw Error('京东服务正在执行');
  const lock={id:now+':'+host.random(),expires:now+600000};
  const snapshot=JSON.stringify(profile);
  const headers={...profile.headers,Cookie:jsMergeCookie(jsHeader(profile.headers,'Cookie'),login),
@@ -2630,6 +2631,8 @@ async function runServiceActivity(host,crypto) {
  }
  async function call(f, map, expectedCode, beforeSend){
   guard();
+  const stage=f===c.query?'查询任务列表':f==='checkInTaskLuckyDraw'?'领取京豆':map.actionType===1?'开始计时':'提交浏览结果';
+  host.log(stage);
   const body={...template.body};
   if(map){delete body.isJdApp;body.checkInTaskParamMap={...map,requestScene:0};}
   const p={...template.params,functionId:f,body:JSON.stringify(body)};
@@ -2658,6 +2661,7 @@ async function runServiceActivity(host,crypto) {
  try{
   let rows=await list();
   const ids=[...new Set(rows.map(row=>row?.encryptAssignmentId).filter(id=>typeof id==='string'&&JD_CAMPAIGN_ID.test(id)))];
+  host.log('任务列表返回 '+rows.length+' 项');
   const find=id=>{
    const matches=rows.filter(row=>row?.encryptAssignmentId===id);
    return matches.length===1?jbServiceBrowsePlan(matches[0]):null;
@@ -2695,8 +2699,10 @@ async function runServiceActivity(host,crypto) {
     if(journal[startKey]||journal[id+':finish:'+before]){
      notes.push(name+'：进度 '+before+'/'+row.assignmentTimesLimit+'，已有提交记录');break;
     }
+    host.log(name+'：第 '+(before+1)+'/'+row.assignmentTimesLimit+' 项');
     const params={encryptAssignmentId:id,itemId:item.itemId,jumpUrl:item.url};
     await call(c.claim,{...params,actionType:1},'1',()=>once(startKey));
+    host.log('浏览计时 '+row.waitDuration+' 秒');
     await host.sleep(row.waitDuration*1000);
     await call(c.claim,{...params,actionType:0},'0',()=>once(id+':finish:'+before));
     rows=await list();
@@ -2746,12 +2752,12 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    if(typeof argument==='string')argument=JSON.parse(argument);
    if(argument?.activity==='service'){
     let message;
-    try{message=await runServiceActivity(host,crypto);}catch(e){
+    try{message=await runServiceActivity({...host,log:text=>console.log('[京东服务] '+text)},crypto);}catch(e){
      const detail=String(e?.message||'');
-     message=/^(?:京东服务|请先打开京东服务)/.test(detail)?detail:'京东服务活动执行停止';
+     message=/^(?:京东服务|请先打开京东服务)/.test(detail)?detail:'京东服务执行停止';
     }
-    console.log('[京东服务活动] '+message);
-    $notification.post('京东服务活动','本次结果',message);
+    console.log('[京东服务] '+message);
+    $notification.post('京东服务','本次结果',message);
     return;
    }
    const runner=createSignins(host,{retail:runRetailSignin,jxzy:runJxSignin,home:runHomeSignin,index:runIndexSignin,finance:runFinanceSignin},crypto);
