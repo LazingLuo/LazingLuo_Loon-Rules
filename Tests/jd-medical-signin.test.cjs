@@ -77,7 +77,7 @@ let total=0;async function test(name,f){await f();total++;console.log('OK '+name
   const h=host();h.map.delete(KEY);await assert.rejects(()=>capture(h,req(),{success:false,code:'403'}));assert(!h.read(KEY));
  });
  await test('late capture does not replace newer device material',async()=>{const h=host();h.write(KEY,{...h.read(KEY),capturedAt:h.observedAt+1000,eidToken:'NEWER'});assert.equal(await capture(h,req(),page()),null);assert.equal(h.read(KEY).eidToken,'NEWER');});
- for(const name of ['jd-signin-capture.js','jd-activity-capture.js','jd-splash.js'])await test('first-match runtime captures sign-in without changing response: '+name,async()=>{
+ for(const name of ['jd-signin-capture.js','jd-activity-capture.js'])await test('first-match runtime captures sign-in without changing response: '+name,async()=>{
   const h=host();h.map.delete(KEY);let result,notes=[];
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('capture timeout')),1000);const context={$request:req(),$response:reply(page()),$persistentStore:{read:h.rawRead,write:h.rawWrite},$script:{startTime:new Date().toISOString()},$notification:{post:(...x)=>notes.push(x)},$done:x=>{result=x;clearTimeout(timer);resolve();},console:{log:()=>{}},setTimeout,clearTimeout};try{vm.runInNewContext(fs.readFileSync(path.join(root,name),'utf8'),context,{timeout:5000});}catch(e){clearTimeout(timer);reject(e);}});
   assert(h.read(KEY));assert(!result?.body);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!JSON.stringify(notes).includes('FAKE_DEVICE'));

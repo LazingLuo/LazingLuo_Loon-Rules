@@ -6,7 +6,7 @@ for(const dir of ['Scripts','Plugins','Docs'])for(const name of fs.readdirSync(p
  assert(!/JD_SPECIAL_CHANNEL|createSpecialClient|tjCapture|特价频道|特价签到|jd-special-activity|\bspecial:/.test(s),dir+'/'+name);
 }
 assert(!fs.existsSync(path.join(root,'Scripts/jd-special-activity.js')));
-assert(fs.readFileSync(path.join(root,'Scripts/jd-splash.js'),'utf8').includes(fs.readFileSync(path.join(root,'Scripts/jd-signin-capture.js'),'utf8')));
+assert(!fs.readFileSync(path.join(root,'Scripts/jd-splash.js'),'utf8').includes('jdSplashCapture'));
 assert.throws(()=>api.jsTarget('special',{url:'https://api.m.jd.com/',body:'functionId=common_do_task&appid=newtry&body=%7B%22channelId%22%3A%2216%22%7D'}));
 (async()=>{
  for(const name of ['jd-signin-capture.js','jd-activity-capture.js']){
