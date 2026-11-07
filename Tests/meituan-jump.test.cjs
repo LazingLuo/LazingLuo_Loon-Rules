@@ -180,6 +180,39 @@ for (const taskKey of fallbackKeys) {
 const preference = structuredClone(seedEvents.find(event => event.val_lab.title.startsWith('浏览点淘')));
 preference.val_lab.task_detail.task_url.iosUlink = links.diantao + '&source=OTHER';
 check(mtPlan(capture([preference]), now).diantao === links.diantao, 'valid iOS scheme keeps existing priority');
+function nativeTaskLink(key, code = 'FAKE_CODE', token = 'OFFLINE') {
+  const task = MT_TASKS.find(t => t.key === key);
+  const ticket = {taskCode: code, token, playId: task.playId};
+  if(key === 'baiduLite') return 'baiduboxlite://v1/easybrowse/open?url=' +
+    encodeURIComponent('https://activity.baidu.com/incentive/incentiveHome?taskInfo=' +
+      encodeURIComponent(JSON.stringify({sdkParams: ticket})));
+  const page = key === 'taobaoLite' ? 'https://pages.tmall.com/wow/z/sale/nsrSolution/chicken-farm-newHome' :
+    'https://market.m.taobao.com/app/tb-zhibo-app/callapp-mid-center/home.html';
+  const target = page + '?' + new URLSearchParams(ticket);
+  return key === 'taobaoLite' ? 'taobaolite://m.ltao.com/open/index.html?h5Url=' + encodeURIComponent(target) :
+    'taobaoliveshare://xevddy.com/gateway/index.htm?source=meituanhuanlianghezuo&targetUrl=' + encodeURIComponent(target);
+}
+for(const key of ['diantao','baiduLite','taobaoLite']) {
+  const task = MT_TASKS.find(t => t.key === key);
+  const native = nativeTaskLink(key);
+  const event = structuredClone(seedEvents.find(ev => ev.val_lab.title.startsWith(task.prefix)));
+  event.val_lab.task_detail.task_url = {iosDeeplink: native, iosUlink: links[key]};
+  const stored = capture([event]);
+  check(mtValidLink(task, native), 'native scheme and nested task ticket accepted: ' + key);
+  check(mtPlan(stored, now)[key] === native, 'native link wins byte-for-byte over HTTPS: ' + key);
+  check(mtBridge({url: MT_BASE + 'tasks', method: 'GET', headers: {
+    'X-Lazing-Export-Key': 'a'.repeat(64), 'X-Lazing-Jump-Plan': 'extended-v3'
+  }}, 'a'.repeat(64) + '|' + proof, stored, now).response.body.includes(native),
+    'current shortcut receives native task link: ' + key);
+  event.val_lab.task_detail.task_url.iosDeeplink = nativeTaskLink(key, 'WRONG_CODE');
+  check(mtPlan(capture([event]), now)[key] === links[key], 'conflicting native ticket falls back to valid web link: ' + key);
+  check(!mtValidLink(task, nativeTaskLink(key, 'FAKE_CODE', '')), 'empty nested token rejected: ' + key);
+  const wrongHost = native.replace(/(https%3A%2F%2F)[^%]+/i, '$1external.invalid');
+  check(!mtValidLink(task, wrongHost), 'wrong nested destination rejected: ' + key);
+  const onlyNative = structuredClone(event);
+  onlyNative.val_lab.task_detail.task_url = {iosDeeplink: native};
+  check(mtPlan(capture([onlyNative]), now)[key] === native, 'native works with no universal link: ' + key);
+}
 function invalidFree(entries) {
   let saved = null;
   for (const e of entries) {
@@ -216,6 +249,8 @@ for (const file of process.argv.slice(2)) {
     check(plan.count === 13 && !plan.fallbackSummary, '505 supplies all thirteen from list events');
     check(expected.every(k => record.tasks[k]?.source === 'list'), '505 needs no manual click');
     check(invalidFree(entries), '505 list passes destination and ticket validation');
+    check(plan.diantao.startsWith('taobaoliveshare://') && plan.baiduLite.startsWith('baiduboxlite://') &&
+      plan.taobaoLite.startsWith('taobaolite://'), '505 exports three captured App schemes');
   }
   check(!JSON.stringify(record).includes('iosDeeplink'), path.basename(file) + ': no full telemetry saved');
   console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; ' + plan.count + ' task links recovered (URLs withheld).');

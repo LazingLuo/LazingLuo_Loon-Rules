@@ -1,6 +1,6 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.4.3';
+const MT_VERSION = '0.4.4';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
@@ -17,9 +17,42 @@ const MT_TASKS = [
   {key: 'xianyu', name: '闲鱼', prefix: '浏览闲鱼', route: /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/},
   {key: 'alipayMember', name: '支付宝会员', prefix: '浏览支付宝会员', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'alipayGold', name: '支付宝金豆夺宝', prefix: '逛一逛支付宝金豆夺宝', route: /^alipays:\/\/platformapi\/startapp\?/},
-  {key:'baiduLite',name:'百度极速版',prefix:'浏览百度极速版',route:/^https:\/\/activity\.baidu\.com\/mbox\/4a89aa9163\/matrixInvoke\?/,playId:'1480'},
-  {key:'taobaoLite',name:'淘宝特价版',prefix:'浏览淘宝特价版',route:/^https:\/\/huodong\.taobao\.com\/wow\/z\/sale\/static\/meituan\?/,playId:'1568'},
-  {key:'diantao',name:'点淘',prefix:'浏览点淘',route:/^https:\/\/market\.m\.taobao\.com\/app\/tb-zhibo-app\/callapp-mid-center\/home\.html\?/,playId:'1483'}
+  {
+    key:'baiduLite',
+    name:'百度极速版',
+    prefix:'浏览百度极速版',
+    route:/^https:\/\/activity\.baidu\.com\/mbox\/4a89aa9163\/matrixInvoke\?/,
+    playId:'1480',
+    native: {
+      route:/^baiduboxlite:\/\/v1\/easybrowse\/open\?/,
+      field:'url',
+      page:/^https:\/\/activity\.baidu\.com\/incentive\/incentiveHome\?/,
+    },
+  },
+  {
+    key:'taobaoLite',
+    name:'淘宝特价版',
+    prefix:'浏览淘宝特价版',
+    route:/^https:\/\/huodong\.taobao\.com\/wow\/z\/sale\/static\/meituan\?/,
+    playId:'1568',
+    native: {
+      route:/^taobaolite:\/\/m\.ltao\.com\/open\/index\.html\?/,
+      field:'h5Url',
+      page:/^https:\/\/pages\.tmall\.com\/wow\/z\/sale\/nsrSolution\/chicken-farm-newHome\?/,
+    },
+  },
+  {
+    key:'diantao',
+    name:'点淘',
+    prefix:'浏览点淘',
+    route:/^https:\/\/market\.m\.taobao\.com\/app\/tb-zhibo-app\/callapp-mid-center\/home\.html\?/,
+    playId:'1483',
+    native: {
+      route:/^taobaoliveshare:\/\/xevddy\.com\/gateway\/index\.htm\?/,
+      field:'targetUrl',
+      page:/^https:\/\/market\.m\.taobao\.com\/app\/tb-zhibo-app\/callapp-mid-center\/home\.html\?/,
+    },
+  },
 ];
 // A character substitution in lx_dict telemetry; structural JSON is retained.
 // Complete ASCII letter/digit mapping recovered from independent field names,
@@ -39,7 +72,22 @@ function mtObject(raw) {
 function mtLinkParams(url){
  try{const result={};for(const part of url.split('?')[1].split('#')[0].split('&')){if(!part)continue;const i=part.indexOf('='),k=decodeURIComponent((i<0?part:part.slice(0,i)).replace(/\+/g,' '));if(Object.prototype.hasOwnProperty.call(result,k))return null;result[k]=decodeURIComponent((i<0?'':part.slice(i+1)).replace(/\+/g,' '));}return result;}catch(_){return null;}
 }
-function mtNewLink(task,url){const p=mtLinkParams(url);return !!p&&p.playId===task.playId&&typeof p.taskCode==='string'&&p.taskCode.length>0&&typeof p.token==='string'&&p.token.length>0;}
+function mtTaskParams(task, url) {
+  const params = mtLinkParams(url);
+  if (!params || !task.native || !task.native.route.test(url)) return params;
+  const target = params[task.native.field];
+  if (typeof target !== 'string' || !task.native.page.test(target) ||
+      /[\x00-\x20\x7f<>"`\\]/.test(target) || /%(?![a-fA-F0-9]{2})/.test(target)) return null;
+  const nested = mtLinkParams(target);
+  if (!nested) return null;
+  return task.key === 'baiduLite' ? mtObject(nested.taskInfo)?.sdkParams : nested;
+}
+function mtNewLink(task, url) {
+  const params = mtTaskParams(task, url);
+  return !!params && String(params.playId) === task.playId &&
+    typeof params.taskCode === 'string' && params.taskCode.length > 0 &&
+    typeof params.token === 'string' && params.token.length > 0;
+}
 
 function mtXianyuLink(url) {
   const params = mtLinkParams(url);
@@ -47,7 +95,7 @@ function mtXianyuLink(url) {
 }
 function mtValidLink(task, url) {
   return typeof url === 'string' && url.length > 20 && url.length <= 16384 &&
-    !/[\x00-\x20\x7f<>"`\\]/.test(url) && task.route.test(url) &&
+    !/[\x00-\x20\x7f<>"`\\]/.test(url) && (task.route.test(url) || !!task.native?.route.test(url)) &&
     !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url)) && (task.key !== 'xianyu' || mtXianyuLink(url));
 }
 function mtObserve(body, old, now) {
@@ -98,8 +146,8 @@ function mtObserve(body, old, now) {
         const candidates = typeof source === 'string' ? [source] :
           source && typeof source === 'object' ? [source.iosDeeplink, source.iosUlink] : [];
         const url = candidates.find(candidate => mtValidLink(task, candidate) &&
-          (!tracked || mtLinkParams(candidate)?.taskCode === code));
-        const params = tracked && typeof url === 'string' ? mtLinkParams(url) : null;
+          (!tracked || mtTaskParams(task, candidate)?.taskCode === code));
+        const params = tracked && typeof url === 'string' ? mtTaskParams(task, url) : null;
         const validCode = typeof code === 'string' && code.length > 0 && code.length <= 512;
         const freshEvent = Math.abs(now - stamp) <= 15 * 60 * 1000;
         if (tracked && sourceType === 'list' && validCode && freshEvent) {
@@ -155,7 +203,7 @@ function mtPlan(record, now, tasks = MT_TASKS) {
       if (!Number.isFinite(age) || age < -60000 || age > MT_TTL || !mtValidLink(task, item.url)) return false;
       if (!tracked) return true;
       const stamp = Number(item.sourceTime || item.capturedAt);
-      const code = mtLinkParams(item.url)?.taskCode;
+      const code = mtTaskParams(task, item.url)?.taskCode;
       return stamp <= now + 60000 && mtDay(stamp) === mtDay(now) && !!code && (!currentCode || currentCode === code);
     }
     const saved = record?.tasks?.[task.key];
@@ -203,7 +251,7 @@ function mtBridge(request, argument, record, now) {
   return reply(Object.assign(plan, {code: plan.count ? 'READY' : 'NO_TASKS'}));
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = {MT_MAP, MT_TASKS, MT_KEY, MT_BASE, MT_TTL,
-  mtDecode, mtObserve, mtPlan, mtBridge, mtValidLink, mtLinkParams};
+  mtDecode, mtObserve, mtPlan, mtBridge, mtValidLink, mtLinkParams, mtTaskParams};
 if (typeof $done === 'function') {
   const now = Date.now();
   const read = () => mtObject($persistentStore.read(MT_KEY));
