@@ -65,8 +65,8 @@ function seedLegacy(h){
  await test('other-account activity profile rejected',()=>{const h=host();h.write('JXZY_CHECKIN_ACCOUNT_V1',{pin:'other',headers:headers()});assert.throws(()=>api.jsLegacyAccount('jxzy','offline',h.read,h.login()));});
  await test('external host and non-signin API blocked',()=>{assert.throws(()=>api.jsTarget('game',{url:'https://example.com/api',body:''}));assert.throws(()=>api.jsTarget('game',request('waterGoodForFarm',{linkId:api.JS_GAME})));});
  await test('algorithm initialization never receives login cookie',()=>{assert.throws(()=>api.jsTarget('game',{url:'https://cactus.jd.com/request_algo',headers:{Cookie:'SECRET'}}));api.jsTarget('game',{url:'https://cactus.jd.com/request_algo',headers:{'Content-Type':'application/json'}});});
- await test('combined task ordering and finance double-sign position',async()=>{const h=host();seedLegacy(h);const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.deepEqual(r.results.map(x=>x.task),api.JS_TASKS.map(x=>x[0]));assert(r.results[4].doubleSign);assert.equal(h.waits.length,0);assert.equal(r.results.length,17);});
- await test('random wait occurs only between tasks',async()=>{const h=host();seedLegacy(h);const events=[];h.log=s=>events.push(s);h.random=()=>0;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:15});assert.equal(h.waits.length,16);assert(h.waits.every(x=>x===5000));assert(events[0].includes('第 1/17 项'));});
+ await test('combined task ordering and finance double-sign position',async()=>{const h=host();seedLegacy(h);const r=await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:0});assert.deepEqual(r.results.map(x=>x.task),api.JS_TASKS.map(x=>x[0]));assert(r.results[4].doubleSign);assert.equal(h.waits.length,0);assert.equal(r.results.length,19);});
+ await test('random wait occurs only between tasks',async()=>{const h=host();seedLegacy(h);const events=[];h.log=s=>events.push(s);h.random=()=>0;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:15});assert.equal(h.waits.length,18);assert(h.waits.every(x=>x===5000));assert(events[0].includes('第 1/19 项'));});
  await test('random wait upper bound',async()=>{const h=host();seedLegacy(h);h.random=()=>0.999999;await api.createSignins(h,basicLegacy(h),fakeCrypto).run({gapSeconds:120});assert(h.waits.every(x=>x===120000));});
  await test('single failed legacy task leaves other sign-ins running',async()=>{const h=host();seedLegacy(h);const l=basicLegacy(h);l.jxzy=()=>{throw Error('test');};const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[3].status,'stopped');assert.equal(r.results.find(x=>x.task==='home').status,'already_done');assert(r.finished);});
  await test('old LAST is not reused when a legacy lock returns early',async()=>{const h=host();seedLegacy(h);h.write('JXZY_CHECKIN_LAST_RESULT_V1',{time:1,date:day(),status:'signed_confirmed'});const l=basicLegacy(h);l.jxzy=c=>c.$done({});const r=await api.createSignins(h,l,fakeCrypto).run({gapSeconds:0});assert.equal(r.results[3].status,'stopped');});
@@ -120,7 +120,7 @@ function seedLegacy(h){
    else{const p=api.jsParams(o);assert.equal(o['auto-redirect'],false);assert.equal(o['auto-cookie'],false);if(p.functionId==='jdh_bm_getKitTask')j={code:0,result:{status:4}};else if(p.functionId==='weGameHome')j={success:true,data:{signMainVo:{currentStatus:3}}};else if(p.functionId.startsWith('bean_deliverySign_'))j={code:0,data:{bizCode:0,result:{value:1}}};else throw Error('Unexpected native call');}
    cb(null,{status:200},JSON.stringify(j));
   }}};
-  try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,17);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
+  try{vm.runInNewContext(fs.readFileSync(mainPath,'utf8'),ctx,{timeout:10000});await done;assert.equal(notes.length,1);assert.equal(count,1);assert.equal(h.read(K.last).results.length,19);assert(!JSON.stringify(notes).includes('FAKE_SECRET'));assert(!h.logs.join('\n').includes('FAKE_DEVICE'));}finally{timers.forEach(clearTimeout);}
  });
  // Virtual timers test interruption recovery without live network or real waits.
  function leaseHost(){
@@ -263,4 +263,3 @@ function seedLegacy(h){
  await test('generated Loon scripts parse without Node APIs',()=>{for(const p of [mainPath,capturePath])new vm.Script(fs.readFileSync(p,'utf8'));});
  console.log('Passed '+total+' offline checks. No live account requests.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
-
