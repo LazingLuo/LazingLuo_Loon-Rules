@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const core = require('../Scripts/meituan-jump.js');
-const {MT_TASKS, MT_BASE, MT_KEY, MT_TTL, mtObserve, mtDecode, mtPlan, mtBridge, mtValidLink} = core;
+const {MT_TASKS, MT_EXTENDED_TASKS, MT_BASE, MT_KEY, MT_TTL, mtObserve, mtDecode, mtPlan, mtBridge, mtValidLink} = core;
 let checks = 0;
 function check(ok, label) { assert.ok(ok, label); checks += 1; }
 const now = Date.parse('2026-11-06T13:00:00+08:00'), key = 'a'.repeat(64), proof = 'b'.repeat(64);
@@ -49,7 +49,7 @@ const excluded = envelope();
 const ex = JSON.parse(excluded[0].evs);
 ex.push({stm: now, val_lab: {title: '浏览趣头条可得8888', task_detail: {task_code: 'FAKE', task_url: 'https://h5ssl.1sapp.com/'}}});
 excluded[0].evs = JSON.stringify(ex);
-check(Object.keys(mtObserve(JSON.stringify(excluded), null, now).record.tasks).length === 13, 'Qutoutiao excluded');
+check(Object.keys(mtObserve(JSON.stringify(excluded), null, now).record.tasks).length === 13, 'Qutoutiao link without a ticket excluded');
 const expired = JSON.parse(JSON.stringify(full.record));
 Object.values(expired.tasks).forEach(x => { x.capturedAt = now - MT_TTL - 1; });
 check(mtPlan(expired, now).count === 0, 'expired links omitted');
@@ -99,7 +99,7 @@ for(const key of ['baiduLite','taobaoLite','diantao']){
 }
 check(!bridge('tasks', {'X-Lazing-Export-Key': key}).xianyu, 'old Shortcut receives no extra task links or inflated count');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'unknown'}).count === 7, 'unknown client preserves legacy plan');
-check(mtPlan(full.record, now).summary.includes('/13'), 'observer summary uses current task denominator');
+check(mtPlan(full.record, now).summary.includes('/16'), 'observer summary uses current task denominator');
 check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), 'https://h5.m.goofish.com/other?taskCode=FAKE'), 'Xianyu route constrained to observed task landing path');
 check(bridge('tasks', {origin: 'https://example.invalid', 'X-Lazing-Export-Key': key}).code === 'BROWSER_DENIED', 'browser read refused');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'x-lazing-export-key': key}).code === 'PAIRING_FAILED', 'duplicate auth header refused');
@@ -225,6 +225,50 @@ function invalidFree(entries) {
   }
   return true;
 }
+const xianyuTicket = encodeURIComponent('xianyu_growth_other.fake-campaign.taskCode:FAKE_CODE;playId:1723;userToken:OFFLINE;channel:meituanCoin;callSource:offline');
+const xianyuTarget = 'fleamarket://home?' + new URLSearchParams({
+  forward_url: 'fleamarket://fish_coin_game?channel=offline', xy_flow_in: xianyuTicket,
+});
+const xianyuNative = 'fleamarket://2.taobao.com/onepiece?' + new URLSearchParams({h5Url: xianyuTarget, bc_fl_src: xianyuTicket});
+const qutoutiao = 'https://h5ssl.1sapp.com/activity_dest/qtt_download/download.html?' +
+  new URLSearchParams({source: 'meituanshipin', task: 'OFFLINE', task_code: 'FAKE_CODE', play_id: '1751', third_token: 'OFFLINE'});
+function toutiaoParams(playId, code = 'FAKE_CODE') {
+  return new URLSearchParams({schemeParams: JSON.stringify({
+    callback_param: encodeURIComponent(JSON.stringify({token: 'OFFLINE', taskCode: code, playId})),
+  })});
+}
+const extraLinks = {
+  qutoutiao,
+  toutiao: 'snssdk141://daoliang.independent?' + toutiaoParams('1639'),
+  toutiaoLite: 'snssdk35://daoliang.independent?' + toutiaoParams('1563'),
+};
+function newEvent(key, iosDeeplink, iosUlink) {
+  const task = MT_EXTENDED_TASKS.find(t => t.key === key);
+  return {nm: 'MV', stm: now, val_lab: {title: task.prefix, task_detail: {
+    task_code: 'FAKE_CODE', task_url: {iosDeeplink, iosUlink},
+  }}};
+}
+const latestRecord = capture([
+  ...Object.entries(extraLinks).map(([key, url]) => newEvent(key, url)),
+  newEvent('xianyu', xianyuNative, links.xianyu),
+], full.record);
+const v4Plan = JSON.parse(mtBridge({url: MT_BASE + 'tasks', method: 'GET', headers: {
+  'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v4',
+}}, key + '|' + proof, latestRecord, now).response.body);
+check(v4Plan.count === 16 && Object.entries(extraLinks).every(([key, url]) => v4Plan[key] === url), 'v0.5 receives all sixteen supported links');
+check(v4Plan.xianyu === xianyuNative, 'Xianyu App route preserves source ticket and wins over web');
+check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), xianyuNative.replace('fish_coin_game', 'other')), 'unexpected Xianyu destination rejected');
+const v3Plan = JSON.parse(mtBridge({url: MT_BASE + 'tasks', method: 'GET', headers: {
+  'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v3',
+}}, key + '|' + proof, latestRecord, now).response.body);
+check(v3Plan.count === 13 && !v3Plan.qutoutiao && !v3Plan.toutiao && !v3Plan.toutiaoLite, 'v0.4 does not count extra links');
+check(mtPlan(latestRecord, midnight).count === 9, 'new task tickets expire at Beijing midnight');
+const webToutiao = 'https://article.zlink.toutiao.com/FakePath?' + toutiaoParams('1639');
+const wrongToutiao = 'snssdk141://daoliang.independent?' + toutiaoParams('1639', 'OTHER_CODE');
+check(mtPlan(capture([newEvent('toutiao', wrongToutiao, webToutiao)]), now).toutiao === webToutiao,
+  'mismatched Toutiao ticket falls back to a validated web link');
+check(!mtPlan(capture([newEvent('qutoutiao', qutoutiao.replace('third_token=OFFLINE', 'third_token='))]), now).qutoutiao,
+  'Qutoutiao without third-party ticket rejected');
 let harChecks = 0;
 for (const file of process.argv.slice(2)) {
   const entries = JSON.parse(fs.readFileSync(file, 'utf8')).log.entries.slice().sort((a, b) => Date.parse(a.startedDateTime) - Date.parse(b.startedDateTime));
@@ -240,17 +284,21 @@ for (const file of process.argv.slice(2)) {
   const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
   const plan = mtPlan(record, current);
   const original = path.basename(file).startsWith('450_') ? ['mtPig', 'mtOrchard', 'xianyu', 'alipayMember', 'alipayGold'] : path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent', 'mtOrchard'];
-  const expected = path.basename(file).startsWith('505_') ? MT_TASKS.map(task => task.key) : path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
+  const expected = path.basename(file).startsWith('505_') ? MT_EXTENDED_TASKS.map(task => task.key) : path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
     /^(491|496)_/.test(path.basename(file)) ? ['baiduLite','taobaoLite','diantao'] : original.filter(k=>!['mtContent','mtPig','mtOrchard'].includes(k));
   check(plan.count === expected.length, path.basename(file) + ': selected iOS links recovered');
   check(Object.keys({...record.tasks, ...record.jumpTasks}).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
-  check(expected.every(k => mtValidLink(MT_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
+  check(expected.every(k => mtValidLink(MT_EXTENDED_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
   if(path.basename(file).startsWith('505_')) {
-    check(plan.count === 13 && !plan.fallbackSummary, '505 supplies all thirteen from list events');
+    check(plan.count === 16 && !plan.fallbackSummary, '505 supplies all sixteen from list events');
     check(expected.every(k => record.tasks[k]?.source === 'list'), '505 needs no manual click');
     check(invalidFree(entries), '505 list passes destination and ticket validation');
     check(plan.diantao.startsWith('taobaoliveshare://') && plan.baiduLite.startsWith('baiduboxlite://') &&
-      plan.taobaoLite.startsWith('taobaolite://'), '505 exports three captured App schemes');
+      plan.taobaoLite.startsWith('taobaolite://') && plan.xianyu.startsWith('fleamarket://') &&
+      plan.toutiao.startsWith('snssdk141://') && plan.toutiaoLite.startsWith('snssdk35://'),
+    '505 exports six captured App schemes');
+    check(plan.etao.startsWith('https://market.m.taobao.com/') && plan.qutoutiao.startsWith('https://h5ssl.1sapp.com/'),
+      '505 retains both observed HTTPS entries');
   }
   check(!JSON.stringify(record).includes('iosDeeplink'), path.basename(file) + ': no full telemetry saved');
   console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; ' + plan.count + ' task links recovered (URLs withheld).');

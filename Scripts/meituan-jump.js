@@ -1,10 +1,10 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.4.4';
+const MT_VERSION = '0.5.0';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
-const MT_CLICK_FALLBACK = new Set(['xianyu', 'baiduLite', 'taobaoLite', 'diantao']);
+const MT_CLICK_FALLBACK = new Set(['xianyu', 'baiduLite', 'taobaoLite', 'diantao', 'qutoutiao', 'toutiao', 'toutiaoLite']);
 const mtDay = time => Math.floor((time + 8 * 60 * 60 * 1000) / MT_TTL);
 const MT_TASKS = [
   {key: 'antManor', name: '蚂蚁庄园', prefix: '浏览蚂蚁庄园', route: /^alipays:\/\/platformapi\/startapp\?/},
@@ -14,7 +14,11 @@ const MT_TASKS = [
   {key: 'etao', name: '一淘', prefix: '浏览一淘', route: /^https:\/\/market\.m\.taobao\.com\//},
   {key: 'cmcc', name: '中国移动', prefix: '浏览中国移动', route: /^cn\.10086\.app:\/\/url=https(?:%3[aA]%2[fF]%2[fF]|:\/\/)wx\.10086\.cn(?:%2[fF]|\/)/},
   {key: 'weibo', name: '微博', prefix: '浏览微博', route: /^sinaweibo:\/\/changegroup\?/},
-  {key: 'xianyu', name: '闲鱼', prefix: '浏览闲鱼', route: /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/},
+  {
+    key: 'xianyu', name: '闲鱼', prefix: '浏览闲鱼',
+    route: /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/,
+    native: {route: /^fleamarket:\/\/2\.taobao\.com\/onepiece\?/},
+  },
   {key: 'alipayMember', name: '支付宝会员', prefix: '浏览支付宝会员', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'alipayGold', name: '支付宝金豆夺宝', prefix: '逛一逛支付宝金豆夺宝', route: /^alipays:\/\/platformapi\/startapp\?/},
   {
@@ -54,6 +58,22 @@ const MT_TASKS = [
     },
   },
 ];
+const MT_EXTENDED_TASKS = MT_TASKS.concat([
+  {
+    key: 'qutoutiao', name: '趣头条', prefix: '浏览趣头条', playId: '1751',
+    route: /^https:\/\/h5ssl\.1sapp\.com\/activity_dest\/qtt_download\/download\.html\?/,
+  },
+  {
+    key: 'toutiao', name: '今日头条', prefix: '浏览今日头条', playId: '1639',
+    route: /^https:\/\/article\.zlink\.toutiao\.com\/[a-zA-Z0-9_-]+\?/,
+    native: {route: /^snssdk141:\/\/daoliang\.independent\?/},
+  },
+  {
+    key: 'toutiaoLite', name: '头条极速版', prefix: '浏览头条极速', playId: '1563',
+    route: /^https:\/\/z\.toutiao\.com\/[a-zA-Z0-9_-]+\?/,
+    native: {route: /^snssdk35:\/\/daoliang\.independent\?/},
+  },
+]);
 // A character substitution in lx_dict telemetry; structural JSON is retained.
 // Complete ASCII letter/digit mapping recovered from independent field names,
 // UUIDs, timestamps, URL escapes and native trace labels in the supplied HARs.
@@ -72,9 +92,37 @@ function mtObject(raw) {
 function mtLinkParams(url){
  try{const result={};for(const part of url.split('?')[1].split('#')[0].split('&')){if(!part)continue;const i=part.indexOf('='),k=decodeURIComponent((i<0?part:part.slice(0,i)).replace(/\+/g,' '));if(Object.prototype.hasOwnProperty.call(result,k))return null;result[k]=decodeURIComponent((i<0?'':part.slice(i+1)).replace(/\+/g,' '));}return result;}catch(_){return null;}
 }
+function mtXianyuTicket(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const raw = value.includes(':') ? value : decodeURIComponent(value);
+    const ticket = /^xianyu_growth_other\.[\w-]+\.taskCode:([^;]+);playId:(\d+);userToken:([^;]+);channel:(meituanCoin);callSource:[\w-]+$/.exec(raw);
+    return ticket && {taskCode: ticket[1], playId: ticket[2], userToken: ticket[3], channel: ticket[4]};
+  } catch (_) { return null; }
+}
 function mtTaskParams(task, url) {
   const params = mtLinkParams(url);
-  if (!params || !task.native || !task.native.route.test(url)) return params;
+  if (!params) return null;
+  if (task.key === 'qutoutiao') {
+    return params.source === 'meituanshipin' && params.task ?
+      {taskCode: params.task_code, playId: params.play_id, token: params.third_token} : null;
+  }
+  if (task.key === 'toutiao' || task.key === 'toutiaoLite') {
+    const callback = mtObject(params.schemeParams)?.callback_param;
+    if (typeof callback !== 'string') return null;
+    try { return mtObject(callback) || mtObject(decodeURIComponent(callback)); }
+    catch (_) { return null; }
+  }
+  if (!task.native?.route.test(url)) return params;
+  if (task.key === 'xianyu') {
+    const target = params.h5Url;
+    if (!/^fleamarket:\/\/home\?/.test(target || '')) return null;
+    const home = mtLinkParams(target);
+    if (!/^fleamarket:\/\/fish_coin_game\?/.test(home?.forward_url || '')) return null;
+    const source = mtXianyuTicket(params.bc_fl_src);
+    const flow = mtXianyuTicket(home.xy_flow_in);
+    return source && flow && source.taskCode === flow.taskCode && source.playId === flow.playId ? source : null;
+  }
   const target = params[task.native.field];
   if (typeof target !== 'string' || !task.native.page.test(target) ||
       /[\x00-\x20\x7f<>"`\\]/.test(target) || /%(?![a-fA-F0-9]{2})/.test(target)) return null;
@@ -89,14 +137,14 @@ function mtNewLink(task, url) {
     typeof params.token === 'string' && params.token.length > 0;
 }
 
-function mtXianyuLink(url) {
-  const params = mtLinkParams(url);
+function mtXianyuLink(task, url) {
+  const params = mtTaskParams(task, url);
   return !!params?.taskCode && !!params.userToken && /^\d+$/.test(params.playId || '') && params.channel === 'meituanCoin';
 }
 function mtValidLink(task, url) {
   return typeof url === 'string' && url.length > 20 && url.length <= 16384 &&
     !/[\x00-\x20\x7f<>"`\\]/.test(url) && (task.route.test(url) || !!task.native?.route.test(url)) &&
-    !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url)) && (task.key !== 'xianyu' || mtXianyuLink(url));
+    !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url)) && (task.key !== 'xianyu' || mtXianyuLink(task, url));
 }
 function mtObserve(body, old, now) {
   const result = {record: old, changed: [], parsed: 0, invalid: 0, accountChanged: false};
@@ -134,7 +182,7 @@ function mtObserve(body, old, now) {
       if (depth > 18 || !value || typeof value !== 'object') return;
       if (Array.isArray(value)) { value.forEach(x => walk(x, depth + 1, eventTime, sourceType)); return; }
       const title = typeof value.title === 'string' ? value.title : '';
-      const task = MT_TASKS.find(x => title.startsWith(x.prefix));
+      const task = MT_EXTENDED_TASKS.find(x => title.startsWith(x.prefix));
       const detail = value.task_detail;
       if (task && detail && typeof detail === 'object' && !Array.isArray(detail)) {
         const source = detail.task_url;
@@ -189,7 +237,7 @@ function mtObserve(body, old, now) {
   result.changed = Array.from(changed);
   return result;
 }
-function mtPlan(record, now, tasks = MT_TASKS) {
+function mtPlan(record, now, tasks = MT_EXTENDED_TASKS) {
   const plan = {schema: 'lazing-meituan-jump-plan-v1', count: 0, message: '', summary: ''};
   const missing = [], ready = [], fallback = [];
   tasks.forEach(task => {
@@ -238,26 +286,28 @@ function mtBridge(request, argument, record, now) {
   }, body: JSON.stringify(Object.assign({schema: 'lazing-meituan-jump-plan-v1', version: MT_VERSION,
     connected: '', proof: '', code: '', message: '', count: 0, antManor: '', antForest: '',
     taobaoFarm: '', alipayFarm: '', etao: '', cmcc: '', weibo: '', xianyu: '',
-    alipayMember: '', alipayGold: '', baiduLite: '', taobaoLite: '', diantao: '', mtContent: '', mtPig: '', mtOrchard: ''}, value))}});
+    alipayMember: '', alipayGold: '', baiduLite: '', taobaoLite: '', diantao: '', mtContent: '', mtPig: '', mtOrchard: '',
+    qutoutiao: '', toutiao: '', toutiaoLite: ''}, value))}});
   if (!/^[a-f0-9]{64}$/.test(key || '') || !/^[a-f0-9]{64}$/.test(proof || '')) return reply({code: 'NOT_PAIRED', message: '请使用同一套插件和快捷指令'});
   if (!request || request.method !== 'GET' || ![MT_BASE + 'probe', MT_BASE + 'tasks'].includes(request.url)) return reply({code: 'BAD_REQUEST', message: '本机入口不匹配'});
   if (Object.keys(request.headers || {}).some(k => /^(origin|referer)$/i.test(k))) return reply({code: 'BROWSER_DENIED', message: '请通过配套快捷指令读取'});
   if (request.url === MT_BASE + 'probe') return reply({connected: 'yes', proof, code: 'CONNECTED'});
   if (mtHeader(request.headers, 'X-Lazing-Export-Key') !== key) return reply({code: 'PAIRING_FAILED', message: '插件与快捷指令未配对，请导入同一套文件'});
-  // Older Shortcuts only contain seven branches. Keep their counts accurate.
+  // Count only the branches present in each Shortcut version.
   const client = mtHeader(request.headers, 'X-Lazing-Jump-Plan');
-  const tasks = client === 'extended-v3' ? MT_TASKS : ['extended-v1','extended-v2'].includes(client) ? MT_TASKS.filter(t=>!t.playId) : MT_TASKS.slice(0,7);
+  const tasks = client === 'extended-v4' ? MT_EXTENDED_TASKS :
+    client === 'extended-v3' ? MT_TASKS : ['extended-v1','extended-v2'].includes(client) ? MT_TASKS.filter(t=>!t.playId) : MT_TASKS.slice(0,7);
   const plan = mtPlan(record, now, tasks);
   return reply(Object.assign(plan, {code: plan.count ? 'READY' : 'NO_TASKS'}));
 }
-if (typeof module !== 'undefined' && module.exports) module.exports = {MT_MAP, MT_TASKS, MT_KEY, MT_BASE, MT_TTL,
+if (typeof module !== 'undefined' && module.exports) module.exports = {MT_MAP, MT_TASKS, MT_EXTENDED_TASKS, MT_KEY, MT_BASE, MT_TTL,
   mtDecode, mtObserve, mtPlan, mtBridge, mtValidLink, mtLinkParams, mtTaskParams};
 if (typeof $done === 'function') {
   const now = Date.now();
   const read = () => mtObject($persistentStore.read(MT_KEY));
   if (typeof $request === 'undefined') {
     const p = mtPlan(read(), now);
-    const content = p.message + '\n配套快捷指令一淘、中国移动停留10秒，其余5秒；这里只显示链接记录，不判断金币到账。';
+    const content = p.message + '\n一淘和中国移动停留10秒，趣头条往返两次，每次停留5秒，其余停留5秒。金币以美团明细为准。';
     console.log('[美团任务] ' + content);
     $done({title: '美团任务链接记录', content});
   } else if (String($request.url).startsWith(MT_BASE)) {
@@ -272,10 +322,10 @@ if (typeof $done === 'function') {
       const found = mtObserve($request.body, prior, now);
       if (found.record && JSON.stringify(prior) !== JSON.stringify(found.record)) $persistentStore.write(JSON.stringify(found.record), MT_KEY);
       if (found.changed.length || found.accountChanged) {
-        const names = found.changed.map(k => MT_TASKS.find(t => t.key === k).name);
+        const names = found.changed.map(k => MT_EXTENDED_TASKS.find(t => t.key === k).name);
         const p = mtPlan(found.record, now);
-        console.log('[美团任务] 已记录 ' + p.count + '/' + MT_TASKS.length + ' 项：' + names.join('、'));
-        $notification.post('美团任务链接', '已记录 ' + p.count + '/' + MT_TASKS.length + ' 项', [names.join('、'), p.fallbackSummary].filter(Boolean).join('。') || '账号已切换，请重新打开任务列表');
+        console.log('[美团任务] 已记录 ' + p.count + '/' + MT_EXTENDED_TASKS.length + ' 项：' + names.join('、'));
+        $notification.post('美团任务链接', '已记录 ' + p.count + '/' + MT_EXTENDED_TASKS.length + ' 项', [names.join('、'), p.fallbackSummary].filter(Boolean).join('。') || '账号已切换，请重新打开任务列表');
       }
       if (found.invalid) console.log('[美团任务] ' + found.invalid + ' 条地址未通过检查，已跳过');
     } catch (_) { console.log('[美团任务] 本次记录未完成，原请求继续'); }
