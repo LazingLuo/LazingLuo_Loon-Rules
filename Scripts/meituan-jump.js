@@ -1,6 +1,6 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.4.2';
+const MT_VERSION = '0.4.3';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
@@ -90,11 +90,15 @@ function mtObserve(body, old, now) {
       const detail = value.task_detail;
       if (task && detail && typeof detail === 'object' && !Array.isArray(detail)) {
         const source = detail.task_url;
-        // Object form: only iOS, never substitute Android when iOS is missing.
-        const url = typeof source === 'string' ? source : source && source.iosDeeplink;
         const stamp = Number(value.stm) || eventTime || packageTime;
         const tracked = MT_CLICK_FALLBACK.has(task.key);
         const code = detail.task_code;
+        // The list carries both iOS schemes and HTTPS universal links.
+        // Select a supported iOS destination with the same task ticket.
+        const candidates = typeof source === 'string' ? [source] :
+          source && typeof source === 'object' ? [source.iosDeeplink, source.iosUlink] : [];
+        const url = candidates.find(candidate => mtValidLink(task, candidate) &&
+          (!tracked || mtLinkParams(candidate)?.taskCode === code));
         const params = tracked && typeof url === 'string' ? mtLinkParams(url) : null;
         const validCode = typeof code === 'string' && code.length > 0 && code.length <= 512;
         const freshEvent = Math.abs(now - stamp) <= 15 * 60 * 1000;

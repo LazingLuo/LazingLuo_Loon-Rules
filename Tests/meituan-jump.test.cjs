@@ -160,6 +160,38 @@ delete legacy.jumpTasks[preferredKey];
 check(mtPlan(legacy, now)[preferredKey] === links[preferredKey], 'valid same-day pre-update cache remains usable');
 check(!mtPlan(capture(clicks.map(e => ({...e, stm: now - 3600000})), nine), now)[preferredKey], 'old telemetry cannot refresh a click ticket');
 check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), links.xianyu.replace('userToken=OFFLINE','userToken=')), 'Xianyu ticket must contain a token');
+for (const taskKey of fallbackKeys) {
+  const task = MT_TASKS.find(candidate => candidate.key === taskKey);
+  const event = structuredClone(seedEvents.find(event => event.val_lab.title.startsWith(task.prefix)));
+  event.nm = 'MV';
+  event.val_lab.task_detail.task_url = {
+    iosDeeplink: 'unsupported://' + taskKey + '?url=embedded',
+    iosUlink: links[taskKey],
+    androidUlink: 'https://android.invalid/' + taskKey,
+  };
+  let recorded = capture([event]);
+  check(mtPlan(recorded, now)[taskKey] === links[taskKey], 'list uses iOS universal link: ' + taskKey);
+  check(recorded.tasks[taskKey].source === 'list' && !recorded.jumpTasks, 'list needs no click: ' + taskKey);
+  delete event.val_lab.task_detail.task_url.iosUlink;
+  check(!mtPlan(capture([event]), now)[taskKey], 'Android universal link is never used: ' + taskKey);
+  event.val_lab.task_detail.task_url.iosUlink = links[taskKey].replace('taskCode=FAKE_CODE', 'taskCode=DIFFERENT');
+  check(!mtPlan(capture([event]), now)[taskKey], 'universal link must match current task code: ' + taskKey);
+}
+const preference = structuredClone(seedEvents.find(event => event.val_lab.title.startsWith('浏览点淘')));
+preference.val_lab.task_detail.task_url.iosUlink = links.diantao + '&source=OTHER';
+check(mtPlan(capture([preference]), now).diantao === links.diantao, 'valid iOS scheme keeps existing priority');
+function invalidFree(entries) {
+  let saved = null;
+  for (const e of entries) {
+    if (!/^https:\/\/lx\d*\.meituan\.com\//.test(e.request.url)) continue;
+    const post = e.request.postData || {};
+    const body = post.encoding === 'base64' ? Buffer.from(post.text || '', 'base64').toString() : post.text;
+    const result = mtObserve(body, saved, Date.parse(e.startedDateTime));
+    if(result.invalid) return false;
+    saved = result.record;
+  }
+  return true;
+}
 let harChecks = 0;
 for (const file of process.argv.slice(2)) {
   const entries = JSON.parse(fs.readFileSync(file, 'utf8')).log.entries.slice().sort((a, b) => Date.parse(a.startedDateTime) - Date.parse(b.startedDateTime));
@@ -175,11 +207,16 @@ for (const file of process.argv.slice(2)) {
   const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
   const plan = mtPlan(record, current);
   const original = path.basename(file).startsWith('450_') ? ['mtPig', 'mtOrchard', 'xianyu', 'alipayMember', 'alipayGold'] : path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent', 'mtOrchard'];
-  const expected = path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
+  const expected = path.basename(file).startsWith('505_') ? MT_TASKS.map(task => task.key) : path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
     /^(491|496)_/.test(path.basename(file)) ? ['baiduLite','taobaoLite','diantao'] : original.filter(k=>!['mtContent','mtPig','mtOrchard'].includes(k));
   check(plan.count === expected.length, path.basename(file) + ': selected iOS links recovered');
   check(Object.keys({...record.tasks, ...record.jumpTasks}).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
   check(expected.every(k => mtValidLink(MT_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
+  if(path.basename(file).startsWith('505_')) {
+    check(plan.count === 13 && !plan.fallbackSummary, '505 supplies all thirteen from list events');
+    check(expected.every(k => record.tasks[k]?.source === 'list'), '505 needs no manual click');
+    check(invalidFree(entries), '505 list passes destination and ticket validation');
+  }
   check(!JSON.stringify(record).includes('iosDeeplink'), path.basename(file) + ': no full telemetry saved');
   console.log(path.basename(file) + ': parsed ' + parsed + ' envelopes; ' + plan.count + ' task links recovered (URLs withheld).');
   harChecks += 1;
