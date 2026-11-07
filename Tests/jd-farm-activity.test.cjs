@@ -106,6 +106,22 @@ async function simulate(options={}){
  r=await simulate({tasks:[task('a'),task('b')]});assert.equal(r.result.waterConfirmed,20);assert.equal(r.calls.filter(c=>c.p.functionId==='apTaskDrawAward').length,2);n++;
  r=await simulate({tasks:[task('a')],extra:[task('b')]});assert.equal(r.result.waterConfirmed,20);n++;
  r=await simulate({tasks:[task('a','BROWSE_RTB',{taskLimitTimes:3})]});assert.equal(r.result.waterConfirmed,30);assert.equal(r.result.final[0].current,3);assert.equal(r.waits.length,3);n++;
+ // HAR507: a new timed channel task uses taskInsert instead of itemType.
+ {
+  const channel=task('new-channel','BROWSE_CHANNEL',{taskShowTitle:'测试中新出现的频道'});
+  const item=channel.taskItemList[0];
+  const r=await simulate({tasks:[channel,task('product','BROWSE_RTB')]});
+  assert(!r.result.stopped,r.result.message);
+  assert.equal(r.result.waterConfirmed,20);
+  const [channelStart,productStart]=r.calls.filter(c=>c.p.functionId==='apStartTaskTime');
+  assert.deepEqual(channelStart.b,{
+   linkId:T.FARM,taskId:channel.id,itemId:item.itemId,taskInsert:false,
+   pipeExt:{...channel.pipeExt,...item.pipeExt},channel:4,
+  });
+  assert.equal(productStart.b.itemType,'1');
+  assert(!('taskInsert' in productStart.b));
+  n++;
+ }
  r=await simulate({tasks:[task('a','NEW_TYPE'),task('b','FOLLOW_CHANNEL'),task('c','SUBSCRIBE'),task('d','ADD_WIDGET'),task('e','WECHAT_SHARE')]});assert.equal(r.result.initial.length,5);assert(!r.calls.some(c=>T.MUTATE.has(c.p.functionId)));n++;
  r=await simulate({mode:'claim',tasks:[task('water','CUMULATIVE_TIMES',{taskDoTimes:20,taskLimitTimes:20,taskFinished:true,canDrawAwardNum:1}),task('a')]});assert.equal(r.result.waterConfirmed,10);assert.equal(r.waits.length,0);n++;
  r=await simulate({tasks:[task('a',{},{})],mode:'query'});assert(r.result.stopped);n++;

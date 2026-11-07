@@ -1,4 +1,4 @@
-// Activity execution revision 20261106-3
+// Activity execution revision 20261107-1
 
 // 东东农场与幸运转盘，Loon手动版 2026-10-23.2
 // Current JD farm/platform contracts observed in 407/408; no account data.
@@ -511,9 +511,15 @@ function createFarmTaskClient(host,crypto,account,sharedLogin) {
     if(!Number.isInteger(seconds)||seconds<0||seconds>180){row.result='浏览时长不明确，留待App';return;}
     const b=taskBody(scope,t,item);let r;
     if(timed){
-      const start={linkId:b.linkId,taskId:b.taskId,itemId:item.itemId,channel:4};
-      if(item.itemType!==null&&item.itemType!==undefined)start.itemType=item.itemType;
+      const start={linkId:b.linkId,taskId:b.taskId,itemId:b.itemId};
+      // HAR507: timed farm channel tasks of this type send the list's taskInsert.
+      if(scope==='farm'&&t.taskType==='BROWSE_CHANNEL'&&T.number(t.timeLimitSwitch)===2&&typeof item.taskInsert==='boolean'){
+        start.taskInsert=b.taskInsert;
+      }else if(item.itemType!==null&&item.itemType!==undefined){
+        start.itemType=item.itemType;
+      }
       if(b.pipeExt)start.pipeExt=b.pipeExt;
+      start.channel=b.channel;
       r=await api(scope,'apStartTaskTime',start,'start:'+keyBase,[2024]);
       if(r.code===2024)throw Error('农场已有其他计时任务，请先在App完成');
       // The server may demand a longer duration through its countdown jump.
