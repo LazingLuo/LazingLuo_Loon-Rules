@@ -2,7 +2,7 @@
 // HAR510: planting activity. Task progress and green bubbles are separate.
 const PL_KEY='JD_PLANT_ACTIVITY_ACCOUNT_V2',PL_PREFIX='JD_PLANT_ACTIVITY_V1.',PL_LINK='4HcenxuZM4XiHesOb1HG4g';
 const PL_PAGE='https://pro.m.jd.com/mall/active/4Gck3RiwkxFEyA9ztVmQ2zwqjNRr/index.html';
-const PL_APPS={plantBeanIndex:'d246a',cultureBean:'6a216',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'};
+const PL_APPS={plantBeanIndex:'d246a',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'};
 const PL_ENCODING={root:'of7rHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT',platform:'qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT'};
 const plClone=o=>JSON.parse(JSON.stringify(o));
 const plHeader=(h,k)=>{const keys=Object.keys(h||{}).filter(x=>x.toLowerCase()===k.toLowerCase());return keys.map(x=>String(h[x])).join(k.toLowerCase()==='cookie'?'; ':', ');};
@@ -18,7 +18,7 @@ const plFinished=t=>t.taskFinished===true||t.taskDoTimes>=t.taskLimitTimes;
 function plCredentialStatus(a){
  const t=a?.templates||{},s=a?.signing||{};
  const parts=[['主页',!!(t.plantBeanIndex&&s.plantBeanIndex?.environment)],['任务列表',!!t['apTaskList:0']],
-  ['开始计时',!!(t.apStartTaskTime&&s.apStartTaskTime?.environment)],['提交计时',!!(t.apDoLimitTimeTask&&s.apDoLimitTimeTask?.environment)],['气泡列表',!!t.plantBeanBubbleInfo]];
+  ['开始计时',!!(t.apStartTaskTime&&s.apStartTaskTime?.environment)],['提交计时',!!(t.apDoLimitTimeTask&&s.apDoLimitTimeTask?.environment)]];
  return {ready:parts.every(x=>x[1]),missing:parts.filter(x=>!x[1]).map(x=>x[0]),text:parts.map(x=>x[0]+'：'+(x[1]?'有':'缺')).join('；')};
 }
 function plCaptureResult(host,record,fn,result,updated=false,first=false){
@@ -26,26 +26,17 @@ function plCaptureResult(host,record,fn,result,updated=false,first=false){
  host.write(key,{at:host.observedAt||Date.now(),fn,result,status:s});
  return {updated:updated?[PL_KEY]:[],first,plantStatus:message,plantNotify:old?.status?.text!==s.text||old?.result!==result};
 }
-function plBubbles(bubbles){
- if(!Array.isArray(bubbles))throw Error('种豆气泡结构变化');
- const seen=new Set();
- for(const b of bubbles){
-  if(typeof b?.nutrientsType!=='string'||!b.nutrientsType||seen.has(b.nutrientsType)||!Number.isInteger(b.nutrNum)||b.nutrNum<=0||b.nutrNum>100000)throw Error('种豆气泡数据不完整');
-  seen.add(b.nutrientsType);
- }
- return bubbles;
-}
 function plCapture(host,request,response,decode){
  if(request?.method!=='POST'||Number(response?.status)!==200||['X-Lazing-Plant-Run','X-Lazing-Signin-Run','X-Lazing-Farm-Run','X-Lazing-Activity-Run'].some(k=>plHeader(request.headers,k)==='1'))return null;
  const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?)(?:\?([^#]*))?$/);if(!m)return null;
  const q=plForm(m[2]),p=plForm(request.body);for(const k of Object.keys(p)){if(k in q&&q[k]!==p[k])throw Error('种豆请求参数冲突');q[k]=p[k];}
- const f=q.functionId;if(!['apTaskList','plantBeanBubbleInfo',...Object.keys(PL_APPS)].includes(f))return null;
+ const f=q.functionId;if(!['apTaskList',...Object.keys(PL_APPS)].includes(f))return null;
  const b=JSON.parse(q.body||'{}'),platform=f.startsWith('ap'),kind=platform?'platform':'root';
  if(platform&&(b.linkId!==PL_LINK||q.appid!==(f==='apStartTaskTime'?'activity_platform_se':'activities_platform'))||!platform&&(q.appid!=='signed_wh5'||b.monitor_source!=='plant_m_plant_index'))return null;
  if(platform&&!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(m[1])||!platform&&m[1]!=='https://api.m.jd.com/')return null;
  if(!plRef(plHeader(request.headers,'Referer'))&&!(platform&&plHeader(request.headers,'Referer')==='https://pro.m.jd.com/'))return plCaptureResult(host,host.read(PL_KEY,null),f,'页面来源未通过检查');
  if(f==='apTaskList'&&b.queryType!==0)return null;
- const j=JSON.parse(response.body||'{}');if(!plAccepted(j)&&!(f==='apDoLimitTimeTask'&&String(j.code)==='2031'))return null;if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);if(f==='plantBeanBubbleInfo')plBubbles(j.data?.bubbleInfos);
+ const j=JSON.parse(response.body||'{}');if(!plAccepted(j)&&!(f==='apDoLimitTimeTask'&&String(j.code)==='2031'))return null;if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);
  let ck=plHeader(request.headers,'Cookie');const canonical=host.read('JD_SIGNIN_LOGIN_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
  const directPin=plCookie(ck,'pt_pin'),directKey=plCookie(ck,'pt_key');
  // The native webview in HAR492 sends only its page cookie. Reuse a captured
@@ -64,8 +55,6 @@ function plCapture(host,request,response,decode){
  // Never preserve round IDs, action item IDs or referral data as new actions.
  let base={};if(f==='apTaskList')base={linkId:PL_LINK,queryType:b.queryType,channel:4,...(typeof b.area==='string'?{area:b.area}:{})};
  if(f==='plantBeanIndex')base={wxHeadImgUrl:'',shareUuid:'',channel:String(b.channel||''),plantUpdateV1:'v1',monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- if(f==='plantBeanBubbleInfo')base={monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- if(f==='cultureBean')base={monitor_source:'plant_m_plant_index',monitor_refer:'plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
  record.templates[key]={endpoint:m[1],params,headers,body:base,at};record.updatedAt=Math.max(at,Number(record.updatedAt||0));host.write(PL_KEY,record);
  return plCaptureResult(host,record,f,plCredentialStatus(record).ready?'凭据已齐':'已保存部分凭据',true,!old);
 }
@@ -74,8 +63,7 @@ function plRound(j){
  if(!Array.isArray(rounds))throw Error('种豆主页面结构变化');
  const current=rounds.filter(x=>String(x?.roundState)==='2');
  const r=current[0];
- if(current.length!==1||typeof r.roundId!=='string'||!r.roundId||!/^\d+$/.test(String(r.growth)))throw Error('种豆本轮进度不明确');
- if(r.bubbleInfos!==undefined)plBubbles(r.bubbleInfos);
+ if(current.length!==1||typeof r.roundId!=='string'||!r.roundId)throw Error('种豆本轮进度不明确');
  return r;
 }
 
@@ -115,11 +103,11 @@ function plTimer(start,item){
   return keys.length===Object.keys(actual.params).length&&keys.every(k=>expected.params[k]===actual.params[k])?j.second:null;
  }catch(_){return null;}
 }
-const PL_VERSION='2026-11-08.2';
-const PL_LABELS={plantBeanIndex:'查询种豆主页',plantBeanBubbleInfo:'查询绿气泡',cultureBean:'收取绿气泡',apTaskList:'查询完整任务列表',apStartTaskTime:'开始浏览',apDoLimitTimeTask:'提交计时结果'};
+const PL_VERSION='2026-11-08.3';
+const PL_LABELS={plantBeanIndex:'查询种豆主页',apTaskList:'查询完整任务列表',apStartTaskTime:'开始浏览',apDoLimitTimeTask:'提交计时结果'};
 
 function createPlantActivity(host,crypto,account,login){
- const day=host.day(),report={version:PL_VERSION,rows:[],completed:0,collected:0,bubbles:0,stopped:false};
+ const day=host.day(),report={version:PL_VERSION,rows:[],completed:0,stopped:false};
  const jkey='journal.'+crypto.hash(account?.pin||'').slice(0,24),old=host.read(jkey,null);
  const journal=old?.day===day?old:{day,actions:{}};
  let session=null,calls=0,roundId;
@@ -132,8 +120,8 @@ function createPlantActivity(host,crypto,account,login){
   host.write(jkey,journal);
  }
  function material(f){
-  const root=f==='plantBeanIndex'||f==='plantBeanBubbleInfo'||f==='cultureBean';
-  const key=f==='apTaskList'?'apTaskList:0':f==='cultureBean'&&!account.templates[f]?'plantBeanIndex':f;
+  const root=f==='plantBeanIndex';
+  const key=f==='apTaskList'?'apTaskList:0':f;
   const t=account.templates[key],s=account.signing[key];
   const expected=root?/^https:\/\/api\.m\.jd\.com\/$/:/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)$/;
   if(!t||!expected.test(t.endpoint)||PL_APPS[f]&&(!s?.environment||!s.eidToken))throw Error('种豆缺少'+PL_LABELS[f]+'参数');
@@ -158,8 +146,6 @@ function createPlantActivity(host,crypto,account,login){
   if(actionKey&&journal.actions[actionKey])throw Error('种豆此项已有提交记录，请在 App 确认');
   const {t,s,headers,env,root}=material(f),p={...t.params,functionId:f,body:JSON.stringify(b)};
   if(!root)p.t=String(host.now());
-  if(f==='plantBeanBubbleInfo'){delete p.h5st;delete p['x-api-eid-token'];}
-  if(f==='cultureBean'&&b.roundId!==roundId)throw Error('种豆本轮发生变化');
   if(PL_APPS[f]){
    p['x-api-eid-token']=s.eidToken;
    const input={};
@@ -213,37 +199,12 @@ function createPlantActivity(host,crypto,account,login){
   row.result='已完成 '+n+'/'+t.taskLimitTimes;
   return n;
  }
- async function collect(round){
-  const t=account.templates.plantBeanBubbleInfo,body={roundId,...t.body};
-  const info=(await api('plantBeanBubbleInfo',body)).data;
-  if(info?.bubbleSwitch!==true){host.progress('绿气泡收取暂不可用');return;}
-  const bubbles=plBubbles(info.bubbleInfos);
-  if(!bubbles.length)return;
-  const base=(account.templates.cultureBean||account.templates.plantBeanIndex).body;
-  if(!base.version||!base.busiVersion||base.appType!==1)throw Error('种豆收取参数缺失');
-  let growth=Number(round.growth);
-  for(const b of bubbles){
-   const key='bubble:'+crypto.hash(roundId+':'+b.nutrientsType).slice(0,40);
-   if(journal.actions[key]){host.progress('有绿气泡收取记录待 App 核对');continue;}
-   const d=(await api('cultureBean',{roundId,nutrientsType:b.nutrientsType,monitor_source:'plant_m_plant_index',monitor_refer:'plant_index',version:base.version,busiVersion:base.busiVersion,appType:base.appType},key)).data;
-   const next=/^\d+$/.test(String(d?.growth))?Number(d.growth):NaN;
-   if(!Number.isSafeInteger(next)||next<growth+b.nutrNum)throw Error('种豆气泡收取结果待 App 核对');
-   remember(key,'verified');
-   report.collected+=b.nutrNum;
-   report.bubbles++;
-   growth=next;
-   report.growthAfter=growth;
-   host.progress(plText(b.name)+'，收取 '+b.nutrNum+' 收获值');
-  }
- }
  async function run(){
   try{
    const status=plCredentialStatus(account);
    if(!account?.pin||!status.ready)throw Error('种豆缺少 '+status.missing.join('、')+'，请打开主页和完整任务列表并做一次普通浏览');
    for(const f of Object.keys(PL_LABELS))material(f);
-   const round=plRound(await api('plantBeanIndex',plClone(account.templates.plantBeanIndex.body)));
-   roundId=round.roundId;
-   report.growthBefore=Number(round.growth);
+   roundId=plRound(await api('plantBeanIndex',plClone(account.templates.plantBeanIndex.body))).roundId;
    const list=plList((await api('apTaskList',plClone(account.templates['apTaskList:0'].body))).data);
    report.total=list.length;
    const rows=list.map(t=>({t,items:plFinished(t)?[]:plItems(t),title:plText(t.taskShowTitle),result:plFinished(t)?'已完成':'需 App 操作'}));
@@ -263,7 +224,6 @@ function createPlantActivity(host,crypto,account,login){
      progress=next;
     }
    }
-   await collect(round);
   }catch(e){
    report.stopped=true;
    report.error=/^种豆/.test(String(e.message))?String(e.message).slice(0,180):'种豆处理未完成';
@@ -274,8 +234,7 @@ function createPlantActivity(host,crypto,account,login){
 }
 function plReport(r){
  return [r.stopped?'已停止，'+r.error:'执行完成',...r.rows.map(x=>x.title+'：'+x.result),
-  '已确认完成 '+r.completed+' 次；收取 '+r.bubbles+' 个绿色气泡，共 '+r.collected+' 收获值。',
-  ...(r.growthAfter!==undefined?['本轮收获值 '+r.growthBefore+' → '+r.growthAfter]:[])].join('\n');
+  '已确认完成 '+r.completed+' 次。绿气泡请在京东 App 手动收取。'].join('\n');
 }
 
 function createFarmCrypto(host) {
@@ -612,11 +571,11 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
    });}
    const host={read:localRead,write:localWrite,now:()=>Date.now(),day:()=>new Date(Date.now()+28800000).toISOString().slice(0,10),guard,progress,setTimeout,clearTimeout,
     request:o=>request(o,false),requestAlgo:o=>request(o,true),pause:async ms=>{guard();await new Promise(r=>setTimeout(r,ms));guard();},sleep:async ms=>{guard();if(Date.now()+ms+25000>=deadline)throw Error('种豆本轮时间不足');await new Promise(r=>setTimeout(r,ms));guard();}};
-   localWrite('lock',{runId,until:deadline});owned=true;progress('版本 '+PL_VERSION+'，筛选完整列表中的普通计时浏览并收取绿气泡');
+   localWrite('lock',{runId,until:deadline});owned=true;progress('版本 '+PL_VERSION+'，仅处理普通计时浏览，绿气泡手动收取');
    const status=plCredentialStatus(account);progress('凭据检查：'+status.text);
    const lastCapture=read(PL_KEY+'.capture',null);if(lastCapture?.result)progress('最近获取：'+lastCapture.result);
    if(!status.ready)throw Error('种豆缺少：'+status.missing.join('、')+'；尚未发送活动请求');
-   const r=await createPlantActivity(host,createFarmCrypto(host),account,login).run();localWrite('last',r);console.log('[种豆得豆] '+plReport(r));notify(r.stopped?'执行停止':'执行完成',r.stopped?r.error:'完成 '+r.completed+' 次；收取 '+r.collected+' 收获值');
+   const r=await createPlantActivity(host,createFarmCrypto(host),account,login).run();localWrite('last',r);console.log('[种豆得豆] '+plReport(r));notify(r.stopped?'执行停止':'执行完成',r.stopped?r.error:'完成 '+r.completed+' 次，绿气泡请在 App 收取');
   }catch(e){const text=/^种豆/.test(String(e.message))?String(e.message).slice(0,180):'种豆执行未完成，已停止';console.log('[种豆得豆] '+text);notify('未继续',text);}
   finally{if(owned&&localRead('lock',null)?.runId===runId)$persistentStore.write('',PL_PREFIX+'lock');$done({});}
  })();

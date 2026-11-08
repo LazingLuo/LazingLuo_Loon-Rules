@@ -31,19 +31,18 @@ function req(f,b,headers={}){
 }
 const fixtures=[
  ['plantBeanIndex',{...base,channel:'baibaoxiang'},response(round())],
- ['plantBeanBubbleInfo',{...base,roundId:'old-round'},response({bubbleSwitch:true,bubbleInfos:[]})],
  ['apTaskList',{linkId:P.PL_LINK,queryType:0,channel:4},response([task()])],
  ['apStartTaskTime',{linkId:P.PL_LINK},response(jump())],
  ['apDoLimitTimeTask',{linkId:P.PL_LINK},response(null,2031)]
 ];
 function profile(){const m=memory();for(const [f,b,r] of fixtures)P.plCapture(m,req(f,b),r,()=>env);return m.read(P.PL_KEY,null);}
-test('both capture routes store the complete list, bubble list and distinct signer profiles',async()=>{
+test('both capture routes store the complete list and distinct signer profiles without bubble credentials',async()=>{
  for(const capture of [A,S]){
   const m=memory();for(const [f,b,r] of fixtures)assert((await capture.jsCapture(m,req(f,b),r,{},()=>env)).updated.includes(P.PL_KEY));
   const p=m.read(P.PL_KEY,null);assert(P.plCredentialStatus(p).ready);
   assert.deepEqual(Object.keys(p.signing).sort(),['apDoLimitTimeTask','apStartTaskTime','plantBeanIndex']);
   assert.equal(p.templates['apTaskList:0'].params['x-api-eid-token'],'list-eid');
-  assert(!JSON.stringify(p).includes('old-round'));
+  assert(!p.templates.plantBeanBubbleInfo);assert(!p.templates.cultureBean);
  }
 });
 test('capture ignores own execution, other activities, and recommendation-only lists',async()=>{
@@ -82,23 +81,21 @@ async function simulate(o={}){
  request:async r=>{
   const p=P.plForm(r.body),f=p.functionId,b=JSON.parse(p.body);calls.push(f);assert.equal(r.headers['X-Lazing-Plant-Run'],'1');
   if(o.reply?.[f])return o.reply[f];
-  if(f==='plantBeanIndex')return response(round());
+  if(f==='plantBeanIndex')return response(round(1688,[bubble]));
   if(f==='apTaskList'){assert.equal(b.queryType,0);assert.equal(p['x-api-eid-token'],'list-eid');return response(o.list||[t,task('玩一玩')]);}
   if(f==='apStartTaskTime'){assert.equal(b.pipeExt.assignmentId,t.pipeExt.assignmentId);return response(jump(b.itemId));}
   if(f==='apDoLimitTimeTask')return response({finished:true,userFinishedTimes:++finished,encryptAssignmentId:t.pipeExt.assignmentId});
-  if(f==='plantBeanBubbleInfo'){assert.equal(b.roundId,'test-round');assert(!('h5st' in p));return response({bubbleSwitch:true,bubbleInfos:[bubble]});}
-  if(f==='cultureBean'){assert.equal(b.nutrientsType,bubble.nutrientsType);assert.equal(p.functionId,'cultureBean');return response({growth:'1698'});}
   throw Error(f);
  }};
  const c={hash,decodeEnvironment:()=>env,signOnline:async(app,_pr,_env,input)=>sig(app,input.t?'platform':'root')};
  return {result:await P.createPlantActivity(host,c,account,{pin:'offline',cookie}).run(),calls,waits};
 }
-test('full list is read once; one timed browse and one bubble claim are counted separately',async()=>{
+test('full list is read once and a timed browse leaves existing bubbles for the app',async()=>{
  const {result:r,calls,waits}=await simulate();
  assert.equal(r.error,undefined);
- assert.deepEqual(calls,['plantBeanIndex','apTaskList','apStartTaskTime','apDoLimitTimeTask','plantBeanBubbleInfo','cultureBean']);
- assert.deepEqual(waits,[6000]);assert.equal(r.completed,1);assert.equal(r.bubbles,1);assert.equal(r.collected,10);
- assert.equal(r.rows[1].result,'需 App 操作');assert.match(P.plReport(r),/1688 → 1698/);
+ assert.deepEqual(calls,['plantBeanIndex','apTaskList','apStartTaskTime','apDoLimitTimeTask']);
+ assert.deepEqual(waits,[6000]);assert.equal(r.completed,1);
+ assert.equal(r.rows[1].result,'需 App 操作');assert.match(P.plReport(r),/绿气泡请在京东 App 手动收取/);
 });
 test('multi-visit tasks use distinct eligible targets and stop at the server limit',async()=>{
  const t=task();
@@ -108,23 +105,29 @@ test('multi-visit tasks use distinct eligible targets and stop at the server lim
  assert(!r.stopped,r.error);assert.equal(r.completed,2);assert.equal(r.rows[0].result,'已完成 2/3');
  assert.equal(calls.filter(f=>f==='apStartTaskTime').length,2);
 });
-test('can collect an existing bubble when there are no eligible tasks',async()=>{
- const {result:r,calls}=await simulate({list:[task('玩一玩')]});assert.equal(r.completed,0);assert.equal(r.bubbles,1);assert(!calls.includes('apStartTaskTime'));
+test('legacy bubble credentials do not cause requests when the list has no eligible tasks',async()=>{
+ const p=profile();
+ p.templates.cultureBean={endpoint:root};p.templates.plantBeanBubbleInfo={endpoint:root};
+ const {result:r,calls}=await simulate({profile:p,list:[task('玩一玩')]});
+ assert(!r.stopped,r.error);assert.equal(r.completed,0);
+ assert.deepEqual(calls,['plantBeanIndex','apTaskList']);
 });
-test('a growth increase above the bubble face value keeps both values distinct',async()=>{
- const {result:r}=await simulate({reply:{cultureBean:response({growth:'1701'})}});
- assert(!r.stopped,r.error);assert.equal(r.collected,10);assert.equal(r.growthAfter-r.growthBefore,13);
+test('the capture scripts ignore both app bubble endpoints',async()=>{
+ for(const c of [A,S]){
+  const m=memory();
+  for(const fn of ['plantBeanBubbleInfo','cultureBean'])assert.equal(await c.jsCapture(m,req(fn,base),response({growth:'1698',bubbleInfos:[bubble]}),{},()=>env),null);
+  assert(!m.read(P.PL_KEY,null));
+ }
 });
 test('a 413 or an HTTP refusal stops immediately and does not retry',async()=>{
  for(const refusal of [response(null,413),response(null,0,403)]){
   const {result:r,calls}=await simulate({reply:{apDoLimitTimeTask:refusal}});
-  assert(r.stopped);assert.match(r.error,/413|403/);assert.equal(r.collected,0);assert.equal(calls.at(-1),'apDoLimitTimeTask');
+  assert(r.stopped);assert.match(r.error,/413|403/);assert.equal(r.completed,0);assert.equal(calls.at(-1),'apDoLimitTimeTask');
  }
 });
-test('ambiguous completion and mismatched growth cannot be counted',async()=>{
+test('ambiguous completion cannot be counted',async()=>{
  const a=await simulate({reply:{apDoLimitTimeTask:response({finished:true,userFinishedTimes:1,encryptAssignmentId:'other'})}});
  assert.equal(a.result.completed,0);assert.equal(a.calls.at(-1),'apDoLimitTimeTask');
- const b=await simulate({reply:{cultureBean:response({growth:'1688'})}});assert(b.result.stopped);assert.equal(b.result.collected,0);
 });
 test('duplicate start is blocked after restart and an incomplete profile sends no traffic',async()=>{
  const m=memory(),a=await simulate({memory:m,reply:{apStartTaskTime:response(null,413)}});

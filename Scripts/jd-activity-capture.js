@@ -1,3 +1,4 @@
+// Shared capture 2026-11-08.3: planting uses browse credentials only.
 // Shared capture 2026-11-08.2: add the planting activity.
 // Shared capture 2026-11-08.1: separate gear entrances and capture furnishing, service and campus.
 // Shared capture 20261103-6: own sign-ins and activities only.
@@ -1288,7 +1289,7 @@ function jsMedicalCapture(host,request,response,decode){
 // HAR510: planting activity. Task progress and green bubbles are separate.
 const PL_KEY='JD_PLANT_ACTIVITY_ACCOUNT_V2',PL_PREFIX='JD_PLANT_ACTIVITY_V1.',PL_LINK='4HcenxuZM4XiHesOb1HG4g';
 const PL_PAGE='https://pro.m.jd.com/mall/active/4Gck3RiwkxFEyA9ztVmQ2zwqjNRr/index.html';
-const PL_APPS={plantBeanIndex:'d246a',cultureBean:'6a216',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'};
+const PL_APPS={plantBeanIndex:'d246a',apStartTaskTime:'acb1e',apDoLimitTimeTask:'ebecc'};
 const PL_ENCODING={root:'of7rHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT',platform:'qbkgHGHQ8GlOIyVOF6JQ8G1P5WFW3yVSC61T-bEQGGlQI6ZNHuFT-bVR7qUT'};
 const plClone=o=>JSON.parse(JSON.stringify(o));
 const plHeader=(h,k)=>{const keys=Object.keys(h||{}).filter(x=>x.toLowerCase()===k.toLowerCase());return keys.map(x=>String(h[x])).join(k.toLowerCase()==='cookie'?'; ':', ');};
@@ -1304,7 +1305,7 @@ const plFinished=t=>t.taskFinished===true||t.taskDoTimes>=t.taskLimitTimes;
 function plCredentialStatus(a){
  const t=a?.templates||{},s=a?.signing||{};
  const parts=[['主页',!!(t.plantBeanIndex&&s.plantBeanIndex?.environment)],['任务列表',!!t['apTaskList:0']],
-  ['开始计时',!!(t.apStartTaskTime&&s.apStartTaskTime?.environment)],['提交计时',!!(t.apDoLimitTimeTask&&s.apDoLimitTimeTask?.environment)],['气泡列表',!!t.plantBeanBubbleInfo]];
+  ['开始计时',!!(t.apStartTaskTime&&s.apStartTaskTime?.environment)],['提交计时',!!(t.apDoLimitTimeTask&&s.apDoLimitTimeTask?.environment)]];
  return {ready:parts.every(x=>x[1]),missing:parts.filter(x=>!x[1]).map(x=>x[0]),text:parts.map(x=>x[0]+'：'+(x[1]?'有':'缺')).join('；')};
 }
 function plCaptureResult(host,record,fn,result,updated=false,first=false){
@@ -1312,26 +1313,17 @@ function plCaptureResult(host,record,fn,result,updated=false,first=false){
  host.write(key,{at:host.observedAt||Date.now(),fn,result,status:s});
  return {updated:updated?[PL_KEY]:[],first,plantStatus:message,plantNotify:old?.status?.text!==s.text||old?.result!==result};
 }
-function plBubbles(bubbles){
- if(!Array.isArray(bubbles))throw Error('种豆气泡结构变化');
- const seen=new Set();
- for(const b of bubbles){
-  if(typeof b?.nutrientsType!=='string'||!b.nutrientsType||seen.has(b.nutrientsType)||!Number.isInteger(b.nutrNum)||b.nutrNum<=0||b.nutrNum>100000)throw Error('种豆气泡数据不完整');
-  seen.add(b.nutrientsType);
- }
- return bubbles;
-}
 function plCapture(host,request,response,decode){
  if(request?.method!=='POST'||Number(response?.status)!==200||['X-Lazing-Plant-Run','X-Lazing-Signin-Run','X-Lazing-Farm-Run','X-Lazing-Activity-Run'].some(k=>plHeader(request.headers,k)==='1'))return null;
  const m=String(request.url||'').match(/^(https:\/\/api\.m\.jd\.com\/(?:api|client\.action)?)(?:\?([^#]*))?$/);if(!m)return null;
  const q=plForm(m[2]),p=plForm(request.body);for(const k of Object.keys(p)){if(k in q&&q[k]!==p[k])throw Error('种豆请求参数冲突');q[k]=p[k];}
- const f=q.functionId;if(!['apTaskList','plantBeanBubbleInfo',...Object.keys(PL_APPS)].includes(f))return null;
+ const f=q.functionId;if(!['apTaskList',...Object.keys(PL_APPS)].includes(f))return null;
  const b=JSON.parse(q.body||'{}'),platform=f.startsWith('ap'),kind=platform?'platform':'root';
  if(platform&&(b.linkId!==PL_LINK||q.appid!==(f==='apStartTaskTime'?'activity_platform_se':'activities_platform'))||!platform&&(q.appid!=='signed_wh5'||b.monitor_source!=='plant_m_plant_index'))return null;
  if(platform&&!['https://api.m.jd.com/api','https://api.m.jd.com/client.action'].includes(m[1])||!platform&&m[1]!=='https://api.m.jd.com/')return null;
  if(!plRef(plHeader(request.headers,'Referer'))&&!(platform&&plHeader(request.headers,'Referer')==='https://pro.m.jd.com/'))return plCaptureResult(host,host.read(PL_KEY,null),f,'页面来源未通过检查');
  if(f==='apTaskList'&&b.queryType!==0)return null;
- const j=JSON.parse(response.body||'{}');if(!plAccepted(j)&&!(f==='apDoLimitTimeTask'&&String(j.code)==='2031'))return null;if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);if(f==='plantBeanBubbleInfo')plBubbles(j.data?.bubbleInfos);
+ const j=JSON.parse(response.body||'{}');if(!plAccepted(j)&&!(f==='apDoLimitTimeTask'&&String(j.code)==='2031'))return null;if(f==='apTaskList')plList(j.data);if(f==='plantBeanIndex')plRound(j);
  let ck=plHeader(request.headers,'Cookie');const canonical=host.read('JD_SIGNIN_LOGIN_V1',null)||host.read('QL_BRIDGE_CREDENTIAL_V1',null);
  const directPin=plCookie(ck,'pt_pin'),directKey=plCookie(ck,'pt_key');
  // The native webview in HAR492 sends only its page cookie. Reuse a captured
@@ -1350,8 +1342,6 @@ function plCapture(host,request,response,decode){
  // Never preserve round IDs, action item IDs or referral data as new actions.
  let base={};if(f==='apTaskList')base={linkId:PL_LINK,queryType:b.queryType,channel:4,...(typeof b.area==='string'?{area:b.area}:{})};
  if(f==='plantBeanIndex')base={wxHeadImgUrl:'',shareUuid:'',channel:String(b.channel||''),plantUpdateV1:'v1',monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- if(f==='plantBeanBubbleInfo')base={monitor_source:'plant_m_plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
- if(f==='cultureBean')base={monitor_source:'plant_m_plant_index',monitor_refer:'plant_index',version:b.version,busiVersion:b.busiVersion,appType:b.appType};
  record.templates[key]={endpoint:m[1],params,headers,body:base,at};record.updatedAt=Math.max(at,Number(record.updatedAt||0));host.write(PL_KEY,record);
  return plCaptureResult(host,record,f,plCredentialStatus(record).ready?'凭据已齐':'已保存部分凭据',true,!old);
 }
@@ -1360,8 +1350,7 @@ function plRound(j){
  if(!Array.isArray(rounds))throw Error('种豆主页面结构变化');
  const current=rounds.filter(x=>String(x?.roundState)==='2');
  const r=current[0];
- if(current.length!==1||typeof r.roundId!=='string'||!r.roundId||!/^\d+$/.test(String(r.growth)))throw Error('种豆本轮进度不明确');
- if(r.bubbleInfos!==undefined)plBubbles(r.bubbleInfos);
+ if(current.length!==1||typeof r.roundId!=='string'||!r.roundId)throw Error('种豆本轮进度不明确');
  return r;
 }
 
