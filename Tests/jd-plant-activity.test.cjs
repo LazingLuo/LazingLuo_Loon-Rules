@@ -57,6 +57,18 @@ test('new campaign pages are eligible by type and endpoint; lookalike games, pur
  assert(P.plItem(task()));assert(P.plItem(task('每日领钱',jr)));
  for(const t of [task('浏览5秒','https://miniapp-fe.jd.com/myshare?appId=x'),task('浏览5秒',page+'&jwebprog=1'),task('玩一玩得奖励'),{...task(),taskType:'BROWSE_RTB'},{...task(),timeLimitPeriod:16},{...task(),taskShowTitle:'下单领奖励'}])assert.equal(P.plItem(t),null);
 });
+test('campaign themes do not override a verified ordinary browse type',()=>{
+ for(const title of ['PLUS品牌盛典抽奖','抢20元外卖金券','签到领京豆','新品活动抽奖'])assert(P.plItem(task(title)),title);
+ for(const taskType of ['CONSECUTIVE_SIGN_IN','SHARE_INVITE','ORDER_MARK','JOIN_OTHER_ACT','BROWSE_PRODUCT','BROWSE_RTB']){
+  const t=task('浏览5秒');t.taskType=t.pipeExt.taskType=taskType;assert.equal(P.plItem(t),null,taskType);
+ }
+ for(const key of ['clickUrl','exposalUrl','itemUrl']){
+  const t=task();t.taskItemList[0][key]='https://example.invalid/tracking';assert.equal(P.plItem(t),null,key);
+ }
+ for(const id of ['42HV4J3Q87B2xFQMJk81PCc1mEs3','3fcyrvLZALNPWCEDRvaZJVrzek8v']){
+  assert.equal(P.plItem(task('浏览5秒',page.replace('ABC123456789012345678901',id))),null);
+ }
+});
 test('countdown accepts the two observed URL shapes and rejects a changed destination or slide requirement',()=>{
  const item=P.plItem(task());
  assert.equal(P.plTimer({data:jump(page+'&hdTimerId=sample%3Btoken')},item),5);

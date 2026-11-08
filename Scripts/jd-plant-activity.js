@@ -95,10 +95,11 @@ function plLanding(url,allowTimer=false){
 }
 function plItems(t){
  if(t.taskType!=='BROWSE_CHANNEL'||t.pipeExt?.taskType!==t.taskType||![1,2].includes(t.timeLimitSwitch)||!Number.isInteger(t.timeLimitPeriod)||t.timeLimitPeriod<1||t.timeLimitPeriod>PL_MAX_SECONDS||!Array.isArray(t.taskItemList)||!Number.isSafeInteger(t.id))return [];
- if(/视频|直播|游戏|玩一玩|玩AI|邀请|助力|下单|组件|提醒|签到|双签|抽奖|外卖|农场|小程序/.test(plText(t.taskShowTitle)))return [];
+ // A campaign title can advertise a sign-in, draw or voucher while its task only requires browsing.
+ if(/视频|直播|游戏|玩一玩|玩AI|邀请|助力|下单|组件|提醒|双签|农场|小程序/.test(plText(t.taskShowTitle)))return [];
  const seen=new Set();
  return t.taskItemList.filter(i=>{
-  if(!i||seen.has(i.itemId)||!plLanding(i.itemId)||i.clickUrl||i.itemUrl||typeof i.pipeExt?.itemId!=='string'||!i.pipeExt.itemId||!['1',1].includes(i.itemType))return false;
+  if(!i||seen.has(i.itemId)||!plLanding(i.itemId)||i.clickUrl||i.exposalUrl||i.itemUrl||typeof i.pipeExt?.itemId!=='string'||!i.pipeExt.itemId||!['1',1].includes(i.itemType))return false;
   seen.add(i.itemId);return true;
  });
 }
@@ -114,7 +115,7 @@ function plTimer(start,item){
   return keys.length===Object.keys(actual.params).length&&keys.every(k=>expected.params[k]===actual.params[k])?j.second:null;
  }catch(_){return null;}
 }
-const PL_VERSION='2026-11-08.1';
+const PL_VERSION='2026-11-08.2';
 const PL_LABELS={plantBeanIndex:'查询种豆主页',plantBeanBubbleInfo:'查询绿气泡',cultureBean:'收取绿气泡',apTaskList:'查询完整任务列表',apStartTaskTime:'开始浏览',apDoLimitTimeTask:'提交计时结果'};
 
 function createPlantActivity(host,crypto,account,login){
