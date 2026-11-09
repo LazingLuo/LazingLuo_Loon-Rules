@@ -29,6 +29,20 @@ test('bound account rejects another account capture',async()=>{const r=await dis
 for(const fn of ['interact_pre_executor','getPageInfoSafetyTranslate'])test('removed activity template is not captured: '+fn,async()=>{const r=await dispatch(fn,{encryptProjectId:'old'});assert(!r.store.JD_ACTIVITY_TASKS_ACCOUNT_V1);assert(!Object.keys(r.store).some(k=>/journal|receipt/.test(k)));});
 test('Jingxi task-list-only visit preserves query without inventing a signature',async()=>{const r=await dispatch('jxzy_active_task_queryTaskList',{source:'jxzy',craftId:'6824629a7c46584759d39b78',sceneval:2,buid:325,appCode:'ms1888ebbf',signStr:'OLD_SIGNATURE',time:123},{params:{appid:'jx_h5_babel',client:'jxh5',channel:'jxh5'},headers:{Referer:'https://pro.m.jd.com/mall/active/2iqSwv1JiDHxAkHAikfU6XAECFmo/index.html'}},{code:0,data:{taskInfoList:[]}});const p=JSON.parse(r.store.JXZY_CHECKIN_ACCOUNT_V1);assert(p.query);assert(!p.signing);assert(!JSON.stringify(p).includes('OLD_SIGNATURE'));});
 test('farm task query is passively captured',async()=>{const r=await dispatch('apTaskList',{linkId:'fWWo3YmB983abNOJPR7veg',queryType:0,channel:4},{params:{appid:'activities_platform',client:'ios',clientVersion:'16.1.50'},headers:{Referer:'https://pro.m.jd.com/mall/active/42HV4J3Q87B2xFQMJk81PCc1mEs3/index.html'}},{code:0,data:[]});assert(JSON.parse(r.store.JD_FARM_TASKS_ACCOUNT_V1).scopes.farm);});
+test('home activity accepts the 21-item browse list shape and still rejects excessive or duplicate tasks',()=>{
+ const exposed={};
+ const source=src('jd-home-activity.js').split('(async function jxLoonTaskMain(){')[0];
+ vm.runInNewContext(source+'\nEXPOSE.parseList=createJxTaskClient({},{}).parseList;', {EXPOSE:exposed},{timeout:3000});
+ const makeList=count=>Array.from({length:count},(_,i)=>({
+  taskId:'home-'+i,showTask:1,taskType:3,taskStatus:1,taskName:'浏览商品',
+  taskProgress:{itemId:'item-'+i,current:0,total:1},
+  extInfo:{browseTask:{browseTime:10,completionFlag:false}}
+ }));
+ const parse=taskInfoList=>exposed.parseList({code:0,data:{taskInfoList}});
+ assert.equal(parse([{showTask:1,taskType:1},...makeList(21),{showTask:1,taskType:2}]).length,21);
+ assert.throws(()=>parse(makeList(51)),/51 项，超过 50 项上限/);
+ const duplicated=makeList(21);duplicated[20]=duplicated[0];assert.throws(()=>parse(duplicated),/重复项/);
+});
 test('farm entry cannot switch to lottery through arguments',()=>{assert(farmSource.includes("const mode='farm-all';"));assert(!farmSource.includes("const mode=typeof $argument==='string'?$argument:'status';"));});
 test('farm has no automatic watering endpoint',()=>{const t=farm.farmTools();assert(![...t.ALLOWED].some(x=>/water|irrigat/i.test(x)));});
 test('latest canonical Cookie beats stale page Cookie',()=>{const d={JD_SIGNIN_LOGIN_V1:{pin:'offline',cookie:'pt_key=NEW;pt_pin=offline;',headers:{...headers,Cookie:'pt_key=STALE;pt_pin=offline;'},capturedAt:10},JD_CHECKIN_TEST_ACCOUNT_V1:{pin:'offline',modes:{blindbox:{headers,capturedAt:2}}}};const s=jx.actSharedMaterial((k,f)=>d[k]||f,()=>({pp:{p1:'offline'}}));assert(s.headers.Cookie.includes('NEW'));assert(!s.headers.Cookie.includes('STALE'));});

@@ -1,4 +1,4 @@
-// Activity execution revision 20261030-2
+// Activity execution revision 20261109-1
 
 // Shared login and Jingxi adapters only. No retired activity clients.
 const actClone=x=>JSON.parse(JSON.stringify(x));
@@ -408,7 +408,7 @@ function createJxTaskClient(host, crypto) {
   function parseList(r) {
     if(!r||String(r.code)!=='0'||!r.data||!Array.isArray(r.data.taskInfoList))throw Error('任务列表查询失败或登录已失效');
     const tasks=r.data.taskInfoList.map(taskView).filter(Boolean),ids=new Set();
-    if(tasks.length>20)throw Error('任务数量异常，本次停止');
+    if(tasks.length>50)throw Error('浏览任务共 '+tasks.length+' 项，超过 50 项上限，本次停止');
     for(const t of tasks){if(ids.has(t.id))throw Error('任务列表出现重复项');ids.add(t.id);}
     return tasks;
   }
@@ -562,7 +562,7 @@ function jxTaskSharedProfile(shared) {
     snapshot=rawRead(ACCOUNT);let shared;
     try{shared=JSON.parse(snapshot||'null');}catch(_){throw Error('家电家居共享凭据无法读取，请重新进入家电家居自营首页获取');}
     const profile=jxTaskSharedProfile(actJxProfile((k,f)=>{const s=rawRead(k);watched[k]=s;return s?JSON.parse(s):f;},createJxTaskCrypto({read,write,setTimeout,clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{}}).decodeEnvironment));
-    console.log('[家电家居任务] 版本 20261030-2；使用同账号共享资料');
+    console.log('[家电家居任务] 版本 20261109-1；使用同账号共享资料');
     const host={now:()=>Date.now(),day:()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10),read,write,setTimeout,
       clearTimeout:typeof clearTimeout==='function'?clearTimeout:()=>{},
       progress:(index,total,title)=>update('开始处理',{index,total,title}),
