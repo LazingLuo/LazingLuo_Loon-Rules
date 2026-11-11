@@ -28,3 +28,13 @@ DOMAIN,zlsdk.1rtb.net,REJECT
 # 快手广告
 DOMAIN,open.e.kuaishou.com,REJECT
 DOMAIN,open.e.kuaishou.cn,REJECT
+
+# 汇量 Mintegral
+DOMAIN-SUFFIX,mintegral.com,REJECT
+DOMAIN,hb.rayjump.com,REJECT
+DOMAIN,cdn-adn.rayjump.com,REJECT
+
+# Sigmob
+DOMAIN-SUFFIX,sigmob.com,REJECT
+DOMAIN,adservice.sigmob.cn,REJECT
+DOMAIN,dc.sigmob.cn,REJECT
