@@ -99,7 +99,7 @@ for(const key of ['baiduLite','taobaoLite','diantao']){
 }
 check(!bridge('tasks', {'X-Lazing-Export-Key': key}).xianyu, 'old Shortcut receives no extra task links or inflated count');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'unknown'}).count === 7, 'unknown client preserves legacy plan');
-check(mtPlan(full.record, now).summary.includes('/16'), 'observer summary uses current task denominator');
+check(mtPlan(full.record, now).summary.includes('/17'), 'observer summary uses current task denominator');
 check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), 'https://h5.m.goofish.com/other?taskCode=FAKE'), 'Xianyu route constrained to observed task landing path');
 check(bridge('tasks', {origin: 'https://example.invalid', 'X-Lazing-Export-Key': key}).code === 'BROWSER_DENIED', 'browser read refused');
 check(bridge('tasks', {'X-Lazing-Export-Key': key, 'x-lazing-export-key': key}).code === 'PAIRING_FAILED', 'duplicate auth header refused');
@@ -248,16 +248,25 @@ function newEvent(key, iosDeeplink, iosUlink) {
     task_code: 'FAKE_CODE', task_url: {iosDeeplink, iosUlink},
   }}};
 }
+const poolLink = links.xianyu.replace('meituanCoin', 'meituanPool').replace('1723', '1961');
 const latestRecord = capture([
   ...Object.entries(extraLinks).map(([key, url]) => newEvent(key, url)),
   newEvent('xianyu', xianyuNative, links.xianyu),
+  newEvent('xianyuPool', xianyuNative, poolLink),
 ], full.record);
 const v4Plan = JSON.parse(mtBridge({url: MT_BASE + 'tasks', method: 'GET', headers: {
   'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v4',
 }}, key + '|' + proof, latestRecord, now).response.body);
 check(v4Plan.count === 16 && Object.entries(extraLinks).every(([key, url]) => v4Plan[key] === url), 'v0.5 receives all sixteen supported links');
-check(v4Plan.xianyu === xianyuNative, 'Xianyu App route preserves source ticket and wins over web');
-check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), xianyuNative.replace('fish_coin_game', 'other')), 'unexpected Xianyu destination rejected');
+check(v4Plan.xianyu === links.xianyu && !v4Plan.xianyuPool, 'v4 retains only the coin web entry');
+const v5Plan = JSON.parse(mtBridge({url: MT_BASE + 'tasks', method: 'GET', headers: {
+  'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v5',
+}}, key + '|' + proof, latestRecord, now).response.body);
+check(v5Plan.count === 17 && v5Plan.xianyu === links.xianyu && v5Plan.xianyuPool === poolLink,
+  'v5 stores each Xianyu web link independently');
+check(!mtPlan(capture([newEvent('xianyu', xianyuNative), newEvent('xianyuPool', xianyuNative, links.xianyu)]), now).xianyuPool,
+  'pool branch rejects a coin URL');
+check(!mtValidLink(MT_TASKS.find(t => t.key === 'xianyu'), xianyuNative), 'native Xianyu URLs are not exported');
 const v3Plan = JSON.parse(mtBridge({url: MT_BASE + 'tasks', method: 'GET', headers: {
   'X-Lazing-Export-Key': key, 'X-Lazing-Jump-Plan': 'extended-v3',
 }}, key + '|' + proof, latestRecord, now).response.body);
@@ -284,19 +293,24 @@ for (const file of process.argv.slice(2)) {
   const current = Math.max(...entries.map(x => Date.parse(x.startedDateTime)));
   const plan = mtPlan(record, current);
   const original = path.basename(file).startsWith('450_') ? ['mtPig', 'mtOrchard', 'xianyu', 'alipayMember', 'alipayGold'] : path.basename(file).startsWith('442_') ? ['xianyu', 'alipayMember', 'alipayGold', 'mtContent'] : ['antManor', 'antForest', 'taobaoFarm', 'alipayFarm', 'etao', 'cmcc', 'weibo', 'mtContent', 'mtOrchard'];
-  const expected = path.basename(file).startsWith('505_') ? MT_EXTENDED_TASKS.map(task => task.key) : path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
+  const expected = path.basename(file).startsWith('524_') ? MT_EXTENDED_TASKS.map(task => task.key) :
+    path.basename(file).startsWith('505_') ? MT_EXTENDED_TASKS.filter(task => task.key !== 'xianyuPool').map(task => task.key) : path.basename(file).startsWith('504_') ? ['baiduLite','taobaoLite','diantao','xianyu'] :
     /^(491|496)_/.test(path.basename(file)) ? ['baiduLite','taobaoLite','diantao'] : original.filter(k=>!['mtContent','mtPig','mtOrchard'].includes(k));
   check(plan.count === expected.length, path.basename(file) + ': selected iOS links recovered');
   check(Object.keys({...record.tasks, ...record.jumpTasks}).sort().join(',') === expected.slice().sort().join(','), path.basename(file) + ': only expected tasks saved');
   check(expected.every(k => mtValidLink(MT_EXTENDED_TASKS.find(t => t.key === k), plan[k])), path.basename(file) + ': every destination validated');
+  if (path.basename(file).startsWith('524_')) {
+    check(['xianyu', 'xianyuPool'].every(k => record.tasks[k]?.source === 'list' &&
+      plan[k].startsWith('https://h5.m.goofish.com/')), '524 has both Xianyu web links in list events');
+  }
   if(path.basename(file).startsWith('505_')) {
     check(plan.count === 16 && !plan.fallbackSummary, '505 supplies all sixteen from list events');
     check(expected.every(k => record.tasks[k]?.source === 'list'), '505 needs no manual click');
     check(invalidFree(entries), '505 list passes destination and ticket validation');
     check(plan.diantao.startsWith('taobaoliveshare://') && plan.baiduLite.startsWith('baiduboxlite://') &&
-      plan.taobaoLite.startsWith('taobaolite://') && plan.xianyu.startsWith('fleamarket://') &&
+      plan.taobaoLite.startsWith('taobaolite://') && plan.xianyu.startsWith('https://h5.m.goofish.com/') &&
       plan.toutiao.startsWith('snssdk141://') && plan.toutiaoLite.startsWith('snssdk35://'),
-    '505 exports six captured App schemes');
+    '505 exports five App schemes and the Xianyu web link');
     check(plan.etao.startsWith('https://market.m.taobao.com/') && plan.qutoutiao.startsWith('https://h5ssl.1sapp.com/'),
       '505 retains both observed HTTPS entries');
   }

@@ -1,11 +1,16 @@
 // Observe task links already sent by the Meituan App. No business API replay.
 'use strict';
-const MT_VERSION = '0.5.0';
+const MT_VERSION = '0.5.5';
 const MT_KEY = 'LAZING_MT_JUMP_TASKS_V1';
 const MT_BASE = 'http://example.com/loon-meituan-jump/v1/';
 const MT_TTL = 24 * 60 * 60 * 1000;
-const MT_CLICK_FALLBACK = new Set(['xianyu', 'baiduLite', 'taobaoLite', 'diantao', 'qutoutiao', 'toutiao', 'toutiaoLite']);
+const MT_CLICK_FALLBACK = new Set(['xianyu', 'xianyuPool', 'baiduLite', 'taobaoLite', 'diantao', 'qutoutiao', 'toutiao', 'toutiaoLite']);
 const mtDay = time => Math.floor((time + 8 * 60 * 60 * 1000) / MT_TTL);
+const MT_XIANYU_WEB = /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/;
+const MT_XIANYU_POOL = {
+  key: 'xianyuPool', name: '闲鱼鱼塘', prefix: '浏览闲鱼鱼塘',
+  route: MT_XIANYU_WEB, channel: 'meituanPool', playId: '1961',
+};
 const MT_TASKS = [
   {key: 'antManor', name: '蚂蚁庄园', prefix: '浏览蚂蚁庄园', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'antForest', name: '蚂蚁森林', prefix: '浏览蚂蚁森林', route: /^alipays:\/\/platformapi\/startapp\?/},
@@ -15,9 +20,8 @@ const MT_TASKS = [
   {key: 'cmcc', name: '中国移动', prefix: '浏览中国移动', route: /^cn\.10086\.app:\/\/url=https(?:%3[aA]%2[fF]%2[fF]|:\/\/)wx\.10086\.cn(?:%2[fF]|\/)/},
   {key: 'weibo', name: '微博', prefix: '浏览微博', route: /^sinaweibo:\/\/changegroup\?/},
   {
-    key: 'xianyu', name: '闲鱼', prefix: '浏览闲鱼',
-    route: /^https:\/\/h5\.m\.goofish\.com\/wow\/moyu\/moyu-project\/coin\/pages\/coinCallApp\?/,
-    native: {route: /^fleamarket:\/\/2\.taobao\.com\/onepiece\?/},
+    key: 'xianyu', name: '闲鱼币', prefix: '浏览闲鱼',
+    route: MT_XIANYU_WEB, channel: 'meituanCoin', playId: '1723',
   },
   {key: 'alipayMember', name: '支付宝会员', prefix: '浏览支付宝会员', route: /^alipays:\/\/platformapi\/startapp\?/},
   {key: 'alipayGold', name: '支付宝金豆夺宝', prefix: '逛一逛支付宝金豆夺宝', route: /^alipays:\/\/platformapi\/startapp\?/},
@@ -59,6 +63,7 @@ const MT_TASKS = [
   },
 ];
 const MT_EXTENDED_TASKS = MT_TASKS.concat([
+  MT_XIANYU_POOL,
   {
     key: 'qutoutiao', name: '趣头条', prefix: '浏览趣头条', playId: '1751',
     route: /^https:\/\/h5ssl\.1sapp\.com\/activity_dest\/qtt_download\/download\.html\?/,
@@ -92,14 +97,6 @@ function mtObject(raw) {
 function mtLinkParams(url){
  try{const result={};for(const part of url.split('?')[1].split('#')[0].split('&')){if(!part)continue;const i=part.indexOf('='),k=decodeURIComponent((i<0?part:part.slice(0,i)).replace(/\+/g,' '));if(Object.prototype.hasOwnProperty.call(result,k))return null;result[k]=decodeURIComponent((i<0?'':part.slice(i+1)).replace(/\+/g,' '));}return result;}catch(_){return null;}
 }
-function mtXianyuTicket(value) {
-  if (typeof value !== 'string') return null;
-  try {
-    const raw = value.includes(':') ? value : decodeURIComponent(value);
-    const ticket = /^xianyu_growth_other\.[\w-]+\.taskCode:([^;]+);playId:(\d+);userToken:([^;]+);channel:(meituanCoin);callSource:[\w-]+$/.exec(raw);
-    return ticket && {taskCode: ticket[1], playId: ticket[2], userToken: ticket[3], channel: ticket[4]};
-  } catch (_) { return null; }
-}
 function mtTaskParams(task, url) {
   const params = mtLinkParams(url);
   if (!params) return null;
@@ -114,15 +111,6 @@ function mtTaskParams(task, url) {
     catch (_) { return null; }
   }
   if (!task.native?.route.test(url)) return params;
-  if (task.key === 'xianyu') {
-    const target = params.h5Url;
-    if (!/^fleamarket:\/\/home\?/.test(target || '')) return null;
-    const home = mtLinkParams(target);
-    if (!/^fleamarket:\/\/fish_coin_game\?/.test(home?.forward_url || '')) return null;
-    const source = mtXianyuTicket(params.bc_fl_src);
-    const flow = mtXianyuTicket(home.xy_flow_in);
-    return source && flow && source.taskCode === flow.taskCode && source.playId === flow.playId ? source : null;
-  }
   const target = params[task.native.field];
   if (typeof target !== 'string' || !task.native.page.test(target) ||
       /[\x00-\x20\x7f<>"`\\]/.test(target) || /%(?![a-fA-F0-9]{2})/.test(target)) return null;
@@ -132,19 +120,19 @@ function mtTaskParams(task, url) {
 }
 function mtNewLink(task, url) {
   const params = mtTaskParams(task, url);
+  if (task.channel) {
+    return !!params?.taskCode && !!params.userToken &&
+      params.playId === task.playId && params.channel === task.channel;
+  }
   return !!params && String(params.playId) === task.playId &&
     typeof params.taskCode === 'string' && params.taskCode.length > 0 &&
     typeof params.token === 'string' && params.token.length > 0;
 }
 
-function mtXianyuLink(task, url) {
-  const params = mtTaskParams(task, url);
-  return !!params?.taskCode && !!params.userToken && /^\d+$/.test(params.playId || '') && params.channel === 'meituanCoin';
-}
 function mtValidLink(task, url) {
   return typeof url === 'string' && url.length > 20 && url.length <= 16384 &&
     !/[\x00-\x20\x7f<>"`\\]/.test(url) && (task.route.test(url) || !!task.native?.route.test(url)) &&
-    !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url)) && (task.key !== 'xianyu' || mtXianyuLink(task, url));
+    !/%(?![a-fA-F0-9]{2})/.test(url) && (!task.playId || mtNewLink(task,url));
 }
 function mtObserve(body, old, now) {
   const result = {record: old, changed: [], parsed: 0, invalid: 0, accountChanged: false};
@@ -182,7 +170,8 @@ function mtObserve(body, old, now) {
       if (depth > 18 || !value || typeof value !== 'object') return;
       if (Array.isArray(value)) { value.forEach(x => walk(x, depth + 1, eventTime, sourceType)); return; }
       const title = typeof value.title === 'string' ? value.title : '';
-      const task = MT_EXTENDED_TASKS.find(x => title.startsWith(x.prefix));
+      const task = title.startsWith(MT_XIANYU_POOL.prefix) ? MT_XIANYU_POOL :
+        MT_EXTENDED_TASKS.find(x => title.startsWith(x.prefix));
       const detail = value.task_detail;
       if (task && detail && typeof detail === 'object' && !Array.isArray(detail)) {
         const source = detail.task_url;
@@ -285,7 +274,7 @@ function mtBridge(request, argument, record, now) {
     'Pragma': 'no-cache', 'X-Content-Type-Options': 'nosniff'
   }, body: JSON.stringify(Object.assign({schema: 'lazing-meituan-jump-plan-v1', version: MT_VERSION,
     connected: '', proof: '', code: '', message: '', count: 0, antManor: '', antForest: '',
-    taobaoFarm: '', alipayFarm: '', etao: '', cmcc: '', weibo: '', xianyu: '',
+    taobaoFarm: '', alipayFarm: '', etao: '', cmcc: '', weibo: '', xianyu: '', xianyuPool: '',
     alipayMember: '', alipayGold: '', baiduLite: '', taobaoLite: '', diantao: '', mtContent: '', mtPig: '', mtOrchard: '',
     qutoutiao: '', toutiao: '', toutiaoLite: ''}, value))}});
   if (!/^[a-f0-9]{64}$/.test(key || '') || !/^[a-f0-9]{64}$/.test(proof || '')) return reply({code: 'NOT_PAIRED', message: '请使用同一套插件和快捷指令'});
@@ -295,8 +284,9 @@ function mtBridge(request, argument, record, now) {
   if (mtHeader(request.headers, 'X-Lazing-Export-Key') !== key) return reply({code: 'PAIRING_FAILED', message: '插件与快捷指令未配对，请导入同一套文件'});
   // Count only the branches present in each Shortcut version.
   const client = mtHeader(request.headers, 'X-Lazing-Jump-Plan');
-  const tasks = client === 'extended-v4' ? MT_EXTENDED_TASKS :
-    client === 'extended-v3' ? MT_TASKS : ['extended-v1','extended-v2'].includes(client) ? MT_TASKS.filter(t=>!t.playId) : MT_TASKS.slice(0,7);
+  const tasks = client === 'extended-v5' ? MT_EXTENDED_TASKS :
+    client === 'extended-v4' ? MT_EXTENDED_TASKS.filter(t => t !== MT_XIANYU_POOL) :
+    client === 'extended-v3' ? MT_TASKS : ['extended-v1','extended-v2'].includes(client) ? MT_TASKS.filter(t => !t.playId || t.channel) : MT_TASKS.slice(0,7);
   const plan = mtPlan(record, now, tasks);
   return reply(Object.assign(plan, {code: plan.count ? 'READY' : 'NO_TASKS'}));
 }
