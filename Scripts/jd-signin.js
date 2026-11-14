@@ -2309,8 +2309,11 @@ function createExtraSignins(host,crypto){
   const ua=jsHeader(login.headers,'User-Agent');if(!ua)throw Error('缺少京东页面环境，请打开京东');
   return {...login,ua};
  }
- async function http(task,options){
-  check();jsTarget(task,options);const r=await host.request(task,options);
+ async function http(task,options,stage){
+  check();jsTarget(task,options);
+  if(stage)host.log('五金城：'+stage);
+  const r=await host.request(task,options);
+  if(stage)host.log('五金城：'+stage+'返回 HTTP '+(Number(r.status)||0));
   if(Number(r.status)!==200)throw Error('HTTP '+(Number(r.status)||0));
   let data;try{data=JSON.parse(r.body);}catch(_){throw Error('接口响应格式变化');}
   if(!data||typeof data!=='object'||Array.isArray(data))throw Error('接口响应格式变化');return data;
@@ -2385,18 +2388,18 @@ function createExtraSignins(host,crypto){
     }
     return {url:jbEndpoint(task,claim)+'?'+query,headers,body:jsEncode(p)};
    }
-   const query=async()=>{const o=await options(c.query);safe();const j=await http(task,o);safe();return jbState(task,j,date);};
+   const query=async(stage)=>{const o=await options(c.query);safe();const j=await http(task,o,task==='hardware'?stage:null);safe();return jbState(task,j,date);};
    const journalTask=c.craft?(task==='gearAI'?'gear':task)+':'+c.craft:task;
-   const before=await query(),old=prior(journalTask)||(!c.requireObservedClaim?prior(task):null),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:old&&Number.isFinite(old.creditQuantity)&&old.creditQuantity>=0&&old.creditQuantity<=100000?{creditQuantity:old.creditQuantity}:old&&beanNumber(old.healthCoins)!==null?{healthCoins:Number(old.healthCoins)}:{};
+   const before=await query('查询签到状态'),old=prior(journalTask)||(!c.requireObservedClaim?prior(task):null),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:old&&Number.isFinite(old.creditQuantity)&&old.creditQuantity>=0&&old.creditQuantity<=100000?{creditQuantity:old.creditQuantity}:old&&beanNumber(old.healthCoins)!==null?{healthCoins:Number(old.healthCoins)}:{};
    if(before.done===true){mark(journalTask,'confirmed',known);return {status:'already_done',...known};}
    if(before.done===null)return {status:old?'pending':'no_chance',detail:old?'今天已提交，去页面确认':'当前没有待签项目',...known};
    if(old)return {status:'pending',detail:'今天已提交，去页面确认',...known};
    const o=await options(c.claim,before);safe();mark(journalTask,'pending');
-   const j=await http(task,o);safe();jbData(task,j);
+   const j=await http(task,o,task==='hardware'?'提交签到':null);safe();jbData(task,j);
    if(task==='campus'&&j.code!=='21034'||jbServiceFamily(task)&&j.subCode!=='0')throw Error('签到领取结果未通过');
    const quantity=jbReward(task,j);mark(journalTask,'accepted',quantity);
    try{
-    const after=await query();let confirmed=after.done===true;
+    const after=await query('复查签到状态');let confirmed=after.done===true;
     if(task==='wallet'&&confirmed){const delta=Math.round((after.total-before.total)*1000000)/1000000;if(delta>=0&&delta<=100000)quantity.creditQuantity=delta;}
     if(confirmed){mark(journalTask,'confirmed',quantity);return {status:'signed_confirmed',...quantity};}
    }catch(_){}
