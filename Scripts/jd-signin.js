@@ -188,9 +188,9 @@ function jbServiceState(response, day, task = 'service') {
  if (signed && row.todayCheckInState === 1 && row.completionFlag === true && row.status === 2) return {done: true};
  const notCheckedIn = row.todayCheckInState === null || row.todayCheckInState === 0;
  if (!signed && notCheckedIn && row.completionFlag === false && row.status === 1) {
-  const nextDay = housekeeping ? row.continueSignDay + 1 : 1;
-  if (housekeeping && (!Number.isSafeInteger(row.continueSignDay) || !Number.isSafeInteger(row.signDays) ||
-      nextDay < 1 || nextDay > row.signDays || nextDay > 7)) throw Error('家政签到天数不明确');
+  if (housekeeping && (!Number.isSafeInteger(row.continueSignDay) || row.continueSignDay < 0 ||
+      !Number.isSafeInteger(row.signDays) || row.signDays < 1 || row.signDays > 7)) throw Error('家政签到天数不明确');
+  const nextDay = housekeeping ? row.continueSignDay % row.signDays + 1 : 1;
   return {done: false, id: row.encryptAssignmentId, itemId: row.itemId, pool, nextDay};
  }
  throw Error('服务签到状态不一致');
