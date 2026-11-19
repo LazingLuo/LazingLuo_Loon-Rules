@@ -1,10 +1,10 @@
 #!name = 京东小合并签到（独立测试）
-#!desc = 手动测试五金城、京东京造和大牌奥莱。五金城沿用正式版的本机凭据；打开京东京造和大牌奥莱对应签到页获取测试凭据。无定时任务。
+#!desc = 手动测试五金城、京东京造、大牌奥莱和新奇集市拆盲盒。五金城沿用正式版的本机凭据；其他三项各自在 App 里获取。无定时任务。
 #!loon_version = 3.5.1(983)
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api\?functionId=jxzy_active_(?:querySign|drawSign)|\?functionId=bean_deliverySign_(?:home|sign))(?:&|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-checkin-isolated-capture.js?v=20261118-1") with tag="京造与大牌奥莱测试凭据", requires_body=true, timeout=20
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-checkin-isolated.js?v=20261118-1") with tag="手动执行三项测试签到", timeout=240
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api\?functionId=jxzy_active_(?:querySign|drawSign)(?:&|$)|\?(?:[^#]*&)?functionId=(?:bean_deliverySign_(?:home|sign)|common_(?:task_list|do_task))(?:&|$))/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-checkin-isolated-capture.js?v=20261119-1") with tag="小合并签到测试凭据", requires_body=true, timeout=20
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-checkin-isolated.js?v=20261119-1") with tag="手动执行四项测试签到", timeout=300
 
 [Mitm]
 hostname = api.m.jd.com

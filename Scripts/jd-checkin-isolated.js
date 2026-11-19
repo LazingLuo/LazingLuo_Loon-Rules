@@ -127,6 +127,7 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ novelty:{key:'JD_TEST_NOVELTY_V1',label:'新奇集市（拆盲盒）',page:'https://pro.m.jd.com/mall/active/4Va8jNzzHPqgTUhxwiTn9PHyVZCB/index.html',appid:'Bigsale',endpoint:'',query:'common_task_list',claim:'common_do_task',apps:{common_task_list:'7f3ea',common_do_task:'7f3ea'},requireObservedClaim:true},
  jingzao:{key:'JD_TEST_JINGZAO_V1',label:'京东京造',page:'https://pro.m.jd.com/mall/active/WFJKWrVftPmGdDENfVqJU8BCB5c/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69b020d1ff1c5603295caf86',requireObservedClaim:true},
  outlet:{key:'JD_TEST_OUTLET_V1',label:'大牌奥莱',page:'https://pro.m.jd.com/mall/active/gFkdsmZNGWwvzFTRT76janC1ThJ/index.html',appid:'signed_wh5_ihub',endpoint:'',query:'bean_deliverySign_home',claim:'bean_deliverySign_sign',apps:{bean_deliverySign_home:'c1e85',bean_deliverySign_sign:'987dd'},requireObservedClaim:true},
  housekeeping:{key:'JD_HOUSEKEEPING_DAILY_ACCOUNT_V1',label:'家政签到',page:'https://pro.m.jd.com/mall/active/38E8Wr8zHfU4JZTMTfZ2At5pVKZt/index.html',appid:'JDHOME_TARO',endpoint:'',query:'checkInTaskList',claim:'checkInTaskDo',apps:{checkInTaskList:'35fa0',checkInTaskDo:'35fa0'}},
@@ -143,7 +144,7 @@ const JB_CONFIG={
 };
 const JD_CAMPAIGN_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const JD_CAMPAIGN_ID_EXT = /^[A-Za-z0-9_-]{1,256}$/;
-const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet'];
+const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet','novelty'];
 const jbServiceFamily = task => task === 'service' || task === 'housekeeping';
 
 function jbCampusBase(body) {
@@ -242,6 +243,9 @@ function jbScope(task,p,b){
  const c=jbConfig(task,b),f=p.functionId;if(!c||![c.query,c.claim].includes(f))return false;
  const claim=f===c.claim;
  if(p.appid!==(claim?(c.claimAppid||c.appid):c.appid))return false;
+ if(task==='novelty')return p.client==='apple'&&b.channelId==='8'&&(claim?
+  Object.keys(b).length===5&&b.itemId==='1'&&b.actionType===0&&JD_CAMPAIGN_ID_EXT.test(b.assignmentId||'')&&b.ext?.doReceiveRewards===null:
+  Object.keys(b).length===3&&b.ext?.queryReceiveTimes===1&&b.extMap?.sceneType===2);
  if(task==='outlet')return p.client==='ios'&&b.activityId==='5383'&&(claim?Object.keys(b).length===1:b.iHubType==='simple'&&Object.keys(b).length===2);
  if(task==='healthKit'){
   if(p.client!=='wh5'||b.channel!=='jdhapp')return false;
@@ -277,6 +281,11 @@ function jbScope(task,p,b){
  const x=jbInner(b);return b.appid===c.appid&&b.sign===11&&Number.isSafeInteger(b.t)&&x?.activity_id===c.activity&&x.template_id==='00043621'&&x.floor_id==='133505424'&&x.taskType===0&&typeof x.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(x.encryptAssignmentId)&&!Object.prototype.hasOwnProperty.call(x,'actionType')&&x.extParam?.sceneid==='babel_'+c.activity;
 }
 function jbData(task,j){
+ if(task==='novelty'){
+  if(j?.data?.bizCode===-106)throw Error('新奇集市接口繁忙（-106），本项停止');
+  if(j?.code!==0||j.data?.bizCode!==0||!j.data.result)throw Error('新奇集市签到接口未通过');
+  return j.data.result;
+ }
  if(task==='outlet'&&(j?.data?.bizCode!==0||!j.data.result))throw Error('大牌奥莱签到接口未通过');
  if(task==='furnishing'){
   if(j?.success!==true||j.code!==0||!j.data||j.data.degradeFlag===true)throw Error('家居馆签到接口未通过');
@@ -300,6 +309,16 @@ function jbData(task,j){
 }
 function jbState(task,j,day){
  const c=JB_CONFIG[task],d=jbData(task,j);
+ if(task==='novelty'){
+  const list=d.taskInfo?.taskList;
+  if(!Array.isArray(list)||list.length>100||d.taskInfo.requestStatusCode!==1)throw Error('新奇集市签到列表结构变化');
+  const rows=list.filter(row=>row?.assignmentType===5&&row.assignmentName==='每日签到');
+  const row=rows[0];
+  if(rows.length!==1||row.assignmentTimesLimit!==1||!JD_CAMPAIGN_ID_EXT.test(row.encryptAssignmentId||''))throw Error('新奇集市签到项目不明确');
+  if(row.completionFlag===true&&row.completionCnt===1)return {done:true};
+  if(row.completionFlag===false&&row.completionCnt===0&&row.timeStatus===1&&row.canParticipation===true)return {done:false,id:row.encryptAssignmentId};
+  throw Error('新奇集市签到状态不明确');
+ }
  if(task==='outlet'){
   const status=d.result?.signButton?.status;
   if(status===1||status===2)return {done:status===2};
@@ -333,6 +352,12 @@ function jbState(task,j,day){
  if(t.completionFlag===false&&t.completionCnt===0&&t.canParticipation===true&&!t.reachUpperLimit&&t.status===1)return {done:false,id:t.encryptAssignmentId};throw Error('签到状态不一致');
 }
 function jbReward(task,j){
+ if(task==='novelty'){
+  const result=jbData(task,j).assignmentResult;
+  const rows=result?.rewardsInfo?.successRewards?.['3'];
+  const quantity=rows?.[0]?.quantity;
+  return result?.assignmentInfo?.completionCnt===1&&rows?.length===1&&Number.isSafeInteger(quantity)&&quantity>0&&rows[0].rewardName===quantity+'个京豆'?{beanQuantity:quantity}:{};
+ }
  if(task==='outlet'){
   const r=jbData(task,j).result,n=Number(r.value);
   return r.rewardSuccess===true&&Number.isSafeInteger(n)&&n>0&&n<=100000?{beanQuantity:n}:{};
@@ -2360,7 +2385,8 @@ function createExtraSignins(host,crypto){
     if(task!=='hardware'||!claim)headers['Content-Type']='application/x-www-form-urlencoded';
     const p={...t.params,functionId:f},now=Date.now();let b;
     if(claim&&c.claimAppid)p.appid=c.claimAppid;
-    if(task==='outlet')b={...t.body};
+    if(task==='novelty')b=claim?{...t.body,assignmentId:action.id}:{...t.body};
+    else if(task==='outlet')b={...t.body};
     else if(task==='furnishing'){
      b=claim?{encryptAssignId:action.id,encryptAssignmentId:action.id,assignId:action.id,type:13,itemId:action.itemId,activityId:'4',isDistinguishReceivedNewUserAward:false}:{...t.body};
     }else if(jbServiceFamily(task)){
@@ -2383,20 +2409,22 @@ function createExtraSignins(host,crypto){
     else b={appid:c.appid,body:JSON.stringify({encryptAssignmentId:action.id,taskType:0,...t.body}),sign:11,t:now};
     p.body=JSON.stringify(b);
     if(task==='gameDaily'||c.craft||task==='furnishing'||task==='hardware'&&!claim){p.t=String(now);if(task==='hardware')p.sign='11';}
+    if(task==='novelty')p.t=String(now);
     if(c.apps[f]){
      if(!env)throw Error('缺少签名环境，请在对应页面签到一次');
      const appId=task==='hardware'&&claim&&signing.appId==='b4c9d'?signing.appId:c.apps[f];
      const input={};for(const k of ['functionId','appid','client','body','clientVersion','sign','t','jsonp'])if(p[k])input[k]=k==='body'?crypto.hash(p.body):p[k];
      p.h5st=await crypto.signOnline(appId,{pin,headers},env,input);safe();
      const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!==appId||sig[5]!=='5.3')throw Error('签到签名字段变化');
-     const eidToken=(task==='outlet'?signing:profile.signing).eidToken;
+     const eidToken=(['outlet','novelty'].includes(task)?signing:profile.signing).eidToken;
      if(eidToken)p['x-api-eid-token']=eidToken;
     }
     if(!jbScope(task,p,b))throw Error('签到参数结构变化');
     if(task==='hardware'&&claim)return {method:'get',url:'https://api.m.jd.com/api?'+jsEncode(p),headers};
     let query='functionId='+f;
-    if(task==='furnishing'){
+    if(task==='furnishing'||task==='novelty'){
      const publicQuery={...p};
+     if(task==='novelty')delete publicQuery.body;
      delete publicQuery.h5st;
      delete publicQuery['x-api-eid-token'];
      query=jsEncode(publicQuery);
@@ -2455,6 +2483,7 @@ function createExtraSignins(host,crypto){
 }
 function jsError(e){
  const s=String(e?.message||'');const http=/HTTP (\d{1,3})/.exec(s);if(http)return 'HTTP '+http[1];
+ if(s==='新奇集市接口繁忙（-106），本项停止')return s;
  if(s==='缺少本入口签到提交凭据，请在对应入口手动签到一次')return s;
  if(/缺少/.test(s))return /设备|签名环境/.test(s)?'缺少签名环境或设备凭据，请打开对应签到页':/金融/.test(s)?'缺少金融凭据，请打开金融签到页':'缺少凭据，请打开对应签到页';
  if(/今天已有|今天已提交/.test(s))return '今天已提交，去页面确认';
@@ -2617,7 +2646,7 @@ function createSignins(host,legacy,crypto){
     host.log('自动签到：等待结束，开始执行');
    }
 
-   const testTasks=['hardware','jingzao','outlet'].map(task=>[task,JB_CONFIG[task].label]);
+   const testTasks=['hardware','jingzao','outlet','novelty'].map(task=>[task,JB_CONFIG[task].label]);
    for(let i=0;i<testTasks.length;i++){
     guard();const [task,name]=testTasks[i];host.log('独立测试：'+name);
     const row=await runTask(task,name);
