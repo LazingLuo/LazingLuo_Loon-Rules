@@ -5,6 +5,7 @@
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^&#]*&)*functionId=start(?:&|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261107-2") with tag="京东开屏配置处理", requires_body=true, timeout=20
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^&#]*&)*functionId=(?:basicConfig|welcomeHome)(?:&|$)/ && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-splash-degrade.js?v=20261121-1") with tag="京东开屏开关实验", requires_body=true, timeout=10
 
 [Rewrite]
 # 仅匹配URL中的尺寸路径并直接拒绝；不读取图片正文，所有扩展名均适用。
