@@ -51,7 +51,24 @@ run({status:'HTTP/1.1 200 OK'});run({noRequest:true});r=run({noteError:true});as
 // Synthetic fixture shaped like a known response. Contains no HAR or account material.
 const fixture = {api:'mtop.taobao.idlecommerce.splash.ads',v:'2.0',ret:['SUCCESS::调用成功'],data:{adMap:{},dspList:[],hotStartInterval:'120',config:{shake:{count:'3',durationIos:'1200'},skip:{padding:null}},spaceIdMap:{ylh:{cacheSpaceId:null,showSpaceId:'SYNTHETIC_SLOT'}}}};
 r=run({obj:fixture});assert.equal(r.data.hotStartInterval,'315360000');
-assert.deepEqual(r.data.config,fixture.data.config);assert.deepEqual(r.data.spaceIdMap,fixture.data.spaceIdMap);
+assert.deepEqual(r.data.config,fixture.data.config);assert.deepEqual(r.data.spaceIdMap,{});
 const r2=run({obj:JSON.parse(r.result.body)});assert.equal(Object.keys(r2.result).length,0);
+for (const host of ['acs.m.goofish.com','acs.wapa.goofish.com','acs.m.taobao.com']) {
+  for (const [api, version] of [['ads','2.0'],['async.ads','1.0']]) {
+    const data={cacheAdInfo:{cacheKey:'sample'},spaceIdMap:{ylh:{showSpaceId:'a'},adPlus:{cacheSpaceId:'b'},other:{keep:true}}};
+    const path=`/gw/mtop.taobao.idlecommerce.splash.${api}/${version}`;
+    r=run({async:api==='async.ads',url:`https://${host}${path}`,obj:{data}});
+    assert.equal(r.data.cacheAdInfo,null);
+    assert.deepEqual(r.data.spaceIdMap,{other:{keep:true}});
+    assert.ok(r.notes[0][2].includes('缓存广告配置'));
+    assert.ok(r.notes[0][2].includes('第三方开屏广告位'));
+  }
+}
+for (const data of [{cacheAdInfo:[]},{spaceIdMap:'unknown'}]) assert.equal(run({obj:{data}}).data,null);
+const plugin=fs.readFileSync(__dirname+'/../Plugins/xianyu_open.plugin','utf8');
+const guard=new RegExp(plugin.match(/^http-response (\S+)/m)[1]);
+assert(guard.test('https://acs.m.taobao.com/gw/mtop.taobao.idlecommerce.splash.ads/2.0'));
+assert(!guard.test('https://acs.m.taobao.com/gw/mtop.taobao.idlecommerce.splash.config/1.0'));
+assert(!guard.test('https://acs.m.taobao.com/gw/mtop.taobao.idlecommerce.game.iaa.ads/1.0'));
 assert(!/\$httpClient|\$task\.fetch|fetch\(/.test(source));
 console.log(`${count} offline cases passed; no live requests or account operations.`);

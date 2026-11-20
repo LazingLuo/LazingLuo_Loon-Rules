@@ -1,12 +1,12 @@
-// 闲鱼 7.28.70 开屏验证版。只处理两个已核对的开屏接口。
-// 2026-10-25.1。关闭插件停止后续改写；已写入 App 的配置由后续原始响应更新。
+// 闲鱼 7.29.11 开屏净化。只处理已识别的开屏主响应和异步响应。
+// 2026-11-20.1。关闭插件停止后续改写；已写入 App 的配置由后续原始响应更新。
 (function () {
   var result = {}, messages = [];
   var hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
   var isObject = function (v) { return v !== null && typeof v === "object" && !Array.isArray(v); };
   try {
     if (typeof $request === "undefined" || typeof $response === "undefined") return $done({});
-    var route = /^https:\/\/acs\.m\.goofish\.com\/gw\/(mtop\.taobao\.idlecommerce\.splash\.(?:async\.)?ads)\/(2\.0|1\.0)\/?(?:\?|$)/i.exec($request.url || "");
+    var route = /^https:\/\/acs\.(?:m\.goofish|wapa\.goofish|m\.taobao)\.com\/gw\/(mtop\.taobao\.idlecommerce\.splash\.(?:async\.)?ads)\/(2\.0|1\.0)\/?(?:\?|$)/i.exec($request.url || "");
     if (!route) return $done({});
     var api = route[1].toLowerCase(), main = api === "mtop.taobao.idlecommerce.splash.ads";
     if (route[2] !== (main ? "2.0" : "1.0")) return $done({});
@@ -22,9 +22,12 @@
     // 陌生结构不猜字段；已知容器类型错误时整条放行。
     if ((hasOwn(data, "adMap") && !isObject(data.adMap)) ||
         (hasOwn(data, "dspList") && !Array.isArray(data.dspList)) ||
+        (hasOwn(data, "cacheAdInfo") && data.cacheAdInfo !== null && !isObject(data.cacheAdInfo)) ||
+        (hasOwn(data, "spaceIdMap") && data.spaceIdMap !== null && !isObject(data.spaceIdMap)) ||
         (hasOwn(data, "realTimeAd") && data.realTimeAd !== null && !isObject(data.realTimeAd))) return $done({});
     if (!hasOwn(data, "adMap") && !hasOwn(data, "dspList") &&
-        !hasOwn(data, "realTimeAd") && !hasOwn(data, "hotStartInterval")) return $done({});
+        !hasOwn(data, "realTimeAd") && !hasOwn(data, "hotStartInterval") &&
+        !hasOwn(data, "cacheAdInfo") && !hasOwn(data, "spaceIdMap")) return $done({});
 
     if (isObject(data.adMap) && Object.keys(data.adMap).length) {
       data.adMap = {};
@@ -38,6 +41,20 @@
     if (Array.isArray(data.dspList) && data.dspList.length) {
       data.dspList = [];
       messages.push("已清空广告来源");
+    }
+    if (isObject(data.cacheAdInfo)) {
+      data.cacheAdInfo = null;
+      messages.push("已移除缓存广告配置");
+    }
+    if (isObject(data.spaceIdMap)) {
+      var clearedSlots = false;
+      ["ylh", "adPlus"].forEach(function (key) {
+        if (isObject(data.spaceIdMap[key])) {
+          delete data.spaceIdMap[key];
+          clearedSlots = true;
+        }
+      });
+      if (clearedSlots) messages.push("已清除第三方开屏广告位");
     }
     if (main) {
       // 主响应的列表用于替换客户端配置。缺省列表会保留默认值/旧值，因此补成空列表。

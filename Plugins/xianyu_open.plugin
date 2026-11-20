@@ -1,10 +1,10 @@
 #!name = 闲鱼开屏净化（测试版）
-#!desc = 清理广告列表及实时广告，延长普通热启动间隔；通知列出实际改动。尚待实机验证。
-#!date = 2026-10-25
+#!desc = 精确处理闲鱼开屏主接口和异步接口，清理实时、缓存广告及第三方开屏广告位，延长热启动间隔。
+#!date = 2026-11-20
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/xianyu.png
 
 [Script]
-http-response ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js?v=20261025-1,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
+http-response ^https:\/\/acs\.(m\.goofish|wapa\.goofish|m\.taobao)\.com\/gw\/mtop\.taobao\.idlecommerce\.splash\.(ads\/2\.0|async\.ads\/1\.0)\/?(\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/idle-splash.js?v=20261120-1,requires-body=true,timeout=10,tag=闲鱼开屏净化,enable=true
 
 [MITM]
-hostname = acs.m.goofish.com
+hostname = acs.m.goofish.com, acs.wapa.goofish.com, acs.m.taobao.com
