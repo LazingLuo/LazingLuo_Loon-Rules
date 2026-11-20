@@ -2,7 +2,7 @@
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
 const JS_VERSION='2026-11-08.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['gearAI','AI装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到'],['used','特价二手签到'],['furnishing','家居馆'],['service','京东服务签到'],['campus','京东校园签到'],['housekeeping','家政签到'],['healthKit','互医签到']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['gearAI','AI装备馆签到'],['wallet','赚话费签到'],['hardware','五金城签到'],['used','特价二手签到'],['furnishing','家居馆'],['service','京东服务签到'],['campus','京东校园签到'],['housekeeping','家政签到'],['healthKit','互医签到'],['jingzao','京东京造'],['outlet','大牌奥莱'],['novelty','新奇集市（拆盲盒）']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
 const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
 const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
@@ -127,6 +127,9 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ novelty:{key:'JD_TEST_NOVELTY_V1',label:'新奇集市（拆盲盒）',page:'https://pro.m.jd.com/mall/active/4Va8jNzzHPqgTUhxwiTn9PHyVZCB/index.html',appid:'Bigsale',endpoint:'',query:'common_task_list',claim:'common_do_task',apps:{common_task_list:'7f3ea',common_do_task:'7f3ea'},requireObservedClaim:true},
+ jingzao:{key:'JD_TEST_JINGZAO_V1',label:'京东京造',page:'https://pro.m.jd.com/mall/active/WFJKWrVftPmGdDENfVqJU8BCB5c/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69b020d1ff1c5603295caf86',requireObservedClaim:true},
+ outlet:{key:'JD_TEST_OUTLET_V1',label:'大牌奥莱',page:'https://pro.m.jd.com/mall/active/gFkdsmZNGWwvzFTRT76janC1ThJ/index.html',appid:'signed_wh5_ihub',endpoint:'',query:'bean_deliverySign_home',claim:'bean_deliverySign_sign',apps:{bean_deliverySign_home:'c1e85',bean_deliverySign_sign:'987dd'},requireObservedClaim:true},
  housekeeping:{key:'JD_HOUSEKEEPING_DAILY_ACCOUNT_V1',label:'家政签到',page:'https://pro.m.jd.com/mall/active/38E8Wr8zHfU4JZTMTfZ2At5pVKZt/index.html',appid:'JDHOME_TARO',endpoint:'',query:'checkInTaskList',claim:'checkInTaskDo',apps:{checkInTaskList:'35fa0',checkInTaskDo:'35fa0'}},
  healthKit:{key:'JD_HEALTH_KIT_SIGNIN_ACCOUNT_V1',label:'互医签到',page:'https://laputa.jd.com/',appid:'jdh-middle',claimAppid:'laputa',query:'jdh_bm_getKitTask',claim:'jdh_msoa_doTaskGw',apps:{jdh_bm_getKitTask:'f0e57',jdh_msoa_doTaskGw:'f0e57'}},
  gearAI:{key:'JD_GEAR_AI_DAILY_ACCOUNT_V1',label:'AI装备馆签到',page:'https://pro.m.jd.com/mall/active/3skw64E2o8zoGcqm41gsewXHgdvR/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a66f5511177f59203da3347',requireObservedClaim:true},
@@ -141,7 +144,7 @@ const JB_CONFIG={
 };
 const JD_CAMPAIGN_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const JD_CAMPAIGN_ID_EXT = /^[A-Za-z0-9_-]{1,256}$/;
-const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit'];
+const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet','novelty'];
 const jbServiceFamily = task => task === 'service' || task === 'housekeeping';
 
 function jbCampusBase(body) {
@@ -240,6 +243,10 @@ function jbScope(task,p,b){
  const c=jbConfig(task,b),f=p.functionId;if(!c||![c.query,c.claim].includes(f))return false;
  const claim=f===c.claim;
  if(p.appid!==(claim?(c.claimAppid||c.appid):c.appid))return false;
+ if(task==='novelty')return p.client==='apple'&&b.channelId==='8'&&(claim?
+  Object.keys(b).length===5&&b.itemId==='1'&&b.actionType===0&&JD_CAMPAIGN_ID_EXT.test(b.assignmentId||'')&&b.ext?.doReceiveRewards===null:
+  Object.keys(b).length===3&&b.ext?.queryReceiveTimes===1&&b.extMap?.sceneType===2);
+ if(task==='outlet')return p.client==='ios'&&b.activityId==='5383'&&(claim?Object.keys(b).length===1:b.iHubType==='simple'&&Object.keys(b).length===2);
  if(task==='healthKit'){
   if(p.client!=='wh5'||b.channel!=='jdhapp')return false;
   return claim?b.appKey==='250141600001'&&b.infoId==='kits'&&b.platform===3&&JD_CAMPAIGN_ID_EXT.test(b.encodeId||''):
@@ -274,6 +281,12 @@ function jbScope(task,p,b){
  const x=jbInner(b);return b.appid===c.appid&&b.sign===11&&Number.isSafeInteger(b.t)&&x?.activity_id===c.activity&&x.template_id==='00043621'&&x.floor_id==='133505424'&&x.taskType===0&&typeof x.encryptAssignmentId==='string'&&/^[-_A-Za-z0-9]{1,256}$/.test(x.encryptAssignmentId)&&!Object.prototype.hasOwnProperty.call(x,'actionType')&&x.extParam?.sceneid==='babel_'+c.activity;
 }
 function jbData(task,j){
+ if(task==='novelty'){
+  if(j?.data?.bizCode===-106)throw Error('新奇集市接口繁忙（-106），本项停止');
+  if(j?.code!==0||j.data?.bizCode!==0||!j.data.result)throw Error('新奇集市签到接口未通过');
+  return j.data.result;
+ }
+ if(task==='outlet'&&(j?.data?.bizCode!==0||!j.data.result))throw Error('大牌奥莱签到接口未通过');
  if(task==='furnishing'){
   if(j?.success!==true||j.code!==0||!j.data||j.data.degradeFlag===true)throw Error('家居馆签到接口未通过');
   return j.data;
@@ -296,6 +309,21 @@ function jbData(task,j){
 }
 function jbState(task,j,day){
  const c=JB_CONFIG[task],d=jbData(task,j);
+ if(task==='novelty'){
+  const list=d.taskInfo?.taskList;
+  if(!Array.isArray(list)||list.length>100||d.taskInfo.requestStatusCode!==1)throw Error('新奇集市签到列表结构变化');
+  const rows=list.filter(row=>row?.assignmentType===5&&row.assignmentName==='每日签到');
+  const row=rows[0];
+  if(rows.length!==1||row.assignmentTimesLimit!==1||!JD_CAMPAIGN_ID_EXT.test(row.encryptAssignmentId||''))throw Error('新奇集市签到项目不明确');
+  if(row.completionFlag===true&&row.completionCnt===1)return {done:true};
+  if(row.completionFlag===false&&row.completionCnt===0&&row.timeStatus===1&&row.canParticipation===true)return {done:false,id:row.encryptAssignmentId};
+  throw Error('新奇集市签到状态不明确');
+ }
+ if(task==='outlet'){
+  const status=d.result?.signButton?.status;
+  if(status===1||status===2)return {done:status===2};
+  throw Error('大牌奥莱签到状态不明确');
+ }
  if(task==='furnishing')return jbFurnishingState(j,day);
  if(jbServiceFamily(task))return jbServiceState(d,day,task);
  if(task==='healthKit')return jbHealthKitState(d,day);
@@ -324,6 +352,16 @@ function jbState(task,j,day){
  if(t.completionFlag===false&&t.completionCnt===0&&t.canParticipation===true&&!t.reachUpperLimit&&t.status===1)return {done:false,id:t.encryptAssignmentId};throw Error('签到状态不一致');
 }
 function jbReward(task,j){
+ if(task==='novelty'){
+  const result=jbData(task,j).assignmentResult;
+  const rows=result?.rewardsInfo?.successRewards?.['3'];
+  const quantity=rows?.[0]?.quantity;
+  return result?.assignmentInfo?.completionCnt===1&&rows?.length===1&&Number.isSafeInteger(quantity)&&quantity>0&&rows[0].rewardName===quantity+'个京豆'?{beanQuantity:quantity}:{};
+ }
+ if(task==='outlet'){
+  const r=jbData(task,j).result,n=Number(r.value);
+  return r.rewardSuccess===true&&Number.isSafeInteger(n)&&n>0&&n<=100000?{beanQuantity:n}:{};
+ }
  const c=JB_CONFIG[task],d=jbData(task,j),num=v=>{if(typeof v==='string'&&!/^\d+(?:\.\d+)?$/.test(v))return null;const n=Number(v);return (typeof v==='number'||typeof v==='string')&&Number.isFinite(n)&&n>=0&&n<=100000?n:null;};
  if(task==='healthKit'){
   const r=d.result;
@@ -2311,9 +2349,27 @@ function createExtraSignins(host,crypto){
  }
  async function http(task,options,stage){
   check();jsTarget(task,options);
-  if(stage)host.log('五金城：'+stage);
+  const label=task==='hardware'?'五金城':JB_CONFIG[task]?.label||'看病买药';
+  if(stage)host.log(label+'：'+stage);
   const r=await host.request(task,options);
-  if(stage)host.log('五金城：'+stage+'返回 HTTP '+(Number(r.status)||0));
+  if(stage)host.log(label+'：'+stage+'返回 HTTP '+(Number(r.status)||0));
+  if(task==='hardware'&&Number(r.status)!==200){
+   const type=String(jsHeader(r.headers,'Content-Type')).split(';')[0].trim();
+   const retry=String(jsHeader(r.headers,'Retry-After')).trim();
+   const body=typeof r.body==='string'?r.body:'';
+   const parts=[body.length?'正文 '+body.length+' 字符':'正文为空'];
+   if(/^[a-z0-9.+-]{1,32}\/[a-z0-9.+-]{1,64}$/i.test(type))parts.push('类型 '+type);
+   if(/^\d{1,6}$/.test(retry))parts.push('服务端等待 '+retry+' 秒');
+   if(body.length&&body.length<=16384){
+    try{
+     const info=JSON.parse(body);
+     for(const [key,value] of Object.entries({code:info?.code,resultCode:info?.resultCode,subCode:info?.data?.subCode??info?.subCode})){
+      if(/^-?\d{1,8}$/.test(String(value)))parts.push(key+'='+value);
+     }
+    }catch(_){}
+   }
+   host.log('五金城：'+stage+'诊断：'+parts.join('；'));
+  }
   if(Number(r.status)!==200)throw Error('HTTP '+(Number(r.status)||0));
   let data;try{data=JSON.parse(r.body);}catch(_){throw Error('接口响应格式变化');}
   if(!data||typeof data!=='object'||Array.isArray(data))throw Error('接口响应格式变化');return data;
@@ -2347,7 +2403,9 @@ function createExtraSignins(host,crypto){
     if(task!=='hardware'||!claim)headers['Content-Type']='application/x-www-form-urlencoded';
     const p={...t.params,functionId:f},now=Date.now();let b;
     if(claim&&c.claimAppid)p.appid=c.claimAppid;
-    if(task==='furnishing'){
+    if(task==='novelty')b=claim?{...t.body,assignmentId:action.id}:{...t.body};
+    else if(task==='outlet')b={...t.body};
+    else if(task==='furnishing'){
      b=claim?{encryptAssignId:action.id,encryptAssignmentId:action.id,assignId:action.id,type:13,itemId:action.itemId,activityId:'4',isDistinguishReceivedNewUserAward:false}:{...t.body};
     }else if(jbServiceFamily(task)){
      b={...t.body};
@@ -2369,33 +2427,36 @@ function createExtraSignins(host,crypto){
     else b={appid:c.appid,body:JSON.stringify({encryptAssignmentId:action.id,taskType:0,...t.body}),sign:11,t:now};
     p.body=JSON.stringify(b);
     if(task==='gameDaily'||c.craft||task==='furnishing'||task==='hardware'&&!claim){p.t=String(now);if(task==='hardware')p.sign='11';}
+    if(task==='novelty')p.t=String(now);
     if(c.apps[f]){
      if(!env)throw Error('缺少签名环境，请在对应页面签到一次');
      const appId=task==='hardware'&&claim&&signing.appId==='b4c9d'?signing.appId:c.apps[f];
      const input={};for(const k of ['functionId','appid','client','body','clientVersion','sign','t','jsonp'])if(p[k])input[k]=k==='body'?crypto.hash(p.body):p[k];
      p.h5st=await crypto.signOnline(appId,{pin,headers},env,input);safe();
      const sig=String(p.h5st).split(';');if(sig.length!==10||sig[2]!==appId||sig[5]!=='5.3')throw Error('签到签名字段变化');
-     if(profile.signing.eidToken)p['x-api-eid-token']=profile.signing.eidToken;
+     const eidToken=(['outlet','novelty'].includes(task)?signing:profile.signing).eidToken;
+     if(eidToken)p['x-api-eid-token']=eidToken;
     }
     if(!jbScope(task,p,b))throw Error('签到参数结构变化');
     if(task==='hardware'&&claim)return {method:'get',url:'https://api.m.jd.com/api?'+jsEncode(p),headers};
     let query='functionId='+f;
-    if(task==='furnishing'){
+    if(task==='furnishing'||task==='novelty'){
      const publicQuery={...p};
+     if(task==='novelty')delete publicQuery.body;
      delete publicQuery.h5st;
      delete publicQuery['x-api-eid-token'];
      query=jsEncode(publicQuery);
     }
     return {url:jbEndpoint(task,claim)+'?'+query,headers,body:jsEncode(p)};
    }
-   const query=async(stage)=>{const o=await options(c.query);safe();const j=await http(task,o,task==='hardware'?stage:null);safe();return jbState(task,j,date);};
+   const query=async(stage)=>{const o=await options(c.query);safe();const j=await http(task,o,stage);safe();return jbState(task,j,date);};
    const journalTask=c.craft?(task==='gearAI'?'gear':task)+':'+c.craft:task;
    const before=await query('查询签到状态'),old=prior(journalTask)||(!c.requireObservedClaim?prior(task):null),known=old&&beanNumber(old.beanQuantity)!==null?{beanQuantity:Number(old.beanQuantity)}:old&&Number.isFinite(old.creditQuantity)&&old.creditQuantity>=0&&old.creditQuantity<=100000?{creditQuantity:old.creditQuantity}:old&&beanNumber(old.healthCoins)!==null?{healthCoins:Number(old.healthCoins)}:{};
    if(before.done===true){mark(journalTask,'confirmed',known);return {status:'already_done',...known};}
    if(before.done===null)return {status:old?'pending':'no_chance',detail:old?'今天已提交，去页面确认':'当前没有待签项目',...known};
    if(old)return {status:'pending',detail:'今天已提交，去页面确认',...known};
    const o=await options(c.claim,before);safe();mark(journalTask,'pending');
-   const j=await http(task,o,task==='hardware'?'提交签到':null);safe();jbData(task,j);
+   const j=await http(task,o,'提交签到');safe();jbData(task,j);
    if(task==='campus'&&j.code!=='21034'||jbServiceFamily(task)&&j.subCode!=='0')throw Error('签到领取结果未通过');
    const quantity=jbReward(task,j);mark(journalTask,'accepted',quantity);
    try{
@@ -2440,6 +2501,8 @@ function createExtraSignins(host,crypto){
 }
 function jsError(e){
  const s=String(e?.message||'');const http=/HTTP (\d{1,3})/.exec(s);if(http)return 'HTTP '+http[1];
+ if(s==='新奇集市接口繁忙（-106），本项停止')return s;
+ if(s==='新奇集市接口繁忙（-106），本项停止')return s;
  if(s==='缺少本入口签到提交凭据，请在对应入口手动签到一次')return s;
  if(/缺少/.test(s))return /设备|签名环境/.test(s)?'缺少签名环境或设备凭据，请打开对应签到页':/金融/.test(s)?'缺少金融凭据，请打开金融签到页':'缺少凭据，请打开对应签到页';
  if(/今天已有|今天已提交/.test(s))return '今天已提交，去页面确认';
@@ -2479,6 +2542,12 @@ function jsLine(r){
  if(r.amount!==undefined)detail+='，现金 '+r.amount+' 元';
  if(r.couponCount>0)detail+='，优惠券 '+r.couponCount+' 张';
  return name+'：'+detail+(r.doubleSign?'\n'+jsLine(r.doubleSign):'');
+}
+function jsSummary(results){
+ const rows=results.flatMap(row=>row.doubleSign?[row,row.doubleSign]:[row]);
+ const beans=rows.reduce((sum,row)=>sum+(['signed_confirmed','reward_received','box_confirmed'].includes(row.status)&&Number.isSafeInteger(row.beanQuantity)&&row.beanQuantity>0?row.beanQuantity:0),0);
+ const failures=rows.filter(row=>['rejected','query_rejected'].includes(row.status)||row.status==='stopped'&&(/^HTTP [45]\d\d$/.test(row.detail||'')||row.detail==='新奇集市接口繁忙（-106），本项停止')).map(row=>JS_TASKS.find(([id])=>id===row.task)?.[1]||(row.task==='double'?'双签礼包':null)).filter(Boolean);
+ return '本轮确认获得：'+beans+' 京豆\n明确失败：'+([...new Set(failures)].join('、')||'无');
 }
 function createSignins(host,legacy,crypto){
  const read=host.read,write=host.write;
@@ -2623,7 +2692,7 @@ function createSignins(host,legacy,crypto){
    if(mayPublish&&!host.rawWrite('',JS_KEYS.lock))host.log('执行锁清理失败，停止续期后2分钟内释放');
    owned=false;
   }
-  const report={version:JS_VERSION,date,finished:!stopped,results,pauses,...(settings.automatic?{startupDelaySeconds}:{}),message:results.map(jsLine).join('\n')};
+  const report={version:JS_VERSION,date,finished:!stopped,results,pauses,...(settings.automatic?{startupDelaySeconds}:{}),message:jsSummary(results)};
   if(mayPublish){write(JS_KEYS.last,report);const h=read(JS_KEYS.history,[]);write(JS_KEYS.history,(Array.isArray(h)?h:[]).concat(report).slice(-20));}return report;
  }
  return {run};
@@ -2828,7 +2897,10 @@ if(typeof $persistentStore!=='undefined'&&typeof $request==='undefined'){
     const text=r.waiting?'自动签到正在等待，约 '+r.startupRemainingSeconds+' 秒后开始。':r.legacyLock?'上次签到占用尚未到期，剩余约 '+Math.ceil(r.remainingSeconds/60)+' 分钟。':r.taskRemainingSeconds!==null?'正在执行'+r.name+'，本项最多还等 '+r.taskRemainingSeconds+' 秒。':'上次签到仍在占用，当前租约剩余 '+r.remainingSeconds+' 秒；后台续期时会延长。';
     host.log(text);$notification.post('京东签到','暂未执行',text);
    }
-   else $notification.post('京东签到',r.finished?'本次签到结果':'执行停止',r.message);
+   else {
+    console.log('----------\n'+r.message);
+    $notification.post('京东签到',r.finished?'本次签到结果':'执行停止',r.message);
+   }
   }catch(e){host.log(jsError(e));$notification.post('京东签到','执行停止',jsError(e));}
   finally{$done({});}
  })();
