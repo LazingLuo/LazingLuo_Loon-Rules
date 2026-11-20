@@ -1,0 +1,16 @@
+#!name = 淘宝开屏多路径过滤
+#!desc = 专用开屏接口、首页开屏条目、Orange 冷热启动开关及已识别素材。保留淘宝 DNS 与网络协议。
+#!loon_version = 3.5.1(983)
+#!date = 2026-11-20
+
+[Rewrite]
+^https:\/\/(?:acs\.m\.taobao\.com|guide-acs\.m\.taobao\.com|h5api\.m\.taobao\.com|acs\.m\.tmall\.com)(?::443)?\/(?:gw|h5)\/mtop\.taobao\.wireless\.home\.splash\.awesome\.get(?:\/\d+(?:\.\d+)*)?\/?(?:\?|$) reject-dict
+^https:\/\/(?:acs\.m\.taobao\.com|guide-acs\.m\.taobao\.com)(?::443)?\/(?:gw|h5)\/mtop\.etao\.noah\.query\/\d+(?:\.\d+)*\/?\?[^#]*(?:[=&"%,])tao_splash(?:[&"%,]|$) reject-dict
+
+[Script]
+response if ${url} ~= /^https:\/\/(?:acs\.m\.taobao\.com|guide-acs\.m\.taobao\.com|h5api\.m\.taobao\.com|acs\.m\.tmall\.com)(?::443)?\/(?:gw|h5)\/mtop\.taobao\.wireless\.home\.(?:newface\.(?:awesome|stream)\.(?:get|newget)|awesome\.(?:get|update|recommend|homepage\.recommend)|refresh|splash\.awesome\.get)(?:\/\d+(?:\.\d+)*)?\/?(?:\?|$)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/taobao-splash-combined.js?v=20261120-1", "home") with tag="淘宝首页开屏", requires_body=true, timeout=10
+response if ${url} ~= /^https?:\/\/(?:orange-dc\.m\.taobao\.com(?::(?:80|443))?\/api\/config(?:[/?#]|$)|dorangesource\.alicdn\.com(?::(?:80|443))?\/)/i && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/taobao-splash-combined.js?v=20261120-1", "orange") with tag="淘宝开屏 Orange", requires_body=true, timeout=10
+request if ${url} ~= /^https?:\/\/(?:gw|heic|img|video|cloudvideo)\.alicdn\.com(?::(?:80|443))?\/[^?#]+\.(?:png|jpe?g|webp|heic|avif|mp4|m3u8|webm)(?:\?|$)/i then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/taobao-splash-combined.js?v=20261120-1", "asset") with tag="淘宝已识别开屏素材", timeout=5
+
+[MITM]
+hostname = acs.m.taobao.com, guide-acs.m.taobao.com, h5api.m.taobao.com, acs.m.tmall.com, orange-dc.m.taobao.com, dorangesource.alicdn.com, gw.alicdn.com, heic.alicdn.com, img.alicdn.com, video.alicdn.com, cloudvideo.alicdn.com
