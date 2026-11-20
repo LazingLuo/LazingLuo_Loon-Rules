@@ -2707,7 +2707,7 @@ function jbServiceBrowseUrl(url) {
 }
 
 function jbServiceBrowsePlan(row) {
- if(row?.assignmentType!==1||row.assignmentActionType!==-1||
+ if(row?.assignmentType!==1||(row.assignmentActionType!==undefined&&row.assignmentActionType!==-1)||
     ![null,112].includes(row.subTaskType??null)||row.appJumpType||
     typeof row.encryptAssignmentId!=='string'||
     !JD_CAMPAIGN_ID.test(row.encryptAssignmentId||'')||

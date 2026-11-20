@@ -20,7 +20,7 @@ generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-index-activity.js?v=20261106-2") with tag="京东指数", timeout=600
 
 
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261108-1&entry=service", `{"activity":"service"}`) with tag="京东服务", timeout=600
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261120-2&entry=service", `{"activity":"service"}`) with tag="京东服务", timeout=600
 
 generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-plant-activity.js?v=20261108-3") with tag="种豆得豆", timeout=600
 
