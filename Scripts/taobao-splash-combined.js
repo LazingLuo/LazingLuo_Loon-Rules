@@ -53,15 +53,29 @@
     return value;
   }
 
+  function report(category, message) {
+    console.log("[淘宝开屏] " + category + "：" + message);
+    try { $notification.post("淘宝开屏", category, message); } catch (_) {}
+  }
+
   try {
     if (typeof $request === "undefined" || typeof $argument === "undefined") return;
     const url = String($request.url || "");
     const mode = $argument;
+    if (mode === "dedicated") {
+      const main = /^https:\/\/(?:acs\.m\.taobao\.com|guide-acs\.m\.taobao\.com|h5api\.m\.taobao\.com|acs\.m\.tmall\.com)(?::443)?\/(?:gw|h5)\/mtop\.taobao\.wireless\.home\.splash\.awesome\.get(?:\/\d+(?:\.\d+)*)?\/?(?:\?|$)/.test(url);
+      const legacy = !main && /^https:\/\/(?:acs\.m\.taobao\.com|guide-acs\.m\.taobao\.com)(?::443)?\/(?:gw|h5)\/mtop\.etao\.noah\.query\/\d+(?:\.\d+)*\/?\?[^#]*(?:[=&"%,])tao_splash(?:[&"%,]|$)/.test(url);
+      if (main || legacy) {
+        result.response = { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, body: "{}" };
+        report("专用接口", main ? "已拦截开屏广告请求" : "已拦截旧版 tao_splash 请求");
+      }
+      return;
+    }
     if (mode === "asset") {
       const candidate = pathOf(url);
       if (candidate && savedPaths().some(r => r[0] === candidate)) {
         result.response = { status: 204, headers: { "Cache-Control": "no-store" }, body: "" };
-        console.log("[淘宝开屏] 已拦截开屏响应确认的素材");
+        report("素材", "已拦截开屏响应确认的" + (/\.(?:mp4|m3u8|webm)$/i.test(candidate) ? "视频" : "图片"));
       }
       return;
     }
@@ -168,7 +182,7 @@
     if (mode === "home") savePaths(paths);
     if (changed) {
       result.body = parsed.prefix + JSON.stringify(edited) + parsed.suffix;
-      console.log("[淘宝开屏] " + (mode === "home" ? "首页开屏条目" : "Orange 冷热启动配置") + "已改写");
+      report(mode === "home" ? "首页配置" : "Orange", mode === "home" ? "已改写首页开屏条目" : "已改写冷热启动配置");
     }
   } catch (_) {
   } finally {
