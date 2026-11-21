@@ -13,7 +13,7 @@ function checkinScheduleArgument(value) {
   const KEY='UNICOM_CHECKIN_ACCOUNT_V1', LAST='UNICOM_CHECKIN_LAST_RESULT_V1';
   const HISTORY='UNICOM_CHECKIN_HISTORY_V1', ATTEMPT='UNICOM_CHECKIN_ATTEMPT_V1';
   const LOCK='UNICOM_CHECKIN_LOCK_V1', RUN='UNICOM_CHECKIN_LAST_RUN_V1';
-  const VERSION='2026-10-14.1';
+  const VERSION='2026-11-21.1';
   const BASE='https://activity.10010.com/sixPalaceGridTurntableLottery/signin/';
   const suppliedArgument=typeof $argument==='undefined'?undefined:$argument;
   let settings,mode,argumentError;
@@ -174,7 +174,9 @@ function checkinScheduleArgument(value) {
     if(recordResult&&(mode==='manual'||mode==='cron')) {
       try {write(LAST,result);const history=read(HISTORY,[]);history.push(result);write(HISTORY,history.slice(-20));}catch(_){console.log('[联通签到] 执行结果保存失败');}
       console.log('[联通签到] '+JSON.stringify(result));
-      $notification.post('联通签到',mode==='cron'?'定时签到结果':'手动签到结果',result.message||result.status);
+      if(!['signed_confirmed','already_done'].includes(result.status)) {
+        $notification.post('联通签到',mode==='cron'?'定时签到结果':'手动签到结果',result.message||result.status);
+      }
     }
     else if(isExecution&&recordResult){console.log('[联通签到] '+JSON.stringify(result));$notification.post('联通签到','执行失败',result.message||'签到入口参数无法识别');}
     $done({});
