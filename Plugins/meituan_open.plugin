@@ -1,10 +1,10 @@
 #!name = 美团去开屏广告
-#!desc = 拦截美团主 App 的开屏配置请求，覆盖即时拉取和预取。
+#!desc = 拦截美团主 App 的开屏配置请求，覆盖即时拉取和预取，命中时通知。
 #!author = LazingLuo
 #!loon_version = 3.5.1(983)
 
-[Rewrite]
-^https:\/\/mop\.meituan\.com\/api\/entryModule\/startupPicture\/?(?:\?|$) reject-dict
+[Script]
+http-request ^https:\/\/mop\.meituan\.com\/api\/entryModule\/startupPicture\/?(?:\?|$) script-path=https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/meituan-splash.js?v=20261121-2,requires-body=false,timeout=5,tag=美团开屏接口命中
 
 [MITM]
 hostname = mop.meituan.com
