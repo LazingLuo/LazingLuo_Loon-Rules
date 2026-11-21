@@ -1,4 +1,5 @@
 #!name = 抖音开屏净化
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/douyin.png
 #!desc = 按抖音 41.2.0 的专用路径处理开屏，按命中类型通知。
 #!author = LazingLuo
 #!loon_version = 3.5.1(983)

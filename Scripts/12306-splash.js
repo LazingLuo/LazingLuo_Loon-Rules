@@ -1,4 +1,4 @@
-// 铁路12306 5.9.6 开屏净化，20261121-1。
+// 铁路12306 5.9.6 开屏净化，20261121-2。
 // 0007 的占位响应格式参考公开规则:
 // https://github.com/AEtso/Loon/blob/master/Scripts/12306.js
 (() => {
@@ -20,7 +20,6 @@
   }
 
   let body;
-  let message;
   switch (placement) {
     case "0007":
       body = {
@@ -28,22 +27,15 @@
         materialsList: [{billMaterialsId: "255", filePath: "h", creativeType: 1}],
         advertParam: {skipTime: 1},
       };
-      message = "已返回 1 秒占位";
       break;
     case "G0054":
       body = {code: "00", materialsList: []};
-      message = "已返回空素材列表";
       break;
     default:
       $done({});
       return;
   }
 
-  try {
-    $notification.post("铁路12306开屏净化", "广告位 " + placement, message);
-  } catch (_) {
-    // 通知失败时仍返回本地响应。
-  }
 
   $done({
     response: {
