@@ -1,0 +1,10 @@
+#!name = 麦当劳去开屏广告
+#!desc = 拦截麦当劳开屏广告配置。仅匹配开屏接口，已缓存的素材会按原有效期处理。
+#!author = LazingLuo
+#!loon_version = 3.5.1(983)
+
+[Rewrite]
+^https:\/\/api2?\.mcd\.cn\/bff\/portal\/home\/splash\/?(?:\?|$) reject-dict
+
+[MITM]
+hostname = api.mcd.cn, api2.mcd.cn
