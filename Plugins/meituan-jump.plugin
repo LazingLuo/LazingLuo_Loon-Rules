@@ -1,4 +1,5 @@
 #!name = 美团跳转任务助手
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/meituan.png
 #!desc = 自用App跳转任务助手，配合快捷指令手动执行。
 #!author = LazingLuo
 #!loon_version = 3.5.1(983)

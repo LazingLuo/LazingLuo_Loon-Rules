@@ -1,4 +1,5 @@
 #!name = 京东签到快捷指令桥接
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/jd.png
 #!desc = 配套快捷指令逐项调用现有10项签到。共用本机凭据和提交记录，无新增凭据获取或定时任务。首次填一次私人配对码。
 #!author = LazingLuo
 #!loon_version = 3.5.1(983)

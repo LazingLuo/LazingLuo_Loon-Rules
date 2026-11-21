@@ -1,4 +1,5 @@
 #!name = 京东合并签到
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/jd.png
 #!desc = 普通签到、每日刮卡、PLUS盲盒、京喜、金融与双签、家电家居、京东指数、看病买药、互动游戏、装备馆、AI装备馆、赚话费、特价二手、家居馆、京东服务、京东校园、家政、互医、京东京造、大牌奥莱、新奇集市。一个手动入口，自动执行同一流程；各项之间随机等待，结束后统一通知。凭据自动保存在本机；请停用原签到插件及重叠的凭据获取规则。
 #!loon_version = 3.5.1(983)
 #!date = 2026-11-08

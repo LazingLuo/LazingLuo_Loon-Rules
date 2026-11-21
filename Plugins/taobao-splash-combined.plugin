@@ -1,4 +1,5 @@
 #!name = 淘宝开屏多路径过滤
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/taobao.png
 #!desc = 专用开屏接口、首页开屏条目、Orange 冷热启动开关及已识别素材，命中分类通知。保留淘宝 DNS 与网络协议。
 #!loon_version = 3.5.1(983)
 #!date = 2026-11-20

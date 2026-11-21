@@ -1,4 +1,5 @@
 #!name = 淘宝开屏拦截与命中通知
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/taobao.png
 #!desc = 专用开屏接口拦截、首页开屏时间改写及窄范围素材规则。加入4个临时网关IP做定向MitM验证，保留HTTPDNS。需已信任MitM证书。
 #!author = FFDNS[https://github.com/Thelongdarkorg/loon-plugins]；LazingLuo
 #!loon_version = 3.5.1(983)

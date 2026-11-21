@@ -1,4 +1,5 @@
 #!name = 京东开屏
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/jd.png
 #!desc = 处理 start 开屏配置并通知，按现有 URL 规则静默拒绝图片和视频素材。
 #!loon_version = 3.5.1(983)
 #!date = 2026-11-07
