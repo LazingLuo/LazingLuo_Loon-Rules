@@ -1,4 +1,5 @@
 #!name = 麦当劳去开屏广告
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/mcdonalds.png
 #!desc = 拦截麦当劳开屏广告配置。仅匹配开屏接口，已缓存的素材会按原有效期处理。
 #!author = LazingLuo
 #!loon_version = 3.5.1(983)
