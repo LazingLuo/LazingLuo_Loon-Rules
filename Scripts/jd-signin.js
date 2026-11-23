@@ -1,8 +1,8 @@
 // 京东合并签到 2026-11-08.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-08.1';
+const JS_VERSION='2026-11-24.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
-const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['gearAI','AI装备馆签到'],['wallet','赚话费签到'],['used','特价二手签到'],['furnishing','家居馆'],['service','京东服务签到'],['campus','京东校园签到'],['housekeeping','家政签到'],['healthKit','互医签到'],['jingzao','京东京造'],['outlet','大牌奥莱'],['novelty','新奇集市（拆盲盒）']];
+const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['gearAI','AI装备馆签到'],['wallet','赚话费签到'],['used','特价二手签到'],['furnishing','家居馆'],['service','京东服务签到'],['campus','京东校园签到'],['housekeeping','家政签到'],['healthKit','互医签到'],['jingzao','京东京造'],['outlet','大牌奥莱'],['novelty','新奇集市（拆盲盒）'],['phoneHall','手机馆'],['medicalDeviceHall','医疗器械馆']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
 const JSM_KEY='JD_MEDICAL_SIGNIN_ACCOUNT_V1';
 const JSM_PAGE='https://pro.m.jd.com/mall/active/3RLqT5qKR4uVAXKxezQTYL9ArSR2/index.html';
@@ -127,6 +127,8 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ phoneHall:{key:'JD_TEST_PHONE_HALL_V1',label:'手机馆',page:'https://pro.m.jd.com/mall/active/Y9FVe619hMoajzqpxky1CQQJAkk/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a62024d81c312970b2026ca',requireObservedClaim:true},
+ medicalDeviceHall:{key:'JD_TEST_MEDICAL_DEVICE_HALL_V1',label:'医疗器械馆',page:'https://pro.m.jd.com/mall/active/gTZQx9VStunoXz1WTiBKhWGQeZ6/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a69cb5eadb0b3433740b0eb',requireObservedClaim:true},
  novelty:{key:'JD_TEST_NOVELTY_V1',label:'新奇集市（拆盲盒）',page:'https://pro.m.jd.com/mall/active/4Va8jNzzHPqgTUhxwiTn9PHyVZCB/index.html',appid:'Bigsale',endpoint:'',query:'common_task_list',claim:'common_do_task',apps:{common_task_list:'7f3ea',common_do_task:'7f3ea'},requireObservedClaim:true},
  jingzao:{key:'JD_TEST_JINGZAO_V1',label:'京东京造',page:'https://pro.m.jd.com/mall/active/WFJKWrVftPmGdDENfVqJU8BCB5c/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69b020d1ff1c5603295caf86',requireObservedClaim:true},
  outlet:{key:'JD_TEST_OUTLET_V1',label:'大牌奥莱',page:'https://pro.m.jd.com/mall/active/gFkdsmZNGWwvzFTRT76janC1ThJ/index.html',appid:'signed_wh5_ihub',endpoint:'',query:'bean_deliverySign_home',claim:'bean_deliverySign_sign',apps:{bean_deliverySign_home:'c1e85',bean_deliverySign_sign:'987dd'},requireObservedClaim:true},

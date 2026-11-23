@@ -934,6 +934,8 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ phoneHall:{key:'JD_TEST_PHONE_HALL_V1',label:'手机馆',page:'https://pro.m.jd.com/mall/active/Y9FVe619hMoajzqpxky1CQQJAkk/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a62024d81c312970b2026ca',requireObservedClaim:true},
+ medicalDeviceHall:{key:'JD_TEST_MEDICAL_DEVICE_HALL_V1',label:'医疗器械馆',page:'https://pro.m.jd.com/mall/active/gTZQx9VStunoXz1WTiBKhWGQeZ6/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a69cb5eadb0b3433740b0eb',requireObservedClaim:true},
  novelty:{key:'JD_TEST_NOVELTY_V1',label:'新奇集市（拆盲盒）',page:'https://pro.m.jd.com/mall/active/4Va8jNzzHPqgTUhxwiTn9PHyVZCB/index.html',appid:'Bigsale',endpoint:'',query:'common_task_list',claim:'common_do_task',apps:{common_task_list:'7f3ea',common_do_task:'7f3ea'},requireObservedClaim:true},
  jingzao:{key:'JD_TEST_JINGZAO_V1',label:'京东京造',page:'https://pro.m.jd.com/mall/active/WFJKWrVftPmGdDENfVqJU8BCB5c/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69b020d1ff1c5603295caf86',requireObservedClaim:true},
  outlet:{key:'JD_TEST_OUTLET_V1',label:'大牌奥莱',page:'https://pro.m.jd.com/mall/active/gFkdsmZNGWwvzFTRT76janC1ThJ/index.html',appid:'signed_wh5_ihub',endpoint:'',query:'bean_deliverySign_home',claim:'bean_deliverySign_sign',apps:{bean_deliverySign_home:'c1e85',bean_deliverySign_sign:'987dd'},requireObservedClaim:true},
@@ -1197,7 +1199,7 @@ function jbCapture(host,request,response,decode){
  const task=Object.keys(JB_CONFIG).find(k=>jbScope(k,p,b));if(!task)return null;
  if(request.method==='GET'&&(task!=='hardware'||f!==JB_CONFIG.hardware.claim))return null;
  const c=JB_CONFIG[task],claim=f===c.claim;
- if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&[...JB_SEPARATE_CONTEXT,'gear','gearAI','campus','jingzao','outlet'].includes(task))return null;
+ if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&[...JB_SEPARATE_CONTEXT,'gear','gearAI','campus','jingzao','outlet','phoneHall','medicalDeviceHall'].includes(task))return null;
  const j=JSON.parse(response.body||'{}');
  jbData(task,j);
  if(!claim)jbState(task,j,jsDay());
