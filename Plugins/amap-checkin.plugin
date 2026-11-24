@@ -1,0 +1,19 @@
+#!name = 高德打车签到（仅异常通知）
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/amap.png
+#!desc = 基于 wf021325 脚本及 cc166 2026-08-16 Loon适配版。开启抓取凭据后进入高德App打车福利中心，获取成功后关闭抓取。当前仅App端签到。签到失败或状态待确认时通知。
+#!author = wf021325,cc166
+#!homepage = https://gist.github.com/cc166/e00ce5690861f2d9896b404c5cfbe810
+#!loon_version = 3.5.1(983)
+
+[Argument]
+captureEnabled = switch,false,tag=抓取凭据
+scriptEnabled = switch,true,tag=自动签到
+cronExp = input,"17 8 * * *",tag=签到时间,desc=默认每天08:17
+jitterMax = input,"0",tag=最大随机延迟秒数,desc=0关闭；可填0至600
+
+[Script]
+response if ${url} ~= /^https?:\/\/(?:m5(?:-zb)?|dache)\.amap\.com\/(?:ws\/yuece\/(?:act|openapi\/activity\/current)\/query|common\/(?:alipaymini|wxmini)\?_ENCRYPT=)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/amap-checkin-failure-only.js?v=20261124-1") with tag="高德打车凭据", timeout=30, requires_body=true, enable=${captureEnabled}
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/amap-checkin-failure-only.js?v=20261124-1", {${jitterMax}}) with tag="高德打车签到", timeout=720, enable=${scriptEnabled}
+
+[Mitm]
+hostname = m5.amap.com,m5-zb.amap.com,dache.amap.com
