@@ -934,6 +934,9 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ babyHall:{key:'JD_TEST_BABY_HALL_V1',label:'母婴馆',page:'https://pro.m.jd.com/mall/active/3BbAVGQPDd6vTyHYjmAutXrKAos6/index.html',appid:'signed_wh5_ihub',endpoint:'',query:'bean_deliverySign_home',claim:'bean_deliverySign_sign',apps:{bean_deliverySign_home:'c1e85',bean_deliverySign_sign:'987dd'},activity:'4824',requireObservedClaim:true},
+ snacksHall:{key:'JD_TEST_SNACKS_HALL_V1',label:'零食广场',page:'https://pro.m.jd.com/mall/active/4P6FHPYc6G8MYwTcfvVUh2TFVKMb/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a79bc3514ac70db76cf86dc',requireObservedClaim:true},
+ homeEssentials:{key:'JD_TEST_HOME_ESSENTIALS_V1',label:'家庭常备',page:'https://pro.m.jd.com/mall/active/sSFiqWRdzGTU9ByynawT1k5mix4/index.html',appid:'laputa',endpoint:'client.action',query:'mb2capp_ma_queryActivityPageInfo',claim:'mb2capp_ma_doDailyAttendance',apps:{},requireObservedClaim:true},
  phoneHall:{key:'JD_TEST_PHONE_HALL_V1',label:'手机馆',page:'https://pro.m.jd.com/mall/active/Y9FVe619hMoajzqpxky1CQQJAkk/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a62024d81c312970b2026ca',requireObservedClaim:true},
  medicalDeviceHall:{key:'JD_TEST_MEDICAL_DEVICE_HALL_V1',label:'医疗器械馆',page:'https://pro.m.jd.com/mall/active/gTZQx9VStunoXz1WTiBKhWGQeZ6/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a69cb5eadb0b3433740b0eb',requireObservedClaim:true},
  novelty:{key:'JD_TEST_NOVELTY_V1',label:'新奇集市（拆盲盒）',page:'https://pro.m.jd.com/mall/active/4Va8jNzzHPqgTUhxwiTn9PHyVZCB/index.html',appid:'Bigsale',endpoint:'',query:'common_task_list',claim:'common_do_task',apps:{common_task_list:'7f3ea',common_do_task:'7f3ea'},requireObservedClaim:true},
@@ -953,7 +956,7 @@ const JB_CONFIG={
 };
 const JD_CAMPAIGN_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const JD_CAMPAIGN_ID_EXT = /^[A-Za-z0-9_-]{1,256}$/;
-const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet','novelty'];
+const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet','novelty','babyHall','homeEssentials'];
 const jbServiceFamily = task => task === 'service' || task === 'housekeeping';
 
 function jbCampusBase(body) {
@@ -1055,7 +1058,9 @@ function jbScope(task,p,b){
  if(task==='novelty')return p.client==='apple'&&b.channelId==='8'&&(claim?
   Object.keys(b).length===5&&b.itemId==='1'&&b.actionType===0&&JD_CAMPAIGN_ID_EXT.test(b.assignmentId||'')&&b.ext?.doReceiveRewards===null:
   Object.keys(b).length===3&&b.ext?.queryReceiveTimes===1&&b.extMap?.sceneType===2);
- if(task==='outlet')return p.client==='ios'&&b.activityId==='5383'&&(claim?Object.keys(b).length===1:b.iHubType==='simple'&&Object.keys(b).length===2);
+ if(task==='homeEssentials')return p.client==='iOS'&&Object.keys(b).length===2&&
+  JD_CAMPAIGN_ID.test(b.encryptProjectId||'')&&JD_CAMPAIGN_ID.test(b.encryptAssignmentId||'');
+ if(task==='outlet'||task==='babyHall')return p.client==='ios'&&b.activityId===(c.activity||'5383')&&(claim?Object.keys(b).length===1:b.iHubType==='simple'&&Object.keys(b).length===2);
  if(task==='healthKit'){
   if(p.client!=='wh5'||b.channel!=='jdhapp')return false;
   return claim?b.appKey==='250141600001'&&b.infoId==='kits'&&b.platform===3&&JD_CAMPAIGN_ID_EXT.test(b.encodeId||''):
@@ -1095,6 +1100,11 @@ function jbData(task,j){
   if(j?.code!==0||j.data?.bizCode!==0||!j.data.result)throw Error('新奇集市签到接口未通过');
   return j.data.result;
  }
+ if(task==='homeEssentials'){
+  if(j?.code!=='0000'||j.success!==true||!j.data)throw Error('家庭常备签到接口未通过');
+  return j.data;
+ }
+ if(task==='babyHall'&&(j?.code!==0||j.data?.bizCode!==0||!j.data.result))throw Error('母婴馆签到接口未通过');
  if(task==='outlet'&&(j?.data?.bizCode!==0||!j.data.result))throw Error('大牌奥莱签到接口未通过');
  if(task==='furnishing'){
   if(j?.success!==true||j.code!==0||!j.data||j.data.degradeFlag===true)throw Error('家居馆签到接口未通过');
@@ -1128,10 +1138,17 @@ function jbState(task,j,day){
   if(row.completionFlag===false&&row.completionCnt===0&&row.timeStatus===1&&row.canParticipation===true)return {done:false,id:row.encryptAssignmentId};
   throw Error('新奇集市签到状态不明确');
  }
- if(task==='outlet'){
+ if(task==='homeEssentials'){
+  const info=d.dailySignInfo,list=info?.signList;
+  const today=Array.isArray(list)&&list.length<=31?list.filter(row=>row?.todayFlag===true):[];
+  if(today.length!==1||typeof today[0].signed!=='boolean'||!JD_CAMPAIGN_ID.test(info.encryptAssignmentId||''))throw Error('家庭常备签到状态不明确');
+  return {done:today[0].signed,id:info.encryptAssignmentId};
+ }
+ if(task==='outlet'||task==='babyHall'){
   const status=d.result?.signButton?.status;
+  if(task==='babyHall'&&status===1&&d.result.riskLevel!=='noRisk')throw Error('母婴馆签到状态需在 App 确认');
   if(status===1||status===2)return {done:status===2};
-  throw Error('大牌奥莱签到状态不明确');
+  throw Error(c.label+'签到状态不明确');
  }
  if(task==='furnishing')return jbFurnishingState(j,day);
  if(jbServiceFamily(task))return jbServiceState(d,day,task);
@@ -1199,10 +1216,18 @@ function jbCapture(host,request,response,decode){
  const task=Object.keys(JB_CONFIG).find(k=>jbScope(k,p,b));if(!task)return null;
  if(request.method==='GET'&&(task!=='hardware'||f!==JB_CONFIG.hardware.claim))return null;
  const c=JB_CONFIG[task],claim=f===c.claim;
- if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&[...JB_SEPARATE_CONTEXT,'gear','gearAI','campus','jingzao','outlet','phoneHall','medicalDeviceHall'].includes(task))return null;
+ if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&[...JB_SEPARATE_CONTEXT,'gear','gearAI','campus','jingzao','outlet','phoneHall','medicalDeviceHall','snacksHall'].includes(task))return null;
  const j=JSON.parse(response.body||'{}');
  jbData(task,j);
- if(!claim)jbState(task,j,jsDay());
+ if(!claim){
+  const state=jbState(task,j,jsDay());
+  if(task==='homeEssentials'&&state.id!==b.encryptAssignmentId)return null;
+ }else if(task==='homeEssentials'){
+  const {encryptAssignmentId,signList}=j.data;
+  if(encryptAssignmentId!==b.encryptAssignmentId||!Array.isArray(signList))return null;
+  const today=signList.filter(row=>row?.todayFlag===true);
+  if(today.length!==1||today[0].signed!==true)return null;
+ }else if(task==='babyHall'&&j.data.result.rewardSuccess!==true)return null;
  else if(task==='novelty'&&(j.data.result.assignmentResult?.assignmentInfo?.encryptAssignmentId!==b.assignmentId||j.data.result.assignmentResult?.assignmentInfo?.completionCnt!==1))return null;
  else if(task==='campus'&&j.code!=='21034')return null;
  const referer=jsHeader(request.headers,'Referer');
@@ -1222,7 +1247,12 @@ function jbCapture(host,request,response,decode){
  const fresh=direct&&(!canonical||at>=canonical.time);
  h.Cookie=(fresh?direct:canonical||pair).cookie+rawCookie.split(';').map(x=>x.trim()).filter(x=>x&&!/^pt_(?:key|pin)=/.test(x)).join(';')+';';
  const profile=old?jsClone(old):{pin:pair.pin,templates:{}};
- const wasReady=!!(old?.templates?.query&&old.signing&&(task!=='hardware'||old.templates.claim));
+ const isReady=profile=>{
+  const {query,claim}=profile?.templates||{};
+  return !!(query&&(!Object.keys(c.apps).length||profile.signing)&&
+   (!(c.requireObservedClaim||task==='hardware')||claim));
+ };
+ const wasReady=isReady(old);
  let signing;
  if(c.apps[f]){
   const sig=String(p.h5st||'').split(';');
@@ -1245,9 +1275,14 @@ function jbCapture(host,request,response,decode){
  if(task==='novelty'){
   for(const k of ['area','xAPIClientLanguage','model'])if(p[k]!==undefined)params[k]=p[k];
   body=claim?{channelId:'8',itemId:'1',actionType:0,ext:{doReceiveRewards:null}}:{channelId:'8',ext:{queryReceiveTimes:1},extMap:{sceneType:2}};
- }else if(task==='outlet'){
+ }else if(task==='homeEssentials'){
+  for(const k of ['model','eid','x-api-eid-token'])if(p[k]!==undefined)params[k]=p[k];
+  if(!params.eid||!params['x-api-eid-token'])return null;
+  body={encryptProjectId:b.encryptProjectId,encryptAssignmentId:b.encryptAssignmentId};
+ }else if(task==='outlet'||task==='babyHall'){
   for(const k of ['rfs','eid','appBuild'])if(p[k]!==undefined)params[k]=p[k];
-  body=claim?{activityId:'5383'}:{iHubType:'simple',activityId:'5383'};
+  const activityId=c.activity||'5383';
+  body=claim?{activityId}:{iHubType:'simple',activityId};
  }else if(task==='furnishing')body=claim?{}:{activityId:'4',isDistinguishReceivedNewUserAward:false,reqSource:1};
  else if(task==='housekeeping'||task==='healthKit'){
   // Use the live task ID and sign-in progress when submitting.
@@ -1286,8 +1321,8 @@ function jbCapture(host,request,response,decode){
   host.write('QL_BRIDGE_CREDENTIAL_V1',{...direct,capturedAt:at,source:'combined-signin'});
   if(previous?.cookie!==direct.cookie)updated.push(JS_KEYS.login);
  }
- const ready=!!(profile.templates.query&&profile.signing&&(task!=='hardware'||profile.templates.claim));
- return {updated,first:!old||old.captureVersion!=='2026-11-08.1'||JB_SEPARATE_CONTEXT.includes(task)&&!wasReady&&ready};
+ const becameReady=(JB_SEPARATE_CONTEXT.includes(task)||task==='snacksHall')&&!wasReady&&isReady(profile);
+ return {updated,first:!old||old.captureVersion!=='2026-11-08.1'||becameReady};
 }
 
 function jsMedicalCapture(host,request,response,decode){
@@ -1401,7 +1436,7 @@ async function jsCapture(host,request,response,parsers,decode){
  const added=/^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=(?:bean_deliverySign_(?:home|sign)|common_(?:task_list|do_task))(?:&[^#]*)?$/.test(url);
  if(added){
   const params=jsParams(request),body=jbBody(params);
-  if(['outlet','novelty'].some(task=>jbScope(task,params,body)))return jbCapture(host,request,response,decode);
+  if(['outlet','novelty','babyHall'].some(task=>jbScope(task,params,body)))return jbCapture(host,request,response,decode);
   return null;
  }
  if(!jd&&!finance&&!service)return null;
@@ -1472,7 +1507,7 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
     console.log('[种豆凭据] '+r.plantStatus);
     if(r.plantNotify)$notification.post('种豆得豆','凭据获取',r.plantStatus);
    }else if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据 2026-11-08.1] 已更新：'+text);
-    for(const task of ['gear','gearAI',...JB_SEPARATE_CONTEXT])if(r.updated.includes(JB_CONFIG[task].key)){const p=read(JB_CONFIG[task].key,null),c=jbConfig(task,p?.templates?.query?.body||p?.templates?.claim?.body);console.log('[签到凭据] '+(c?.label||names[JB_CONFIG[task].key])+'：查询'+(p?.templates?.query?'已保存':'缺少')+'，签到参数'+(p?.templates?.claim?'已保存':JB_SEPARATE_CONTEXT.includes(task)&&task!=='hardware'&&p?.templates?.query?'可由查询补齐':'待获取')+'，签名'+(p?.signing?'已保存':'待获取'));}
+    for(const task of ['gear','gearAI',...JB_SEPARATE_CONTEXT])if(r.updated.includes(JB_CONFIG[task].key)){const p=read(JB_CONFIG[task].key,null),c=jbConfig(task,p?.templates?.query?.body||p?.templates?.claim?.body);console.log('[签到凭据] '+(c?.label||names[JB_CONFIG[task].key])+'：查询'+(p?.templates?.query?'已保存':'缺少')+'，签到参数'+(p?.templates?.claim?'已保存':JB_SEPARATE_CONTEXT.includes(task)&&task!=='hardware'&&!c?.requireObservedClaim&&p?.templates?.query?'可由查询补齐':'待获取')+'，签名'+(c&&!Object.keys(c.apps).length?'无需':p?.signing?'已保存':'待获取'));}
     if(r.updated.includes(JS_KEYS.login)||r.first)$notification.post('京东签到','凭据已更新',text);}
   }catch(_){console.log('[签到凭据] 获取未完成，保留原记录');}
   finally{$done({});}
