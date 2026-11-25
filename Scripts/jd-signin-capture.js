@@ -934,6 +934,8 @@ const clean=Object.assign({},body);delete clean.signStr;return Xe(JSON.stringify
 }
 // Independent daily sign-ins observed in HAR480/484/485/487. No browsing or assistance.
 const JB_CONFIG={
+ fashion:{key:'JD_TEST_FASHION_SIGNIN_V1',label:'服饰美妆',page:'https://pro.m.jd.com/mall/active/jgwurvXVswT7VFuX4S5DG2aaK1T/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'69266d9f129fbf6b80a8b1cd',requireObservedClaim:true},
+ trialDaily:{key:'JD_TEST_TRIAL_DAILY_V1',label:'试用领取',page:'https://pro.m.jd.com/mall/active/G7sQ92vWSBsTHzk4e953qUGWQJ4/index.html',appid:'newtry',endpoint:'',query:'qryH5BabelFloors',claim:'common_do_task',apps:{qryH5BabelFloors:'35fa0',common_do_task:'35fa0'},assignment:'2WZdKGbreg4ANJf1SE5mECpxAV8S',activity:'G7sQ92vWSBsTHzk4e953qUGWQJ4',floor:'122572153',pageId:'5366891',channel:'ttt63',requireObservedClaim:true},
  babyHall:{key:'JD_TEST_BABY_HALL_V1',label:'母婴馆',page:'https://pro.m.jd.com/mall/active/3BbAVGQPDd6vTyHYjmAutXrKAos6/index.html',appid:'signed_wh5_ihub',endpoint:'',query:'bean_deliverySign_home',claim:'bean_deliverySign_sign',apps:{bean_deliverySign_home:'c1e85',bean_deliverySign_sign:'987dd'},activity:'4824',requireObservedClaim:true},
  snacksHall:{key:'JD_TEST_SNACKS_HALL_V1',label:'零食广场',page:'https://pro.m.jd.com/mall/active/4P6FHPYc6G8MYwTcfvVUh2TFVKMb/index.html',appid:'jx_h5_babel',query:'jxzy_active_querySign',claim:'jxzy_active_drawSign',apps:{jxzy_active_drawSign:'c50cc'},craft:'6a79bc3514ac70db76cf86dc',requireObservedClaim:true},
  homeEssentials:{key:'JD_TEST_HOME_ESSENTIALS_V1',label:'家庭常备',page:'https://pro.m.jd.com/mall/active/sSFiqWRdzGTU9ByynawT1k5mix4/index.html',appid:'laputa',endpoint:'client.action',query:'mb2capp_ma_queryActivityPageInfo',claim:'mb2capp_ma_doDailyAttendance',apps:{},requireObservedClaim:true},
@@ -956,7 +958,7 @@ const JB_CONFIG={
 };
 const JD_CAMPAIGN_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const JD_CAMPAIGN_ID_EXT = /^[A-Za-z0-9_-]{1,256}$/;
-const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet','novelty','babyHall','homeEssentials'];
+const JB_SEPARATE_CONTEXT = ['hardware','service','furnishing','housekeeping','healthKit','outlet','novelty','babyHall','homeEssentials','trialDaily'];
 const jbServiceFamily = task => task === 'service' || task === 'housekeeping';
 
 function jbCampusBase(body) {
@@ -1055,6 +1057,19 @@ function jbScope(task,p,b){
  const c=jbConfig(task,b),f=p.functionId;if(!c||![c.query,c.claim].includes(f))return false;
  const claim=f===c.claim;
  if(p.appid!==(claim?(c.claimAppid||c.appid):c.appid))return false;
+ if(task==='trialDaily'){
+  if(p.client!=='apple')return false;
+  if(claim){
+   const ext=b.ext,scene=b.extMap;
+   return Object.keys(b).length===6&&b.channelId==='20'&&b.itemId==='1'&&b.assignmentId===c.assignment&&b.actionType==='0'&&
+    ext?.queryReceiveTimes===1&&((Object.keys(ext).length===1)||(Object.keys(ext).length===2&&ext.doReceiveRewards===1))&&
+    scene?.sceneType===1&&scene.babelChannel===c.channel&&Object.keys(scene).length===2;
+  }
+  const floor=b.queryFloorsParam,floorParams=floor?.floorParams,entry=floorParams?.[c.floor];
+  return Object.keys(b).length===5&&b.activityId===c.activity&&b.pageId===c.pageId&&b.siteClient==='m'&&
+   b.siteClientVersion===''&&floor?.type==='2'&&Object.keys(floor).length===2&&entry?.babelChannel===c.channel&&
+   Object.keys(floorParams).length===1&&Object.keys(entry).length===1;
+ }
  if(task==='novelty')return p.client==='apple'&&b.channelId==='8'&&(claim?
   Object.keys(b).length===5&&b.itemId==='1'&&b.actionType===0&&JD_CAMPAIGN_ID_EXT.test(b.assignmentId||'')&&b.ext?.doReceiveRewards===null:
   Object.keys(b).length===3&&b.ext?.queryReceiveTimes===1&&b.extMap?.sceneType===2);
@@ -1126,7 +1141,57 @@ function jbData(task,j){
  const ok=task==='wallet'?j?.code===200:task==='hardware'?j?.success===true&&j.resultCode===0&&j.data?.subCode==='0'&&j.data.hasRisk!==true&&j.data.login!==false:j?.success!==false&&j?.code===0;
  if(!ok||!j.data||typeof j.data!=='object'||Array.isArray(j.data))throw Error('签到接口未通过');return j.data;
 }
+function trialDailyState(j){
+ const c=JB_CONFIG.trialDaily;
+ if(String(j?.code)!=='0'||j.isLogin!==true||j.encodeActivityId!==c.activity||
+    !j.floorResponse||typeof j.floorResponse!=='object'||Array.isArray(j.floorResponse)){
+  throw Error('试用领取福利状态不明确');
+ }
+ const floor=j.floorResponse[c.floor];
+ if(!floor)return {done:null};
+ const service=floor.providerData;
+ if(String(service?.code)!=='0'||service?.success!==true)throw Error('试用领取福利状态不明确');
+ const reply=service.data?.taskReward;
+ if(!reply)return {done:null};
+ const list=reply.data?.result?.taskInfo?.taskList;
+ if(reply.code!==0||reply.data?.bizCode!==0||reply.data.result?.taskInfo?.requestStatusCode!==1||!Array.isArray(list)){
+  throw Error('试用领取福利状态不明确');
+ }
+ const matches=list.filter(task=>task?.encryptAssignmentId===c.assignment);
+ if(!matches.length)return {done:null};
+ if(matches.length!==1)throw Error('试用领取福利状态不明确');
+ const row=matches[0];
+ if(row.assignmentType!==0||row.assignmentTimesLimit!==1||row.timesLimitType!==1)throw Error('试用领取福利状态不明确');
+ if(row.completionCnt===1&&row.completionFlag===true&&row.canReceiveTimes===0)return {done:true};
+ if(row.timeStatus!==1||row.userVerificationInfo?.userQulification!==true||row.userVerificationInfo?.userScore!==true||
+    row.preEncryptAssignmentId||row.preEncryptProjectId||row.lotteryEncryptId)return {done:null};
+ const rewards=row.rewards;
+ if(!Array.isArray(rewards)||rewards.length!==1||rewards[0]?.rewardType!==3||rewards[0].manualReward!==1||
+    rewards[0].inSendTime!==1||!Number.isSafeInteger(rewards[0].quantity)||rewards[0].quantity<=0)return {done:null};
+ if(row.completionCnt===0&&row.completionFlag===false&&row.canReceiveTimes===0)return {done:false,prepare:true};
+ if(row.completionCnt===1&&row.canReceiveTimes===1)return {done:false,prepare:false};
+ throw Error('试用领取福利状态不明确');
+}
+function trialDailyAssignment(j){
+ const assignment=j?.data?.result?.assignmentResult;
+ if(j?.code!==0||j.data?.bizCode!==0||assignment?.subCode!=='0'||
+    assignment.assignmentInfo?.completionCnt!==1||assignment.assignmentInfo?.maxTimes!==1){
+  throw Error('试用领取福利接口未通过');
+ }
+ return assignment;
+}
+function trialDailyBeans(j){
+ const rewards=trialDailyAssignment(j).rewardsInfo;
+ const issued=rewards?.successRewards?.['3'];
+ if(rewards?.poolRewardZeroStock!==0||!Array.isArray(rewards.failRewards)||rewards.failRewards.length||
+    !Array.isArray(issued)||issued.length!==1||issued[0]?.rewardType!==3||
+    !Number.isSafeInteger(issued[0].quantity)||issued[0].quantity<=0||issued[0].quantity>100000){
+  throw Error('试用领取福利发放状态待确认');
+ }
+ return issued[0].quantity;
+}
 function jbState(task,j,day){
+ if(task==='trialDaily')return trialDailyState(j);
  const c=JB_CONFIG[task],d=jbData(task,j);
  if(task==='novelty'){
   const list=d.taskInfo?.taskList;
@@ -1216,9 +1281,11 @@ function jbCapture(host,request,response,decode){
  const task=Object.keys(JB_CONFIG).find(k=>jbScope(k,p,b));if(!task)return null;
  if(request.method==='GET'&&(task!=='hardware'||f!==JB_CONFIG.hardware.claim))return null;
  const c=JB_CONFIG[task],claim=f===c.claim;
- if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&[...JB_SEPARATE_CONTEXT,'gear','gearAI','campus','jingzao','outlet','phoneHall','medicalDeviceHall','snacksHall'].includes(task))return null;
+ if(String(request.url).split('?')[0]!==jbEndpoint(task,claim)&&[...JB_SEPARATE_CONTEXT,'gear','gearAI','campus','jingzao','outlet','phoneHall','medicalDeviceHall','snacksHall','fashion'].includes(task))return null;
  const j=JSON.parse(response.body||'{}');
- jbData(task,j);
+ if(task==='trialDaily'){
+  if(claim){if(b.ext.doReceiveRewards!==1)return null;trialDailyBeans(j);}
+ }else jbData(task,j);
  if(!claim){
   const state=jbState(task,j,jsDay());
   if(task==='homeEssentials'&&state.id!==b.encryptAssignmentId)return null;
@@ -1272,7 +1339,11 @@ function jbCapture(host,request,response,decode){
   for(const k of ['openudid','area','gpsArea','x_app_key'])if(p[k]!==undefined)params[k]=p[k];
  }
  let body;
- if(task==='novelty'){
+ if(task==='trialDaily'){
+  for(const k of ['area','xAPIClientLanguage'])if(p[k]!==undefined)params[k]=p[k];
+  if(!p['x-api-eid-token'])return null;
+  body=b;
+ }else if(task==='novelty'){
   for(const k of ['area','xAPIClientLanguage','model'])if(p[k]!==undefined)params[k]=p[k];
   body=claim?{channelId:'8',itemId:'1',actionType:0,ext:{doReceiveRewards:null}}:{channelId:'8',ext:{queryReceiveTimes:1},extMap:{sceneType:2}};
  }else if(task==='homeEssentials'){
@@ -1321,7 +1392,7 @@ function jbCapture(host,request,response,decode){
   host.write('QL_BRIDGE_CREDENTIAL_V1',{...direct,capturedAt:at,source:'combined-signin'});
   if(previous?.cookie!==direct.cookie)updated.push(JS_KEYS.login);
  }
- const becameReady=(JB_SEPARATE_CONTEXT.includes(task)||task==='snacksHall')&&!wasReady&&isReady(profile);
+ const becameReady=(JB_SEPARATE_CONTEXT.includes(task)||task==='snacksHall'||task==='fashion')&&!wasReady&&isReady(profile);
  return {updated,first:!old||old.captureVersion!=='2026-11-08.1'||becameReady};
 }
 
@@ -1433,10 +1504,10 @@ async function jsCapture(host,request,response,parsers,decode){
  const jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
  const service=/^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=checkInTask(?:List|Do)(?:&[^#]*)?$/.test(url);
- const added=/^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=(?:bean_deliverySign_(?:home|sign)|common_(?:task_list|do_task))(?:&[^#]*)?$/.test(url);
+ const added=/^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=(?:bean_deliverySign_(?:home|sign)|common_(?:task_list|do_task)|qryH5BabelFloors)(?:&[^#]*)?$/.test(url);
  if(added){
   const params=jsParams(request),body=jbBody(params);
-  if(['outlet','novelty','babyHall'].some(task=>jbScope(task,params,body)))return jbCapture(host,request,response,decode);
+  if(['outlet','novelty','babyHall','trialDaily'].some(task=>jbScope(task,params,body)))return jbCapture(host,request,response,decode);
   return null;
  }
  if(!jd&&!finance&&!service)return null;
