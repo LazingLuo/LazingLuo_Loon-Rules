@@ -2,7 +2,7 @@
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/jd.png
 #!desc = 普通签到、每日刮卡、PLUS盲盒、京喜、金融与双签、家电家居、京东指数、看病买药、互动游戏、装备馆、AI装备馆、赚话费、特价二手、家居馆、京东服务、京东校园、家政、互医、京东京造、大牌奥莱、新奇集市、手机馆、医疗器械馆、母婴馆、零食广场、家庭常备、服饰美妆、试用领取。一个手动入口，自动执行同一流程；各项之间随机等待，结束后统一通知。凭据自动保存在本机；请停用原签到插件及重叠的凭据获取规则。
 #!loon_version = 3.5.1(983)
-#!date = 2026-11-26
+#!date = 2026-11-27
 
 [Argument]
 autoEnabled = switch,true,tag=自动签到,desc=关闭后仍可手动执行全部签到
@@ -16,8 +16,8 @@ response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?![^#]
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=(?:checkInTask(?:List|Do)|bean_deliverySign_(?:home|sign)|common_(?:task_list|do_task)|qryH5BabelFloors)(?:&|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-capture.js?v=20261126-1") with tag="京东统一凭据获取", requires_body=true, timeout=20
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?![^#]*[?&]functionId=start(?:&|$))(?:\?|$)/ && ${request.method} == "GET" && ${url} ~= /[?&]functionId=bom_doInteractiveAssignment(?:&|$)/ && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-capture.js?v=20261126-1") with tag="京东统一凭据获取", requires_body=true, timeout=20
 response if ${url} ~= /^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/ && ${request.method} == "POST" && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin-capture.js?v=20261126-1") with tag="金融签到凭据获取", requires_body=true, timeout=20
-cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261126-1", {${gapSeconds}, ${startDelaySeconds}, ${autoEnabled}}) with tag="京东全部签到（自动）", timeout=4800, enable=${autoEnabled}
-generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261126-1", {${gapSeconds}}) with tag="手动执行全部签到", timeout=3000
+cron ${cronExp} then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261127-1", {${gapSeconds}, ${startDelaySeconds}, ${autoEnabled}}) with tag="京东全部签到（自动）", timeout=4800, enable=${autoEnabled}
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-signin.js?v=20261127-1", {${gapSeconds}}) with tag="手动执行全部签到", timeout=3000
 
 [Mitm]
 hostname = api.m.jd.com, ms.jr.jd.com

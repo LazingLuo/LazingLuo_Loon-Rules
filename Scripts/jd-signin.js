@@ -1,6 +1,6 @@
 // 京东合并签到 2026-11-08.1; fixed check-in scope, local credentials.
 // Fixed signup scope. Activity/gameplay task execution is deliberately absent.
-const JS_VERSION='2026-11-26.1';
+const JS_VERSION='2026-11-27.1';
 const JS_KEYS={login:'JD_SIGNIN_LOGIN_V1',extra:'JD_SIGNIN_EXTRA_ACCOUNT_V1',bound:'JD_SIGNIN_ACCOUNT_V1',last:'JD_SIGNIN_LAST_V1',history:'JD_SIGNIN_HISTORY_V1',lock:'JD_SIGNIN_LOCK_V1',attempts:'JD_SIGNIN_ATTEMPTS_V1'};
 const JS_TASKS=[['daily','普通签到'],['scratch','每日刮卡'],['blindbox','PLUS盲盒'],['jxzy','京喜签到'],['finance','金融签到＋双签'],['home','家电家居'],['index','京东指数签到'],['medical','看病买药签到'],['gameDaily','互动游戏签到'],['gear','装备馆签到'],['gearAI','AI装备馆签到'],['wallet','赚话费签到'],['used','特价二手签到'],['furnishing','家居馆'],['service','京东服务签到'],['campus','京东校园签到'],['housekeeping','家政签到'],['healthKit','互医签到'],['jingzao','京东京造'],['outlet','大牌奥莱'],['novelty','新奇集市（拆盲盒）'],['phoneHall','手机馆'],['medicalDeviceHall','医疗器械馆'],['babyHall','母婴馆'],['snacksHall','零食广场'],['homeEssentials','家庭常备'],['fashion','服饰美妆'],['trialDaily','试用领取']];
 // Separate daily sign-in observed in HAR475. No medical browsing automation.
@@ -2665,11 +2665,19 @@ function jsLine(r){
  if(r.couponCount>0)detail+='，优惠券 '+r.couponCount+' 张';
  return name+'：'+detail+(r.doubleSign?'\n'+jsLine(r.doubleSign):'');
 }
-function jsSummary(results){
+function jsSummary(results,finished){
  const rows=results.flatMap(row=>row.doubleSign?[row,row.doubleSign]:[row]);
- const beans=rows.reduce((sum,row)=>sum+(['signed_confirmed','reward_received','box_confirmed'].includes(row.status)&&Number.isSafeInteger(row.beanQuantity)&&row.beanQuantity>0?row.beanQuantity:0),0);
- const failures=rows.filter(row=>['rejected','query_rejected'].includes(row.status)||row.status==='stopped'&&(/^HTTP [45]\d\d$/.test(row.detail||'')||row.detail==='新奇集市接口繁忙（-106），本项停止')).map(row=>JS_TASKS.find(([id])=>id===row.task)?.[1]||(row.task==='double'?'双签礼包':null)).filter(Boolean);
- return '本轮确认获得：'+beans+' 京豆\n明确失败：'+([...new Set(failures)].join('、')||'无');
+ const confirmed=new Set(['signed_confirmed','reward_received','box_confirmed']);
+ const beans=rows.reduce((sum,row)=>sum+(confirmed.has(row.status)&&Number.isSafeInteger(row.beanQuantity)&&row.beanQuantity>0?row.beanQuantity:0),0);
+ const issues=new Set();
+ for(const row of rows){
+  if(confirmed.has(row.status)||row.status==='already_done'||row.status==='no_chance')continue;
+  const name=row.task==='double'?'双签礼包':row.task==='finance'&&row.doubleSign?'金融签到':JS_TASKS.find(([id])=>id===row.task)?.[1];
+  if(name)issues.add(name);
+ }
+ const remaining=JS_TASKS.length-results.length;
+ if(!finished&&remaining>0)issues.add('还有 '+remaining+' 项未执行');
+ return '本轮确认获得：'+beans+' 京豆\n未完成或待确认：'+([...issues].join('、')||'无');
 }
 function createSignins(host,legacy,crypto){
  const read=host.read,write=host.write;
@@ -2814,7 +2822,7 @@ function createSignins(host,legacy,crypto){
    if(mayPublish&&!host.rawWrite('',JS_KEYS.lock))host.log('执行锁清理失败，停止续期后2分钟内释放');
    owned=false;
   }
-  const report={version:JS_VERSION,date,finished:!stopped,results,pauses,...(settings.automatic?{startupDelaySeconds}:{}),message:jsSummary(results)};
+  const report={version:JS_VERSION,date,finished:!stopped,results,pauses,...(settings.automatic?{startupDelaySeconds}:{}),message:jsSummary(results,!stopped)};
   if(mayPublish){write(JS_KEYS.last,report);const h=read(JS_KEYS.history,[]);write(JS_KEYS.history,(Array.isArray(h)?h:[]).concat(report).slice(-20));}return report;
  }
  return {run};
