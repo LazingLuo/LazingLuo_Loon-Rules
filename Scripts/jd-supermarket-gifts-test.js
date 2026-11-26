@@ -1,9 +1,10 @@
-// Manual Loon test for the three daily sign-ins observed in HAR570.
+// Manual Loon test for the four daily sign-ins observed in HAR570 and HAR572.
 // Captured account data and request templates stay in the local Loon store.
 const TEST = 'JD_SUPERMARKET_GIFTS_TEST_V1';
-const TITLE = '京东超市、礼品卡、京东好礼';
+const TITLE = '京东超市、礼品卡、京东好礼、学习机';
 const API = 'https://api.m.jd.com';
 const MARKET_CODE = 'cn_retail_jdsupermarket';
+const STUDY_CIRCLE = 14623744;
 const CHANNELS = [
  {
   key:'market', name:'京东超市', app:'jd-super-market', signer:'35fa0', client:'m',
@@ -18,9 +19,15 @@ const CHANNELS = [
   key:'gifts', name:'京东好礼', app:'Bigsale', signer:'7f3ea', client:'apple',
   page:'https://pro.m.jd.com/mall/active/fvgEmgFdUtWmm1EwDAobGSX5XME/index.html',
   query:'interact_pre_executor', claim:'interact_executor'
+ },
+ {
+  key:'study', name:'学习机', app:'circle-topic-m', signer:{query:'ad41d',claim:'bb1d9'}, client:'apple',
+  page:'https://comment.m.jd.com/', refPage:'https://comment.m.jd.com/circle/home',
+  query:'subject_app_bff_queryCircleTopResource', claim:'subject_app_bff_getTaskRewardPanel'
  }
 ];
 const storeKey = key => TEST+'.'+key;
+const signerFor = (channel,role) => typeof channel.signer==='string'?channel.signer:channel.signer[role];
 const hasKey = (obj,key) => Object.prototype.hasOwnProperty.call(obj,key);
 const onlyKeys = (obj,keys) => Object.keys(obj).length===keys.length && keys.every(k=>hasKey(obj,k));
 const campaignId = v => typeof v==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
@@ -36,7 +43,7 @@ function testLogin(host){
 }
 
 function testURL(channel,fn,form){
- if(channel.key==='market')return API+'/'+fn;
+ if(channel.key==='market'||channel.key==='study')return API+'/'+fn;
  if(channel.key==='card')return API+'/api?functionId='+encodeURIComponent(fn);
  return API+'/?'+jsEncode(form);
 }
@@ -55,12 +62,31 @@ function testScope(channel,role,p,b){
    ?onlyKeys(b,['type'])&&b.type==='2'
    :onlyKeys(b,['ruleId','pid','eid'])&&numericId(b.ruleId)&&numericId(b.pid)&&opaque(b.eid);
  }
+ if(channel.key==='study'){
+  const common=['requestSource','clientSource','realVersion','clientTag'];
+  if(p.loginType!=='2'||p.enableCookies!=='true'||b.requestSource!=='h5'||b.clientSource!=='apple'||
+   !opaque(b.realVersion,32)||!opaque(b.clientTag,32))return false;
+  return role==='query'
+   ?onlyKeys(b,[...common,'circleId'])&&b.circleId===String(STUDY_CIRCLE)
+   :onlyKeys(b,[...common,'bizId','taskId','ticket'])&&b.bizId===STUDY_CIRCLE&&numericId(b.taskId)&&b.ticket==='-99';
+ }
  if(p.channelCode!=='gift'||p.loginType!=='2'||p.sceneCode!==(role==='query'?'sign_floor':'sign'))return false;
  return role==='query'?onlyKeys(b,[]):onlyKeys(b,['assignmentId','itemId','actionType'])&&
   b.itemId==='1'&&b.actionType===0&&campaignId(b.assignmentId);
 }
 
-function testState(channel,json,day){
+function studyEntry(json){
+ const rows=json?.data;
+ if(json?.code!=='0'||json.success!==true||!Array.isArray(rows)||rows.length>100)stop('学习机签到列表待确认');
+ const matches=rows.filter(r=>r?.bitName==='签到有礼'&&r.content?.checkInInfo?.checkName==='签到有礼');
+ if(matches.length!==1)stop('学习机未找到唯一签到项');
+ const info=matches[0].content.checkInInfo;
+ if(info.signType!==0||!numericId(info.taskId)||!numericId(info.projectId)||!numericId(info.assignId))
+  stop('学习机签到项目结构已变化');
+ return info;
+}
+
+function testState(channel,json,day,now){
  const d=json?.data;
  if(channel.key==='market'){
   const floor=d?.floorData;
@@ -80,6 +106,14 @@ function testState(channel,json,day){
   const row=matches[0];
   if(matches.length!==1||!numericId(row.pid)||!numericId(row.ruleId))stop('未确认唯一可用的每日京豆权益');
   return {done:row.status===1,pid:String(row.pid),ruleId:String(row.ruleId),label:row.name};
+ }
+ if(channel.key==='study'){
+  const info=studyEntry(json);
+  const time=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+   ?Date.parse(value.replace(' ','T')+'+08:00'):NaN;
+  if(!(time(info.checkStartTime)<=now&&now<time(info.checkEndTime)))stop('学习机签到活动时间待确认');
+  if(info.status!==1)stop('学习机当前无已确认的待签项，请在 App 查看');
+  return {done:false,taskId:String(info.taskId),projectId:String(info.projectId),assignId:String(info.assignId)};
  }
  const taskInfo=d?.result?.taskInfo;
  if(json?.code!==0||d?.bizCode!==0||taskInfo?.requestStatusCode!==1||
@@ -114,6 +148,19 @@ function testReward(channel,json,day,action){
   if(json?.code!=='000000'||d?.success!==true)stop('礼品卡领取结果待确认');
   return action.label||'';
  }
+ if(channel.key==='study'){
+  if(json?.code!=='0'||json.success!==true||d?.businessCode!=='0'||d.taskType!==5||
+   d.taskName!=='签到有礼'||d.taskId!==action.taskId||d.checkInStatus!==1||d.awardStatus!==1||
+   d.winAward!==true||!numericId(d.productId)||!numericId(d.assignId)||
+   (action.projectId!==undefined&&(d.productId!==action.projectId||d.assignId!==action.assignId)))
+   stop('学习机提交结果待确认');
+  const rows=d.rewardInfos;
+  if(!Array.isArray(rows)||rows.length>20)return '';
+  const beans=rows.filter(r=>r?.rewardType==='3');
+  if(beans.some(r=>!Number.isSafeInteger(r.quantity)||r.quantity<1||r.quantity>10000))return '';
+  const count=beans.reduce((sum,r)=>sum+r.quantity,0);
+  return count>0?count+' 京豆':'';
+ }
  const result=d?.result?.assignmentResult, info=result?.assignmentInfo;
  if(json?.code!==0||d?.bizCode!==0||result?.subCode!=='0'||info?.encryptAssignmentId!==action.assignmentId||
   info?.assignmentType!==5||info?.completionCnt!==1||!Array.isArray(info.signList)||
@@ -137,18 +184,21 @@ function testCapture(host,crypto,req,res){
  const body=JSON.parse(p.body||'{}');
  if(!body||Array.isArray(body)||typeof body!=='object'||!testScope(channel,role,p,body))return null;
  const refPage=jsHeader(req.headers,'x-referer-page');
- if(channel.key!=='card'&&String(refPage).split('?')[0]!==channel.page)return null;
+ if(channel.key!=='card'&&String(refPage).split('?')[0]!==(channel.refPage||channel.page))return null;
  const queryKeys=channel.key==='gifts'?['area','clientVersion','client','loginType','t','appid','xAPIClientLanguage','functionId','channelCode','sceneCode']:
   channel.key==='card'?['functionId']:[];
- const formKeys=channel.key==='gifts'?['body','h5st','x-api-eid-token']:
+ const formKeys=channel.key==='study'
+  ?['appid','enableCookies','functionId','loginType','h5st','body','area','client','clientVersion','osVersion','dModel',
+    'uuid','network','eu','fv','lang','xAPIClientLanguage','xAPIRegion','xAPICurrency']
+  :channel.key==='gifts'?['body','h5st','x-api-eid-token']:
   channel.key==='card'?['cthr','client','clientVersion','t','loginWQBiz','appid','functionId','body','h5st','x-api-eid-token']:
   ['appid','t','functionId','client','uuid','body','h5st','x-api-eid-token'];
- if(!onlyKeys(urlParams,queryKeys)||!onlyKeys(form,formKeys)||!opaque(p['x-api-eid-token']))return null;
+ if(!onlyKeys(urlParams,queryKeys)||!onlyKeys(form,formKeys)||(channel.key!=='study'&&!opaque(p['x-api-eid-token'])))return null;
  const json=JSON.parse(res.body), day=host.day();
- const state=role==='query'?testState(channel,json,day):null;
+ const state=role==='query'?(channel.key==='study'?studyEntry(json):testState(channel,json,day,host.now())):null;
  if(role==='claim')testReward(channel,json,day,body);
  const sig=String(p.h5st).split(';');
- if(sig.length!==10||sig[2]!==channel.signer||sig[5]!=='5.3')return null;
+ if(sig.length!==10||sig[2]!==signerFor(channel,role)||sig[5]!=='5.3')return null;
  const env=crypto.decodeEnvironment(sig[7]);
  const rawCookie=String(jsHeader(req.headers,'Cookie')||'');
  const direct=jsPair(rawCookie), shared=testLogin(host);
@@ -180,7 +230,8 @@ function testCapture(host,crypto,req,res){
  // Rebuild one-time tokens and assignment/benefit IDs from the live query.
  const savedBody=role==='query'?body:channel.key==='market'
   ?Object.fromEntries(Object.entries(body).filter(([k])=>k!=='signToken'))
-  :channel.key==='card'?{eid:body.eid}:{};
+  :channel.key==='card'?{eid:body.eid}
+  :channel.key==='study'?Object.fromEntries(Object.entries(body).filter(([k])=>k!=='taskId')):{};
  const snapshot={
   urlParams, form:safeForm, body:savedBody, eidToken, environment:sig[7], headers, capturedAt,
   cookie:direct?.cookie||'',
@@ -189,6 +240,8 @@ function testCapture(host,crypto,req,res){
  };
  const ready=!!(profile.query&&profile.claim);
  host.write(storeKey(channel.key),{...profile,[role]:snapshot});
+ if(channel.key==='study'&&role==='claim'&&new Date(capturedAt+8*3600000).toISOString().slice(0,10)===day)
+  host.write(storeKey('attempt.study'),{day,pin,confirmed:true});
  return channel.name+'凭据已更新'+(profile[role==='query'?'claim':'query']?(ready?'':'，已齐全'):'，待获取'+(role==='query'?'签到请求':'查询请求'));
 }
 
@@ -213,22 +266,24 @@ async function testOptions(host,crypto,channel,role,profile,state,guard){
   if(channel.key==='market')body={...body,signToken:state.token};
   if(channel.key==='card')body={ruleId:state.ruleId,pid:state.pid,eid:body.eid};
   if(channel.key==='gifts')body={assignmentId:state.assignmentId,itemId:state.itemId,actionType:0};
+  if(channel.key==='study')body={...body,taskId:state.taskId};
  }
  const p={...q,...f};
- if(!testScope(channel,role,p,body)||!opaque(t.eidToken))stop('签到参数变化，请重新获取凭据');
+ if(!testScope(channel,role,p,body)||(channel.key!=='study'&&!opaque(t.eidToken)))stop('签到参数变化，请重新获取凭据');
  f.body=JSON.stringify(body);
- const input={appid:p.appid,body:crypto.hash(f.body),client:p.client,functionId:p.functionId,t:now};
+ const input={appid:p.appid,body:crypto.hash(f.body),client:p.client,functionId:p.functionId};
+ if(hasKey(p,'t'))input.t=p.t;
  if(hasKey(p,'clientVersion'))input.clientVersion=p.clientVersion;
  guard();
- f.h5st=await crypto.signOnline(channel.signer,{pin:profile.pin,headers},env,input);
+ f.h5st=await crypto.signOnline(signerFor(channel,role),{pin:profile.pin,headers},env,input);
  guard();
- f['x-api-eid-token']=t.eidToken;
+ if(channel.key!=='study')f['x-api-eid-token']=t.eidToken;
  return {url:testURL(channel,p.functionId,q),headers,body:jsEncode(f)};
 }
 
 async function testRun(host,crypto){
  const lockKey=storeKey('lock');
- const deadline=host.now()+175000, id=host.now()+'-'+host.random(), day=host.day();
+ const deadline=host.now()+240000, id=host.now()+'-'+host.random(), day=host.day();
  if(Number(host.read(lockKey,null)?.deadline)>host.now())stop('独立测试正在执行');
  if(Number(host.read('JD_SIGNIN_LOCK_V1',null)?.expires)>host.now())stop('正式签到正在执行，请稍后手动测试');
  host.write(lockKey,{id,deadline});
@@ -257,12 +312,16 @@ async function testRun(host,crypto){
      if(response.status!==200)stop('HTTP '+response.status+'，请在 App 查看');
      try{return JSON.parse(response.body);}catch(_){stop('响应无法读取，请在 App 查看');}
     };
-    const before=testState(channel,await query('查询签到状态'),day);
-    if(before.done){lines.push(channel.name+'：今天已完成');continue;}
-    if(!profile.claim)stop('缺少提交凭据，请在 App 手动完成一次');
     const journalKey=storeKey('attempt.'+channel.key);
     const attempt=host.read(journalKey,null);
-    if(attempt?.day===day&&attempt.pin===profile.pin)stop('今日已尝试提交，请在 App 查看');
+    const attemptedToday=attempt?.day===day&&attempt.pin===profile.pin;
+    if(channel.key==='study'&&attemptedToday&&attempt.confirmed){
+     lines.push(channel.name+'：今天已完成');continue;
+    }
+    const before=testState(channel,await query('查询签到状态'),day,host.now());
+    if(before.done){lines.push(channel.name+'：今天已完成');continue;}
+    if(!profile.claim)stop('缺少提交凭据，请在 App 手动完成一次');
+    if(attemptedToday)stop('今日已尝试提交，请在 App 查看');
     const options=await testOptions(host,crypto,channel,'claim',profile,before,guard);
     guard();
     host.write(journalKey,{day,pin:profile.pin});
@@ -273,9 +332,13 @@ async function testRun(host,crypto){
     let result;
     try{result=JSON.parse(response.body);}catch(_){stop('已提交，响应待确认');}
     const reward=testReward(channel,result,day,before);
-    const after=testState(channel,await query('复查签到状态'),day);
-    if(!after.done||after.assignmentId!==before.assignmentId||after.ruleId!==before.ruleId||after.pid!==before.pid)
-     stop('已提交，复查待确认');
+    if(channel.key==='study'){
+     host.write(journalKey,{day,pin:profile.pin,confirmed:true});
+    }else{
+     const after=testState(channel,await query('复查签到状态'),day,host.now());
+     if(!after.done||after.assignmentId!==before.assignmentId||after.ruleId!==before.ruleId||after.pid!==before.pid)
+      stop('已提交，复查待确认');
+    }
     const detail=reward?(channel.key==='card'?'，权益「'+reward+'」':'，'+reward):'';
     lines.push(channel.name+'：完成'+detail);
    }catch(error){lines.push(channel.name+'：'+(error instanceof TestStop?error.message:'执行待确认，请在 App 查看'));}
