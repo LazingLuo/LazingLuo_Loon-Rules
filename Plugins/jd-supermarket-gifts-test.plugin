@@ -1,0 +1,15 @@
+#!name = 京东超市、礼品卡、京东好礼（独立测试）
+#!desc = 手动测试三项签到。首次请打开对应页面并手动完成一次，等待本机凭据提示。
+#!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/jd.png
+#!author = LazingLuo
+#!loon_version = 3.5.1(983)
+#!date = 2026-11-26
+
+[Script]
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/atop_channel_sign_(?:tab|in)$/ && ${request.method} == "POST" && ${response.status} == 200 && ${request.header['Referer']} ~= /^https:\/\/pro\.m\.jd\.com\/mall\/active\/3xhqjGH1wMz5FaMgrfYhR22sFvqz\/index\.html(?:\?|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-supermarket-gifts-test.js") with tag="京东超市凭据", requires_body=true, timeout=20
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/api\?(?:[^#]*&)?functionId=personalCenter(?:BuyHolderInfo|ReceiveHolderEquity)(?:&|$)/ && ${request.method} == "POST" && ${response.status} == 200 && ${request.header['Referer']} ~= /^https:\/\/o\.jd\.com\/(?:\?|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-supermarket-gifts-test.js") with tag="京东礼品卡凭据", requires_body=true, timeout=20
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/\?(?:[^#]*&)?functionId=interact_(?:pre_)?executor(?:&|$)/ && ${request.method} == "POST" && ${response.status} == 200 && ${request.header['Referer']} ~= /^https:\/\/pro\.m\.jd\.com\/mall\/active\/fvgEmgFdUtWmm1EwDAobGSX5XME\/index\.html(?:\?|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-supermarket-gifts-test.js") with tag="京东好礼凭据", requires_body=true, timeout=20
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-supermarket-gifts-test.js") with tag="手动执行京东超市、礼品卡、京东好礼", timeout=200
+
+[Mitm]
+hostname = api.m.jd.com
