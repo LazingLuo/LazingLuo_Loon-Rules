@@ -1497,9 +1497,204 @@ function plRound(j){
  return r;
 }
 
+const JD_BENEFIT_STORE = 'JD_SUPERMARKET_GIFTS_TEST_V1';
+const JD_BENEFIT_API = 'https://api.m.jd.com';
+const JD_BENEFIT_MARKET_CODE = 'cn_retail_jdsupermarket';
+const JD_BENEFITS = [
+ {
+  key:'market', name:'京东超市', app:'jd-super-market', signer:'35fa0', client:'m',
+  page:'https://pro.m.jd.com/mall/active/3xhqjGH1wMz5FaMgrfYhR22sFvqz/index.html',
+  query:'atop_channel_sign_tab', claim:'atop_channel_sign_in'
+ },
+ {
+  key:'card', name:'礼品卡', app:'mygiftcard', signer:'aea58', client:'apple',
+  page:'https://o.jd.com/', query:'personalCenterBuyHolderInfo', claim:'personalCenterReceiveHolderEquity'
+ },
+ {
+  key:'gifts', name:'京东好礼', app:'Bigsale', signer:'7f3ea', client:'apple',
+  page:'https://pro.m.jd.com/mall/active/fvgEmgFdUtWmm1EwDAobGSX5XME/index.html',
+  query:'interact_pre_executor', claim:'interact_executor'
+ }
+];
+const jdBenefitKey = key => JD_BENEFIT_STORE+'.'+key;
+const jdBenefitHasKey = (obj,key) => Object.prototype.hasOwnProperty.call(obj,key);
+const jdBenefitOnlyKeys = (obj,keys) => Object.keys(obj).length===keys.length && keys.every(k=>jdBenefitHasKey(obj,k));
+const jdBenefitCampaignId = v => typeof v==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+const jdBenefitNumericId = v => /^(?:[1-9]\d{0,14})$/.test(String(v));
+const jdBenefitOpaque = (value,max=4096) => typeof value==='string' && value.length>0 && value.length<=max && !/\s/.test(value);
+const jdBenefitStop = text => { throw new JDBenefitStop(text); };
+class JDBenefitStop extends Error {}
+
+function jdBenefitLogin(host){
+ const item=host.read(JS_KEYS.login,null);
+ const pair=jsPair(item?.cookie);
+ return pair?.pin===item?.pin ? pair : null;
+}
+
+function jdBenefitURL(channel,fn,form){
+ if(channel.key==='market')return JD_BENEFIT_API+'/'+fn;
+ if(channel.key==='card')return JD_BENEFIT_API+'/api?functionId='+encodeURIComponent(fn);
+ return JD_BENEFIT_API+'/?'+jsEncode(form);
+}
+
+function jdBenefitScope(channel,role,p,b){
+ if(p.appid!==channel.app || p.client!==channel.client || p.functionId!==channel[role])return false;
+ if(channel.key==='market'){
+  const common=['bizCode','scenario','babelChannel','isJdApp','isWx'];
+  if(b.bizCode!==JD_BENEFIT_MARKET_CODE||b.scenario!=='sign'||b.babelChannel!=='ttt9'||b.isJdApp!=='1'||b.isWx!=='0')return false;
+  return role==='query'
+   ?jdBenefitOnlyKeys(b,[...common,'babelActivityId','source'])&&b.babelActivityId==='01462716'&&b.source==='0'
+   :jdBenefitOnlyKeys(b,[...common,'signToken'])&&jdBenefitOpaque(b.signToken,256);
+ }
+ if(channel.key==='card'){
+  return role==='query'
+   ?jdBenefitOnlyKeys(b,['type'])&&b.type==='2'
+   :jdBenefitOnlyKeys(b,['ruleId','pid','eid'])&&jdBenefitNumericId(b.ruleId)&&jdBenefitNumericId(b.pid)&&jdBenefitOpaque(b.eid);
+ }
+ if(p.channelCode!=='gift'||p.loginType!=='2'||p.sceneCode!==(role==='query'?'sign_floor':'sign'))return false;
+ return role==='query'?jdBenefitOnlyKeys(b,[]):jdBenefitOnlyKeys(b,['assignmentId','itemId','actionType'])&&
+  b.itemId==='1'&&b.actionType===0&&jdBenefitCampaignId(b.assignmentId);
+}
+
+function jdBenefitState(channel,json,day){
+ const d=json?.data;
+ if(channel.key==='market'){
+  const floor=d?.floorData;
+  const info=floor?.items?.length===1&&floor.items[0]?.signTabInfo;
+  if(String(json?.code)!=='0'||json.success!==true||floor?.floorType!=='SIGN_FLOOR'||
+   info?.today!==day||![0,1].includes(info?.signStatus))jdBenefitStop('超市签到日历状态待确认');
+  if(info.signStatus===0&&!jdBenefitOpaque(info.signToken,256))jdBenefitStop('超市签到日历缺少本次签到凭据');
+  return {done:info.signStatus===1,token:info.signToken};
+ }
+ if(channel.key==='card'){
+  const info=d?.holderInfo;
+  if(json?.code!=='000000'||d?.type!==2||!Array.isArray(info?.equityInfo)||info.equityInfo.length>100)jdBenefitStop('礼品卡权益状态待确认');
+  if(!/^V\d{1,2}$/.test(info.holdLevel))jdBenefitStop('持卡等级待确认');
+  const grade=Number(info.holdLevel.slice(1));
+  const matches=info.equityInfo.filter(r=>r?.type===1&&/^天天(?:抢|领)\d{1,4}京豆$/.test(r.name)&&
+   Number.isSafeInteger(r.grade)&&r.grade>=1&&r.grade<=grade&&[0,1].includes(r.status));
+  const row=matches[0];
+  if(matches.length!==1||!jdBenefitNumericId(row.pid)||!jdBenefitNumericId(row.ruleId))jdBenefitStop('未确认唯一可用的每日京豆权益');
+  return {done:row.status===1,pid:String(row.pid),ruleId:String(row.ruleId),label:row.name};
+ }
+ const taskInfo=d?.result?.taskInfo;
+ if(json?.code!==0||d?.bizCode!==0||taskInfo?.requestStatusCode!==1||
+  !Array.isArray(taskInfo.taskList)||taskInfo.taskList.length>100)jdBenefitStop('京东好礼连签列表待确认');
+ const matches=taskInfo.taskList.filter(r=>r?.assignmentType===5&&r.ext?.extraType==='sign');
+ if(matches.length!==1)jdBenefitStop('未确认唯一的京东好礼连签');
+ const row=matches[0], sign=row.ext.sign;
+ const dates=sign?.signList??[];
+ if(!jdBenefitCampaignId(row.encryptAssignmentId)||sign?.itemId!=='1'||row.assignmentTimesLimit!==1||
+  !Array.isArray(dates)||dates.length>366||dates.some(x=>typeof x!=='string'||!/^\d{4}-\d{2}-\d{2}_\d+(?:\.\d+)?$/.test(x)))jdBenefitStop('京东好礼连签结构已变化');
+ const signedToday=dates.some(x=>x.startsWith(day+'_'));
+ const identity={assignmentId:row.encryptAssignmentId,itemId:sign.itemId};
+ if(signedToday&&sign.status===2&&row.completionFlag===true&&row.completionCnt===1)return {done:true,...identity};
+ if(!signedToday&&sign.status===1&&row.completionFlag===false&&row.completionCnt===0&&row.timeStatus===1&&row.canParticipation===true)
+  return {done:false,...identity};
+ jdBenefitStop('京东好礼今日连签状态待确认');
+}
+
+function jdBenefitReward(channel,json,day,action){
+ const d=json?.data;
+ if(channel.key==='market'){
+  if(String(json?.code)!=='0'||json.success!==true||d?.date!==day||d?.signStatus!==1)jdBenefitStop('超市提交结果待确认');
+  if(!Array.isArray(d.rewards)||d.rewards.length>20)return '';
+  return d.rewards.map(r=>{
+   const amount=String(r?.rewardValue);
+   if(!/^\d{1,6}(?:\.\d{1,4})?$/.test(amount)||!/^\d{1,5}$/.test(String(r.rewardType)))return '';
+   const label=typeof r.rewardDesc==='string'&&/^[\u3400-\u9fff]{1,24}$/.test(r.rewardDesc)?r.rewardDesc:'奖励类型 '+r.rewardType;
+   return label+' '+amount;
+  }).filter(Boolean).join('、');
+ }
+ if(channel.key==='card'){
+  if(json?.code!=='000000'||d?.success!==true)jdBenefitStop('礼品卡领取结果待确认');
+  return action.label||'';
+ }
+ const result=d?.result?.assignmentResult, info=result?.assignmentInfo;
+ if(json?.code!==0||d?.bizCode!==0||result?.subCode!=='0'||info?.encryptAssignmentId!==action.assignmentId||
+  info?.assignmentType!==5||info?.completionCnt!==1||!Array.isArray(info.signList)||
+  !info.signList.some(x=>typeof x==='string'&&x.startsWith(day+'_')))jdBenefitStop('京东好礼提交结果待确认');
+ const beans=result.rewardsInfo?.successRewards?.['3'];
+ if(!Array.isArray(beans)||beans.length>20||beans.some(r=>r?.rewardType!==3||!Number.isSafeInteger(r.quantity)||r.quantity<1||r.quantity>10000))return '';
+ const count=beans.reduce((sum,r)=>sum+r.quantity,0);
+ return count>0?count+' 京豆':'';
+}
+
+function jdBenefitCapture(host,crypto,req,res){
+ if(req?.method!=='POST'||Number(res?.status)!==200||jsHeader(req.headers,'X-Lazing-Signin-Run'))return null;
+ const ref=String(jsHeader(req.headers,'Referer')||'').split('?')[0];
+ const channel=JD_BENEFITS.find(c=>c.page===ref);
+ if(!channel)return null;
+ const [base,query='']=String(req.url||'').split('?');
+ if(query.includes('#')||!base.startsWith(JD_BENEFIT_API+'/'))return null;
+ const form=jsForm(req.body), urlParams=jsForm(query);
+ const p=jsParams(req), role=channel.query===p.functionId?'query':channel.claim===p.functionId?'claim':null;
+ if(!role||jdBenefitURL(channel,p.functionId,urlParams).split('?')[0]!==base)return null;
+ const body=JSON.parse(p.body||'{}');
+ if(!body||Array.isArray(body)||typeof body!=='object'||!jdBenefitScope(channel,role,p,body))return null;
+ const refPage=jsHeader(req.headers,'x-referer-page');
+ if(channel.key!=='card'&&String(refPage).split('?')[0]!==channel.page)return null;
+ const queryKeys=channel.key==='gifts'?['area','clientVersion','client','loginType','t','appid','xAPIClientLanguage','functionId','channelCode','sceneCode']:
+  channel.key==='card'?['functionId']:[];
+ const formKeys=channel.key==='gifts'?['body','h5st','x-api-eid-token']:
+  channel.key==='card'?['cthr','client','clientVersion','t','loginWQBiz','appid','functionId','body','h5st','x-api-eid-token']:
+  ['appid','t','functionId','client','uuid','body','h5st','x-api-eid-token'];
+ if(!jdBenefitOnlyKeys(urlParams,queryKeys)||!jdBenefitOnlyKeys(form,formKeys)||!jdBenefitOpaque(p['x-api-eid-token']))return null;
+ const json=JSON.parse(res.body), day=jsDay();
+ const state=role==='query'?jdBenefitState(channel,json,day):null;
+ if(role==='claim')jdBenefitReward(channel,json,day,body);
+ const sig=String(p.h5st).split(';');
+ if(sig.length!==10||sig[2]!==channel.signer||sig[5]!=='5.3')return null;
+ const env=crypto.decodeEnvironment(sig[7]);
+ const rawCookie=String(jsHeader(req.headers,'Cookie')||'');
+ const direct=jsPair(rawCookie), shared=jdBenefitLogin(host);
+ const pin=env.pp?.p1;
+ if(!jdBenefitOpaque(pin,256))return null;
+ const pinMatches=value=>pin===value||pin===decodeURIComponent(value);
+ const bound=host.read(JS_KEYS.bound,null)?.pin;
+ if(direct&&!pinMatches(direct.pin)||shared&&!pinMatches(shared.pin)||bound&&!pinMatches(bound))jdBenefitStop('签到页账号与已有京东账号不一致');
+ const pageCookieParts=rawCookie.split(';').map(x=>x.trim()).filter(Boolean);
+ const pagePin=pageCookieParts.filter(x=>x.startsWith('pt_pin='));
+ if(pagePin.length>1||pagePin.length===1&&!pinMatches(pagePin[0].slice(7)))return null;
+ const headers={};
+ for(const key of ['User-Agent','Origin','Content-Type','Accept','x-rp-client','x-referer-page','request-from','x-babel-ihub','scenario','bizcode']){
+  const value=jsHeader(req.headers,key);
+  if(value)headers[key]=value;
+ }
+ if(!headers['User-Agent']||headers.Origin!==channel.page.split('/').slice(0,3).join('/'))return null;
+ headers.Referer=String(jsHeader(req.headers,'Referer'));
+ const old=host.read(jdBenefitKey(channel.key),null);
+ const oldTime=old?.[role]?.capturedAt;
+ const capturedAt=host.observedAt||Date.now();
+ if(oldTime&&oldTime>capturedAt)return null;
+ const profile=old?.pin===pin?old:{pin};
+ if(channel.key==='card'&&role==='claim'){
+  const equity=profile.query?.equity;
+  if(equity?.day!==day||equity.pid!==body.pid||equity.ruleId!==body.ruleId)return null;
+ }
+ const {h5st,'x-api-eid-token':eidToken,...safeForm}=form;
+ delete safeForm.body;
+ // Rebuild one-time tokens and assignment/benefit IDs from the live query.
+ const savedBody=role==='query'?body:channel.key==='market'
+  ?Object.fromEntries(Object.entries(body).filter(([k])=>k!=='signToken'))
+  :channel.key==='card'?{eid:body.eid}:{};
+ const snapshot={
+  urlParams, form:safeForm, body:savedBody, eidToken, environment:sig[7], headers, capturedAt,
+  cookie:direct?.cookie||'',
+  ...(channel.key==='card'&&state?{equity:{day,pid:state.pid,ruleId:state.ruleId}}:{}),
+  extraCookie:pageCookieParts.filter(x=>!/^pt_(?:pin|key)=/.test(x)).join(';')
+ };
+ const ready=!!(profile.query&&profile.claim);
+ host.write(jdBenefitKey(channel.key),{...profile,[role]:snapshot});
+ return {benefitLabel:channel.name,benefitReady:!ready&&!!profile[role==='query'?'claim':'query']};
+}
+
 async function jsCapture(host,request,response,parsers,decode){
  if((request?.method!=='POST'&&!(request?.method==='GET'&&/[?&]functionId=bom_doInteractiveAssignment(?:&|$)/.test(String(request.url||''))))||Number(response?.status)!==200||jsHeader(request.headers,'X-Lazing-Signin-Run')==='1'||jsHeader(request.headers,'X-Lazing-Farm-Run')==='1'||jsHeader(request.headers,'X-Lazing-Activity-Run')==='1')return null;
  const url=String(request.url||'');
+ if(/^https:\/\/api\.m\.jd\.com\/(?:atop_channel_sign_(?:tab|in)$|(?:api)?\?(?:[^#]*&)?functionId=(?:personalCenterBuyHolderInfo|personalCenterReceiveHolderEquity|interact_(?:pre_)?executor)(?:&|$))/.test(url)){
+  return jdBenefitCapture(host,{decodeEnvironment:decode},request,response);
+ }
  if(url==='https://api.m.jd.com/')return plCapture(host,request,response,decode);
  const jd=/^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)(?:\?[^#]*)?$/.test(url);
  const finance=/^https:\/\/ms\.jr\.jd\.com\/gw2\/generic\/(?:jrSign\/h5\/m\/(?:queryWeekSignMain|queryCashSignSub|dailyCashSignReceive)|legogw\/h5\/m\/getPageInfoDoubleSignInForH5)(?:\?|$)/.test(url);
@@ -1574,7 +1769,10 @@ if(typeof $request!=='undefined'&&typeof $persistentStore!=='undefined'){
    const names={...Object.fromEntries(Object.values(JB_CONFIG).map(c=>[c.key,c.label])),[JSM_KEY]:'看病买药签到',[JDI_KEY]:'京东指数','JD_CHECKIN_TEST_ACCOUNT_V1':'京东签到','JXZY_CHECKIN_ACCOUNT_V1':'京喜','JD_JR_CHECKIN_ACCOUNT_V1':'金融','JD_FARM_TASKS_ACCOUNT_V1':'农场','JD_HOME_CHECKIN_ACCOUNT_V1':'家电家居',[JC_KEY]:'领券中心',[JS_KEYS.extra]:'新增签到',[JS_KEYS.login]:'Cookie'};
    const at=typeof $script!=='undefined'&&Number(new Date($script.startTime));
    const r=await jsCapture({read,write,rawRead:k=>$persistentStore.read(k),rawWrite:(v,k)=>$persistentStore.write(v,k),diagnostic:message=>console.log('[签到凭据] '+message),observedAt:Number.isFinite(at)&&at>0&&at<=Date.now()?at:Date.now()},$request,$response,{retail:runRetailCapture,jxzy:runJxCapture,home:runHomeCapture,finance:runFinanceCapture,farm:farmCapture},farmDecodeEnvironment);
-   if(r?.plantStatus){
+   if(r?.benefitLabel){
+    console.log('[签到凭据] '+r.benefitLabel+'凭据已更新');
+    if(r.benefitReady)$notification.post('京东签到','凭据已齐全',r.benefitLabel);
+   }else if(r?.plantStatus){
     console.log('[种豆凭据] '+r.plantStatus);
     if(r.plantNotify)$notification.post('种豆得豆','凭据获取',r.plantStatus);
    }else if(r?.updated?.length){const text=r.updated.map(k=>names[k]||'凭据').join('、');console.log('[签到凭据 2026-11-08.1] 已更新：'+text);
