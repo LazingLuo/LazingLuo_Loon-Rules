@@ -1,12 +1,13 @@
 #!name = 京东开屏
 #!icon = https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/icons/jd.png
-#!desc = 处理 start 开屏配置并通知，按现有 URL 规则静默拒绝图片和视频素材。
+#!desc = 处理 start 广告有效期与展示间隔，单独保存在响应中看到的素材路径。
 #!loon_version = 3.5.1(983)
-#!date = 2026-11-07
+#!date = 2026-11-28
 
 [Script]
-response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^&#]*&)*functionId=start(?:&|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261107-2") with tag="京东开屏配置处理", requires_body=true, timeout=20
+response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^&#]*&)*functionId=start(?:&|$)/ then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261128-1") with tag="京东开屏配置处理", requires_body=true, timeout=20
 response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^&#]*&)*functionId=(?:basicConfig|welcomeHome)(?:&|$)/ && ${response.status} == 200 then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/main/Scripts/jd-splash-degrade.js?v=20261121-1") with tag="京东开屏开关实验", requires_body=true, timeout=10
+generic then script("https://raw.githubusercontent.com/LazingLuo/LazingLuo_Loon-Rules/refs/heads/main/Scripts/jd-splash.js?v=20261128-1") with tag="查看京东开屏素材路径", timeout=5
 
 [Rewrite]
 # 仅匹配URL中的尺寸路径并直接拒绝；不读取图片正文，所有扩展名均适用。
@@ -16,4 +17,3 @@ response if ${url} ~= /^https:\/\/api\.m\.jd\.com\/(?:api|client\.action)\?(?:[^
 
 [Mitm]
 hostname = api.m.jd.com, m.360buyimg.com, storage.360buyimg.com
-
